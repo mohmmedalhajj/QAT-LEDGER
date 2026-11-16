@@ -139,8 +139,8 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
                 label: 'المستحق للمورد',
                 value: Money(supplier.balanceFor(cur), cur).format(),
                 valueColor: supplier.balanceFor(cur) > 0
-                    ? context.pal.warning
-                    : context.pal.success,
+                    ? ctx.pal.warning
+                    : ctx.pal.success,
               ),
               const SizedBox(height: 8),
               CurrencySelectorRow(

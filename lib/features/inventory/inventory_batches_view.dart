@@ -376,8 +376,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                                     ),
                                     const SizedBox(height: 8),
                                     Text(
-                                      'شراء: ${Money(b.buyPriceMinor, b.currency).format()} • بيع: ${Money(b.sellPriceMinor, b.currency).format()}'
-                                      '${b.supplierName.isNotEmpty ? ' • المورد: ${b.supplierName}' : ''}',
+                                      'شراء: ${Money(b.buyPriceMinor, b.currency).format()} • بيع: ${Money(b.sellPriceMinor, b.currency).format()}${b.supplierName.isNotEmpty ? ' • المورد: ${b.supplierName}' : ''}',
                                       style: TextStyle(
                                         fontSize: 12,
                                         color: pal.textSecondary,

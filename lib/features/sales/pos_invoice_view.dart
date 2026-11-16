@@ -87,7 +87,9 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
             .where((item) => item.inventoryBatchId == batch!.id)
             .fold<int>(0, (sum, item) => sum + item.qtyMilli);
     if (batch != null && qtyMilli + alreadyInCartMilli > batch.remainingQtyMilli) {
-      final left = (batch.remainingQtyMilli - alreadyInCartMilli).clamp(0, 1 << 60);
+      final left = (batch.remainingQtyMilli - alreadyInCartMilli)
+          .clamp(0, 1 << 60)
+          .toInt();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -234,7 +236,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
       builder: (ctx) => AlertDialog(
         title: Row(
           children: [
-            Icon(Icons.check_circle, color: context.pal.success),
+            Icon(Icons.check_circle, color: ctx.pal.success),
             const SizedBox(width: 8),
             Expanded(child: Text('تم اعتماد الفاتورة ${sale.invoiceNumber}')),
           ],
@@ -251,14 +253,14 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
             ErpDetailRow(
               label: 'المدفوع',
               value: Money(sale.paidAmountMinor, sale.currency).format(),
-              valueColor: context.pal.success,
+              valueColor: ctx.pal.success,
             ),
             ErpDetailRow(
               label: 'المتبقي',
               value: Money(sale.remainingAmountMinor, sale.currency).format(),
               valueColor: sale.remainingAmountMinor > 0
-                  ? context.pal.danger
-                  : context.pal.textSecondary,
+                  ? ctx.pal.danger
+                  : ctx.pal.textSecondary,
             ),
           ],
         ),

@@ -23,7 +23,7 @@ class OfflineLicenseVerifier {
     bool allowUntrustedLocalKeyInDev = false,
     TrustedPublicKeyRegistry? extraDevRegistry,
   }) async {
-    DecodedLicenseInput decoded;
+    final DecodedLicenseInput decoded;
     try {
       decoded = LicenseCanonical.parseInput(rawLicenseInput);
     } catch (e) {
@@ -124,11 +124,13 @@ class OfflineLicenseVerifier {
       );
     }
 
-    int? remDays;
-    if (!payload.isPerpetual()) {
-      final diffMs = payload.expiresAtEpochMs - clock.effectiveNowMs;
-      remDays = (diffMs / Duration.millisecondsPerDay).ceil().clamp(0, 99999).toInt();
-    }
+    final int? remDays = payload.isPerpetual()
+        ? null
+        : ((payload.expiresAtEpochMs - clock.effectiveNowMs) /
+                Duration.millisecondsPerDay)
+            .ceil()
+            .clamp(0, 99999)
+            .toInt();
 
     return LicenseVerificationResult(
       kind: LicenseStateKind.valid,

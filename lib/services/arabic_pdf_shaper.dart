@@ -100,7 +100,7 @@ abstract final class ArabicPdfShaper {
       final nextConnects = i + 1 < runes.length && _connectsRight(runes[i + 1]);
       final forms = _forms[curr]!;
 
-      int glyph;
+      final int glyph;
       if (prevConnects && nextConnects && forms[3] != 0) {
         glyph = forms[3]; // medial
       } else if (prevConnects && forms[1] != 0) {

@@ -41,8 +41,7 @@ class WhatsappShareService {
       ..writeln('----------------');
     for (final t in summary.transfers.take(15)) {
       sb.writeln(
-        '• ${t.dateIso} | ${Money(t.amountMinor, t.currency).format()} | ${t.status.arabicLabel}'
-        '${t.transferNumber.isNotEmpty ? ' (#${t.transferNumber})' : ''}',
+        '• ${t.dateIso} | ${Money(t.amountMinor, t.currency).format()} | ${t.status.arabicLabel}${t.transferNumber.isNotEmpty ? ' (#${t.transferNumber})' : ''}',
       );
     }
     return sb.toString().trim();

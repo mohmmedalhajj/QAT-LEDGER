@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/date_utils.dart';
-import '../../core/money.dart';
 import '../../core/platform_bridge.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';

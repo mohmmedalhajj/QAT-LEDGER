@@ -186,7 +186,7 @@ class BackupService {
         stagePath,
         options: OpenDatabaseOptions(readOnly: false),
       );
-      Map<String, int> counts;
+      final Map<String, int> counts;
       try {
         final integrity = await stageDb.rawQuery('PRAGMA integrity_check');
         final ok = integrity.isNotEmpty &&
@@ -283,7 +283,7 @@ class BackupService {
         stagePath,
         options: OpenDatabaseOptions(readOnly: false),
       );
-      Map<String, int> counts;
+      final Map<String, int> counts;
       try {
         final integrity = await stageDb.rawQuery('PRAGMA integrity_check');
         final ok = integrity.isNotEmpty &&

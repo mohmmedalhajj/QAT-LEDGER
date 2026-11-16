@@ -11,7 +11,6 @@ import 'package:share_plus/share_plus.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../developer/developer_console_sheet.dart';
-import '../../licensing/license_models.dart';
 import '../../state/app_controller.dart';
 import '../widgets/erp_components.dart';
 
@@ -242,8 +241,7 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                 const SizedBox(height: 6),
                 Text(
                   lic.isValid && lic.payload != null
-                      ? 'العميل: ${lic.payload!.customerName} • الباقة: ${lic.payload!.planCode}'
-                          '${lic.remainingDays != null ? ' • متبقي: ${lic.remainingDays} يوم' : ' • ترخيص دائم'}'
+                      ? 'العميل: ${lic.payload!.customerName} • الباقة: ${lic.payload!.planCode}${lic.remainingDays != null ? ' • متبقي: ${lic.remainingDays} يوم' : ' • ترخيص دائم'}'
                       : (lic.reason.isEmpty
                           ? lic.kind.arabicDescription
                           : lic.reason),
@@ -446,11 +444,7 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                     ),
                     title: Text('${u.displayName} (${u.username})'),
                     subtitle: Text(
-                      '${u.role.arabicLabel}'
-                      '${u.canDelete ? ' • حذف' : ''}'
-                      '${u.canEditPrices ? ' • أسعار' : ''}'
-                      '${u.canViewReports ? ' • تقارير' : ''}'
-                      '${u.canManageSettings ? ' • إعدادات' : ''}',
+                      '${u.role.arabicLabel}${u.canDelete ? ' • حذف' : ''}${u.canEditPrices ? ' • أسعار' : ''}${u.canViewReports ? ' • تقارير' : ''}${u.canManageSettings ? ' • إعدادات' : ''}',
                     ),
                     trailing: (ctrl.users.length > 1 &&
                             u.username != ctrl.currentUser?.username &&

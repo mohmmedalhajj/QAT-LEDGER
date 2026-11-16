@@ -208,8 +208,8 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
                 value: Money(customer.balanceFor(selectedCur), selectedCur)
                     .format(),
                 valueColor: customer.balanceFor(selectedCur) > 0
-                    ? context.pal.danger
-                    : context.pal.success,
+                    ? ctx.pal.danger
+                    : ctx.pal.success,
               ),
               const SizedBox(height: 8),
               CurrencySelectorRow(
@@ -526,8 +526,8 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
                                         phone: c.phone,
                                         text:
                                             'مرحباً ${c.name}، رصيدكم الحالي لدى ${ctrl.settings.agencyName}:\n'
-                                            'ريال يمني: ${Money(yerDebt, CurrencyCode.yer).format()}\n'
-                                            '${sarDebt != 0 ? 'ريال سعودي: ${Money(sarDebt, CurrencyCode.sar).format()}' : ''}',
+                                            'ريال يمني: ${Money(yerDebt, CurrencyCode.yer).format()}'
+                                            '${sarDebt != 0 ? '\nريال سعودي: ${Money(sarDebt, CurrencyCode.sar).format()}' : ''}',
                                       ),
                                       icon: const Icon(
                                         Icons.chat_outlined,
