@@ -56,6 +56,26 @@ jobs:
             chmod +x android/gradlew
           fi
 
+      - name: Configure release keystore from GitHub Secrets (if provided)
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > android/app/release.jks
+            cat > android/key.properties <<EOF
+          storeFile=release.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+            echo "Release keystore configured from secrets."
+          else
+            echo "::warning::Release keystore secrets not set; Gradle will sign with debug key (clean install only)."
+          fi
+
       - name: Build Customer Release APK
         env:
           QAT_LICENSE_PUBLIC_KEYS: ${{ secrets.QAT_LICENSE_PUBLIC_KEYS }}

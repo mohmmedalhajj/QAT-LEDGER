@@ -67,7 +67,8 @@ android {
             create("release") {
                 val sf = keystoreProperties.getProperty("storeFile")
                 if (!sf.isNullOrBlank()) {
-                    storeFile = file(sf)
+                    val appRel = file(sf)
+                    storeFile = if (appRel.exists()) appRel else rootProject.file(sf)
                 }
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")

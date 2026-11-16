@@ -98,4 +98,12 @@
   - `qat_ledger_v2.db` (created atomically via SQLite `VACUUM INTO`)
   - `manifest.json` (`format_version: 2`, `app_edition`, `db_version: 2`, `created_at_ms`, `row_counts`, `db_sha256`, `device_label`)
   - `agency_assets/` (logo image if configured)
-- Restore workflow validates ZIP integrity, reads `manifest.json`, verifies `sha256(qat_ledger_v2.db) == manifest.db_sha256`, opens staged DB to run `PRAGMA integrity_check` + `PRAGMA foreign_key_check` (or automatically triggers the Room v18 migrator if user picks a legacy `.db` file!), captures a local automatic pre-restore rollback snapshot, swaps the DB atomically, and rolls back automatically on any verification error.
+- Restore workflow validates ZIP integrity, reads `manifest.json`, verifies `sha256(qat_ledger_v2.db) == manifest.db_sha256`, opens staged DB to run `PRAGMA integrity_check` + `PRAGMA foreign_key_check` (or automatically triggers the Room v18 migrator if user picks a legacy `.db` file!), captures a local automatic pre-restore rollback snapshot, restores any bundled `agency_assets/` logo, swaps the DB atomically, and rolls back automatically on any verification error.
+
+---
+
+## 5. Verification Status & Requirement for Real Device Database
+
+- **Executed in Sandbox (Synthetic Only):** Python `sqlite3` validation against the exact 20-table / 12-index DDL extracted from `lib/data/schema.dart` migrating a synthetic Room v18 database (`PRAGMA integrity_check == 'ok'`, zero FK violations, YER/SAR balance separation, unlinked `recipientId = 0 -> NULL`).
+- **Awaiting Flutter Runner:** `test/room_migration_test.dart` (Dart `RoomMigrator` via `sqflite_common_ffi`).
+- **Explicit Request Before Live Rollout:** No real user-device Room v18 database (`tofan_al_aqsa_qat_db`) has been provided in this workspace. Synthetic migration tests **do not prove** compatibility with edge-case rows from a live phone install; do not delete or overwrite any user's legacy `tofan_al_aqsa_qat_db` before running `RoomMigrator` / restore test against a real backup copy of their device DB.
