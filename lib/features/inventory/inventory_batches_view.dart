@@ -325,6 +325,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                             final ratio = b.initialQtyMilli > 0
                                 ? (b.remainingQtyMilli / b.initialQtyMilli)
                                     .clamp(0.0, 1.0)
+                                    .toDouble()
                                 : 0.0;
                             return Card(
                               margin: const EdgeInsets.only(bottom: 10),
