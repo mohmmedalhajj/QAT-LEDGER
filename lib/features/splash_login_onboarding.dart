@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../core/money.dart';
@@ -202,7 +202,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   OutlinedButton.icon(
                     onPressed: () async {
                       Navigator.pop(ctx);
-                      if (!context.mounted) return;
+                      if (!mounted) return;
                       await Navigator.of(context).push<void>(
                         MaterialPageRoute<void>(
                           builder: (_) => DeveloperConsoleSheet(
