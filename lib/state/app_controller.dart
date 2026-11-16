@@ -80,6 +80,8 @@ class AppController extends ChangeNotifier {
   List<TransferRecipient> _recipients = [];
   List<MoneyTransfer> _transfers = [];
   List<TransferRecipientSummary> _recipientReports = [];
+  List<DailySettlementSnapshot> _dailySettlements = [];
+  List<InventoryReconciliationEntry> _reconciliationLogs = [];
   List<AppUser> _users = [];
   AppUser? _currentUser;
   SectionPermissions _sectionPermissions = const SectionPermissions();
@@ -122,11 +124,15 @@ class AppController extends ChangeNotifier {
   List<TransferRecipientSummary> get recipientReports => _recipientReports;
   List<MoneyTransfer> get unlinkedTransfers =>
       _transfers.where((t) => t.isUnlinked).toList();
+  List<DailySettlementSnapshot> get dailySettlements => _dailySettlements;
+  List<InventoryReconciliationEntry> get reconciliationLogs =>
+      _reconciliationLogs;
   List<AppUser> get users => _users;
   AppUser? get currentUser => _currentUser;
   SectionPermissions get sectionPermissions => _sectionPermissions;
 
   bool get canDeleteCurrent => _currentUser?.canDelete ?? true;
+  bool get canEditPricesCurrent => _currentUser?.canEditPrices ?? true;
   bool get canManageSettingsCurrent => _currentUser?.canManageSettings ?? true;
   bool get canViewReportsCurrent =>
       (_currentUser?.canViewReports ?? true) && _sectionPermissions.reports;
@@ -434,7 +440,26 @@ class AppController extends ChangeNotifier {
     _recipients = await _repo.getTransferRecipients();
     _transfers = await _repo.getTransfers();
     _recipientReports = await _repo.getAllRecipientsReports();
+    _dailySettlements = await _repo.getDailySettlements();
+    _reconciliationLogs = await _repo.getInventoryReconciliations();
     notifyListeners();
+  }
+
+  Future<void> saveDailySettlement(DailySettlementSnapshot snapshot) async {
+    await _repo.saveDailySettlement(snapshot);
+    await reloadAll();
+  }
+
+  Future<void> applyInventoryReconciliation({
+    required List<({InventoryBatch batch, int countedQtyMilli})> counts,
+    required String notes,
+  }) async {
+    await _repo.applyInventoryReconciliation(
+      counts: counts,
+      notes: notes,
+      createdBy: _currentUser?.username ?? 'admin',
+    );
+    await reloadAll();
   }
 
   void setSection(int index, {int? subTab}) {

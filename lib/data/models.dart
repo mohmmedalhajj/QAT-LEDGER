@@ -811,3 +811,155 @@ class InventoryValuation {
   int get expectedProfitMinor => totalRetailMinor - totalCostMinor;
 }
 
+@immutable
+class DailySettlementSnapshot {
+  const DailySettlementSnapshot({
+    required this.id,
+    required this.dateIso,
+    required this.epochMs,
+    required this.currency,
+    required this.expectedCashMinor,
+    required this.actualCountedMinor,
+    required this.varianceMinor,
+    required this.salesCashMinor,
+    required this.customerReceiptsMinor,
+    required this.purchasesCashMinor,
+    required this.supplierPaymentsMinor,
+    required this.expensesMinor,
+    required this.transferFeesMinor,
+    required this.pendingTransfersCount,
+    required this.notes,
+    required this.createdBy,
+  });
+
+  final String id;
+  final String dateIso;
+  final int epochMs;
+  final CurrencyCode currency;
+  final int expectedCashMinor;
+  final int actualCountedMinor;
+  final int varianceMinor;
+  final int salesCashMinor;
+  final int customerReceiptsMinor;
+  final int purchasesCashMinor;
+  final int supplierPaymentsMinor;
+  final int expensesMinor;
+  final int transferFeesMinor;
+  final int pendingTransfersCount;
+  final String notes;
+  final String createdBy;
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'dateIso': dateIso,
+        'epochMs': epochMs,
+        'currency': currency.code,
+        'expectedCashMinor': expectedCashMinor,
+        'actualCountedMinor': actualCountedMinor,
+        'varianceMinor': varianceMinor,
+        'salesCashMinor': salesCashMinor,
+        'customerReceiptsMinor': customerReceiptsMinor,
+        'purchasesCashMinor': purchasesCashMinor,
+        'supplierPaymentsMinor': supplierPaymentsMinor,
+        'expensesMinor': expensesMinor,
+        'transferFeesMinor': transferFeesMinor,
+        'pendingTransfersCount': pendingTransfersCount,
+        'notes': notes,
+        'createdBy': createdBy,
+      };
+
+  static DailySettlementSnapshot fromJson(Map<String, dynamic> map) =>
+      DailySettlementSnapshot(
+        id: (map['id'] ?? '').toString(),
+        dateIso: (map['dateIso'] ?? '').toString(),
+        epochMs: (map['epochMs'] as num?)?.toInt() ?? 0,
+        currency: CurrencyCode.fromRaw(map['currency']?.toString()),
+        expectedCashMinor: (map['expectedCashMinor'] as num?)?.toInt() ?? 0,
+        actualCountedMinor: (map['actualCountedMinor'] as num?)?.toInt() ?? 0,
+        varianceMinor: (map['varianceMinor'] as num?)?.toInt() ?? 0,
+        salesCashMinor: (map['salesCashMinor'] as num?)?.toInt() ?? 0,
+        customerReceiptsMinor:
+            (map['customerReceiptsMinor'] as num?)?.toInt() ?? 0,
+        purchasesCashMinor: (map['purchasesCashMinor'] as num?)?.toInt() ?? 0,
+        supplierPaymentsMinor:
+            (map['supplierPaymentsMinor'] as num?)?.toInt() ?? 0,
+        expensesMinor: (map['expensesMinor'] as num?)?.toInt() ?? 0,
+        transferFeesMinor: (map['transferFeesMinor'] as num?)?.toInt() ?? 0,
+        pendingTransfersCount:
+            (map['pendingTransfersCount'] as num?)?.toInt() ?? 0,
+        notes: (map['notes'] ?? '').toString(),
+        createdBy: (map['createdBy'] ?? '').toString(),
+      );
+}
+
+@immutable
+class InventoryReconciliationEntry {
+  const InventoryReconciliationEntry({
+    required this.id,
+    required this.dateIso,
+    required this.epochMs,
+    required this.batchId,
+    required this.qatTypeName,
+    required this.unit,
+    required this.currency,
+    required this.systemQtyMilli,
+    required this.countedQtyMilli,
+    required this.diffQtyMilli,
+    required this.unitCostMinor,
+    required this.financialImpactMinor,
+    required this.notes,
+    required this.createdBy,
+  });
+
+  final String id;
+  final String dateIso;
+  final int epochMs;
+  final int batchId;
+  final String qatTypeName;
+  final String unit;
+  final CurrencyCode currency;
+  final int systemQtyMilli;
+  final int countedQtyMilli;
+  final int diffQtyMilli;
+  final int unitCostMinor;
+  final int financialImpactMinor;
+  final String notes;
+  final String createdBy;
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'dateIso': dateIso,
+        'epochMs': epochMs,
+        'batchId': batchId,
+        'qatTypeName': qatTypeName,
+        'unit': unit,
+        'currency': currency.code,
+        'systemQtyMilli': systemQtyMilli,
+        'countedQtyMilli': countedQtyMilli,
+        'diffQtyMilli': diffQtyMilli,
+        'unitCostMinor': unitCostMinor,
+        'financialImpactMinor': financialImpactMinor,
+        'notes': notes,
+        'createdBy': createdBy,
+      };
+
+  static InventoryReconciliationEntry fromJson(Map<String, dynamic> map) =>
+      InventoryReconciliationEntry(
+        id: (map['id'] ?? '').toString(),
+        dateIso: (map['dateIso'] ?? '').toString(),
+        epochMs: (map['epochMs'] as num?)?.toInt() ?? 0,
+        batchId: (map['batchId'] as num?)?.toInt() ?? 0,
+        qatTypeName: (map['qatTypeName'] ?? '').toString(),
+        unit: (map['unit'] ?? '').toString(),
+        currency: CurrencyCode.fromRaw(map['currency']?.toString()),
+        systemQtyMilli: (map['systemQtyMilli'] as num?)?.toInt() ?? 0,
+        countedQtyMilli: (map['countedQtyMilli'] as num?)?.toInt() ?? 0,
+        diffQtyMilli: (map['diffQtyMilli'] as num?)?.toInt() ?? 0,
+        unitCostMinor: (map['unitCostMinor'] as num?)?.toInt() ?? 0,
+        financialImpactMinor:
+            (map['financialImpactMinor'] as num?)?.toInt() ?? 0,
+        notes: (map['notes'] ?? '').toString(),
+        createdBy: (map['createdBy'] ?? '').toString(),
+      );
+}
+

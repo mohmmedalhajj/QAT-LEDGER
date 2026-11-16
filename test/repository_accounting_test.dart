@@ -202,6 +202,45 @@ void main() {
       expect(restored.verifiedSha256, backup.dbSha256);
       expect((await repo.getTransferRecipients()).length, 1);
 
+      // 5. Physical inventory reconciliation & daily cash settlement persistence
+      final currentBatches = await repo.getInventoryBatches();
+      expect(currentBatches.single.remainingQtyMilli, 10000);
+      await repo.applyInventoryReconciliation(
+        counts: [(batch: currentBatches.single, countedQtyMilli: 9500)],
+        notes: 'تلف ربطة ونصف أثناء الفرز',
+        createdBy: 'admin',
+      );
+      final updatedBatches = await repo.getInventoryBatches();
+      expect(updatedBatches.single.remainingQtyMilli, 9500);
+      final reconLogs = await repo.getInventoryReconciliations();
+      expect(reconLogs.length, 1);
+      expect(reconLogs.single.diffQtyMilli, -500);
+      expect(reconLogs.single.financialImpactMinor, -110000);
+
+      await repo.saveDailySettlement(
+        const DailySettlementSnapshot(
+          id: 'test_settle_1',
+          dateIso: '2026-11-16',
+          epochMs: 1794800000000,
+          currency: CurrencyCode.yer,
+          expectedCashMinor: 500000,
+          actualCountedMinor: 495000,
+          varianceMinor: -5000,
+          salesCashMinor: 600000,
+          customerReceiptsMinor: 0,
+          purchasesCashMinor: 0,
+          supplierPaymentsMinor: 0,
+          expensesMinor: 100000,
+          transferFeesMinor: 0,
+          pendingTransfersCount: 0,
+          notes: 'إغلاق تجريبي',
+          createdBy: 'admin',
+        ),
+      );
+      final settlements = await repo.getDailySettlements();
+      expect(settlements.length, 1);
+      expect(settlements.single.varianceMinor, -5000);
+
       await dbService.close();
     } finally {
       await tempDir.delete(recursive: true);

@@ -1,11 +1,13 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
+import '../core/date_utils.dart';
 import '../core/money.dart';
 import '../core/theme.dart';
 import '../data/models.dart';
 import '../state/app_controller.dart';
 import 'widgets/common_widgets.dart';
+import 'widgets/erp_components.dart';
 
 class DashboardTab extends StatelessWidget {
   const DashboardTab({super.key});
@@ -16,63 +18,92 @@ class DashboardTab extends StatelessWidget {
     final pal = context.pal;
     final policy = ctrl.currencyPolicy;
     final migration = ctrl.migrationSummary;
-
     final visibleCurrencies = policy.allowedCurrencies;
+    final width = MediaQuery.sizeOf(context).width;
+    final isWide = width >= 780;
+
+    final lowStockCount = ctrl.batches
+        .where((b) => b.remainingQtyMilli > 0 && b.remainingQtyMilli <= 5000)
+        .length;
+    final pendingTransfersCount = ctrl.transfers
+        .where((t) => t.status == TransferStatus.pending)
+        .length;
 
     return RefreshIndicator(
       onRefresh: ctrl.reloadAll,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (migration != null && migration.performed)
-            Card(
-              color: pal.successSoft,
-              margin: const EdgeInsets.only(bottom: 12),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Icon(Icons.verified_outlined, color: pal.success),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'تم ترحيل بيانات الإصدار القديم بنجاح (${migration.rowCounts.values.fold<int>(0, (a, b) => a + b)} سجل) مع فصل العملات والتحقق من القيود.',
-                        style: TextStyle(fontSize: 12, color: pal.textPrimary),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: ctrl.dismissMigrationBanner,
-                      icon: const Icon(Icons.close, size: 18),
-                    ),
-                  ],
-                ),
+          if (migration != null && migration.performed) ...[
+            ErpStatusBanner(
+              tone: ErpBannerTone.success,
+              title: 'تم ترحيل بيانات الإصدار القديم بنجاح',
+              subtitle:
+                  'تم استيراد ${migration.rowCounts.values.fold<int>(0, (a, b) => a + b)} سجل مع فصل العملات والتحقق من القيود.',
+              action: IconButton(
+                onPressed: ctrl.dismissMigrationBanner,
+                icon: const Icon(Icons.close, size: 18),
               ),
             ),
+            const SizedBox(height: 12),
+          ],
 
-          // License status & currency mode header strip
+          // Executive Agency & License Strip
           Card(
-            margin: const EdgeInsets.only(bottom: 14),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              padding: const EdgeInsets.all(14),
               child: Row(
                 children: [
-                  Icon(
-                    ctrl.licenseStatus.isValid
-                        ? Icons.verified_user
-                        : Icons.info_outline,
-                    color: ctrl.licenseStatus.isValid ? pal.success : pal.warning,
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: ctrl.licenseStatus.isValid
+                          ? pal.successSoft
+                          : pal.warningSoft,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      ctrl.licenseStatus.isValid
+                          ? Icons.verified_user
+                          : Icons.shield_outlined,
+                      color: ctrl.licenseStatus.isValid
+                          ? pal.success
+                          : pal.warning,
+                    ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          ctrl.settings.agencyName,
-                          style: Theme.of(context).textTheme.titleMedium,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                ctrl.settings.agencyName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            StatusPill(
+                              label: ctrl.licenseStatus.kind.arabicTitle,
+                              bg: ctrl.licenseStatus.isValid
+                                  ? pal.successSoft
+                                  : pal.warningSoft,
+                              fg: ctrl.licenseStatus.isValid
+                                  ? pal.success
+                                  : pal.warning,
+                            ),
+                          ],
                         ),
+                        const SizedBox(height: 4),
                         Text(
-                          '${policy.mode.arabicLabel} • الترخيص: ${ctrl.licenseStatus.kind.arabicTitle}',
+                          '${policy.mode.arabicLabel} • ${QatDateUtils.todayIso()} • ${ctrl.currentUser?.displayName ?? 'admin'}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -80,25 +111,24 @@ class DashboardTab extends StatelessWidget {
                   ),
                   TextButton(
                     onPressed: () => ctrl.setSection(4, subTab: 3),
-                    child: Text(
-                      ctrl.licenseStatus.isValid ? 'التفاصيل' : 'تفعيل',
-                    ),
+                    child: Text(ctrl.licenseStatus.isValid ? 'التفاصيل' : 'تفعيل'),
                   ),
                 ],
               ),
             ),
           ),
+          const SizedBox(height: 16),
 
-          // Quick actions grid
+          // Quick ERP Actions Grid
           Text('إجراءات سريعة', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           GridView.count(
-            crossAxisCount: 4,
+            crossAxisCount: isWide ? 8 : 4,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             mainAxisSpacing: 8,
             crossAxisSpacing: 8,
-            childAspectRatio: 0.95,
+            childAspectRatio: isWide ? 0.98 : 0.92,
             children: [
               _QuickActionTile(
                 icon: Icons.point_of_sale,
@@ -113,6 +143,12 @@ class DashboardTab extends StatelessWidget {
                 onTap: () => ctrl.setSection(1, subTab: 2),
               ),
               _QuickActionTile(
+                icon: Icons.fact_check_outlined,
+                label: 'التحاسب والجرد',
+                color: pal.info,
+                onTap: () => ctrl.setSection(2, subTab: 2),
+              ),
+              _QuickActionTile(
                 icon: Icons.swap_horiz,
                 label: 'حوالة مالية',
                 color: pal.accent,
@@ -124,16 +160,35 @@ class DashboardTab extends StatelessWidget {
                 color: pal.warning,
                 onTap: () => ctrl.setSection(4, subTab: 0),
               ),
+              _QuickActionTile(
+                icon: Icons.table_chart_outlined,
+                label: 'كشف حساب',
+                color: pal.brand,
+                onTap: () => ctrl.setSection(1, subTab: 3),
+              ),
+              _QuickActionTile(
+                icon: Icons.analytics_outlined,
+                label: 'التقارير',
+                color: pal.success,
+                onTap: () => ctrl.setSection(3, subTab: 2),
+              ),
+              _QuickActionTile(
+                icon: Icons.backup_outlined,
+                label: 'نسخ احتياطي',
+                color: pal.accent,
+                onTap: () => ctrl.setSection(4, subTab: 2),
+              ),
             ],
           ),
           const SizedBox(height: 18),
 
-          // Per-currency separated KPI sections (never mixing YER + SAR silently)
+          // Separated Per-Currency Financial Pulse + Inventory Valuation
           for (final cur in visibleCurrencies) ...[
             _CurrencySectionHeader(currency: cur),
             const SizedBox(height: 8),
             _CurrencyKpiGrid(
               currency: cur,
+              isWide: isWide,
               metrics: ctrl.todayMetrics[cur] ??
                   CurrencyDashboardMetrics(
                     currency: cur,
@@ -153,11 +208,12 @@ class DashboardTab extends StatelessWidget {
                     transfersPendingMinor: 0,
                     transfersFeesMinor: 0,
                   ),
+              valuation: ctrl.inventoryValuation[cur],
             ),
             const SizedBox(height: 16),
           ],
 
-          // Optional explicit user-rate preview card (clearly marked estimate only)
+          // Optional explicit user-rate preview card (strictly display only)
           if (policy.hasExplicitDisplayRate) ...[
             _DualCurrencyEstimateCard(
               policy: policy,
@@ -166,24 +222,112 @@ class DashboardTab extends StatelessWidget {
             const SizedBox(height: 16),
           ],
 
-          // Unlinked transfers alert if any
-          if (ctrl.unlinkedTransfers.isNotEmpty)
-            Card(
-              color: pal.warningSoft,
-              child: ListTile(
-                leading: Icon(Icons.link_off, color: pal.warning),
-                title: Text(
-                  'توجد ${ctrl.unlinkedTransfers.length} حوالات غير مرتبطة ببطاقة مستلم',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+          // Operational Alerts
+          if (ctrl.unlinkedTransfers.isNotEmpty ||
+              lowStockCount > 0 ||
+              pendingTransfersCount > 0) ...[
+            Text(
+              'تنبيهات تشغيلية ومحاسبية',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            if (ctrl.unlinkedTransfers.isNotEmpty) ...[
+              ErpStatusBanner(
+                tone: ErpBannerTone.warning,
+                icon: Icons.link_off,
+                title:
+                    'توجد ${ctrl.unlinkedTransfers.length} حوالات غير مرتبطة ببطاقة مستلم',
+                subtitle: 'مراجعة وربط المستلمين تمنع تشتت كشوفات الحوالات.',
+                action: TextButton(
+                  onPressed: () => ctrl.setSection(3, subTab: 0),
+                  child: const Text('مراجعة'),
                 ),
-                subtitle: const Text(
-                  'اضغط للمراجعة والربط في قسم الحوالات',
-                  style: TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (lowStockCount > 0) ...[
+              ErpStatusBanner(
+                tone: ErpBannerTone.info,
+                icon: Icons.inventory_outlined,
+                title: 'تنبيه مخزون: $lowStockCount دفعات قاربت على النفاد',
+                subtitle: 'افتح شاشة المخزون أو التحاسب والجرد لمراجعة الكميات.',
+                action: TextButton(
+                  onPressed: () => ctrl.setSection(2, subTab: 0),
+                  child: const Text('عرض'),
                 ),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 15),
-                onTap: () => ctrl.setSection(3, subTab: 0),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (pendingTransfersCount > 0)
+              ErpStatusBanner(
+                tone: ErpBannerTone.warning,
+                icon: Icons.schedule,
+                title: 'حوالات قيد التسليم: $pendingTransfersCount حوالة',
+                subtitle: 'تابع حالة التسليم أو تحديثها في قسم الحوالات.',
+                action: TextButton(
+                  onPressed: () => ctrl.setSection(3, subTab: 1),
+                  child: const Text('التفاصيل'),
+                ),
+              ),
+            const SizedBox(height: 16),
+          ],
+
+          // Recent Invoices Snapshot Table
+          if (ctrl.sales.isNotEmpty) ...[
+            ErpSectionHeader(
+              title: 'آخر الفواتير المسجلة',
+              icon: Icons.receipt_long_outlined,
+              trailing: TextButton(
+                onPressed: () => ctrl.setSection(1, subTab: 1),
+                child: const Text('سجل المبيعات'),
               ),
             ),
+            const SizedBox(height: 8),
+            ErpAccountingTable(
+              columns: const [
+                ErpTableColumn(title: 'الفاتورة', width: 92),
+                ErpTableColumn(title: 'العميل', width: 120),
+                ErpTableColumn(title: 'الحالة', width: 78),
+                ErpTableColumn(
+                  title: 'الإجمالي',
+                  width: 112,
+                  numeric: true,
+                  align: TextAlign.end,
+                ),
+                ErpTableColumn(
+                  title: 'المتبقي',
+                  width: 105,
+                  numeric: true,
+                  align: TextAlign.end,
+                ),
+              ],
+              rows: [
+                for (final s in ctrl.sales.take(5))
+                  [
+                    ErpTableCell(s.invoiceNumber, bold: true, ltr: true),
+                    ErpTableCell(s.customerName),
+                    ErpTableCell(
+                      s.paymentType.arabicLabel,
+                      color: s.paymentType == PaymentType.paid
+                          ? pal.success
+                          : (s.paymentType == PaymentType.partial
+                              ? pal.warning
+                              : pal.danger),
+                    ),
+                    ErpTableCell(
+                      Money(s.totalAmountMinor, s.currency).format(),
+                      bold: true,
+                    ),
+                    ErpTableCell(
+                      Money(s.remainingAmountMinor, s.currency).format(),
+                      color: s.remainingAmountMinor > 0
+                          ? pal.danger
+                          : pal.textSecondary,
+                    ),
+                  ],
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -210,7 +354,7 @@ class _QuickActionTile extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
         decoration: BoxDecoration(
           color: pal.card,
           borderRadius: BorderRadius.circular(14),
@@ -220,13 +364,13 @@ class _QuickActionTile extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 38,
-              height: 38,
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
                 color: color.withValues(alpha: 0.13),
-                borderRadius: BorderRadius.circular(11),
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(icon, color: color, size: 20),
+              child: Icon(icon, color: color, size: 19),
             ),
             const SizedBox(height: 6),
             Text(
@@ -234,7 +378,7 @@ class _QuickActionTile extends StatelessWidget {
               textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ],
         ),
@@ -266,54 +410,92 @@ class _CurrencyKpiGrid extends StatelessWidget {
   const _CurrencyKpiGrid({
     required this.currency,
     required this.metrics,
+    required this.isWide,
+    this.valuation,
   });
 
   final CurrencyCode currency;
   final CurrencyDashboardMetrics metrics;
+  final bool isWide;
+  final InventoryValuation? valuation;
 
   @override
   Widget build(BuildContext context) {
     final pal = context.pal;
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 10,
-      childAspectRatio: 1.55,
+    final val = valuation;
+    return Column(
       children: [
-        KpiMetricCard(
-          title: 'مبيعات اليوم',
-          value: Money(metrics.salesTotalMinor, currency).format(),
-          subtitle: 'نقدي: ${Money(metrics.salesPaidMinor, currency).format()}',
-          icon: Icons.trending_up,
-          toneColor: pal.brand,
-          currency: currency,
+        GridView.count(
+          crossAxisCount: isWide ? 4 : 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: isWide ? 1.38 : 1.28,
+          children: [
+            KpiMetricCard(
+              title: 'مبيعات اليوم',
+              value: Money(metrics.salesTotalMinor, currency).format(),
+              subtitle:
+                  'نقدي: ${Money(metrics.salesPaidMinor, currency).format()}',
+              icon: Icons.trending_up,
+              toneColor: pal.brand,
+              currency: currency,
+            ),
+            KpiMetricCard(
+              title: 'صافي التدفق النقدي',
+              value: Money(metrics.cashNetFlowMinor, currency).format(),
+              subtitle:
+                  'سندات قبض: ${Money(metrics.customerReceiptsMinor, currency).format()}',
+              icon: Icons.account_balance_wallet_outlined,
+              toneColor:
+                  metrics.cashNetFlowMinor >= 0 ? pal.success : pal.danger,
+              currency: currency,
+            ),
+            KpiMetricCard(
+              title: 'ديون العملاء القائمة',
+              value: Money(metrics.totalCustomerDebtMinor, currency).format(),
+              subtitle:
+                  'آجل اليوم: ${Money(metrics.salesCreditMinor, currency).format()}',
+              icon: Icons.people_outline,
+              toneColor: pal.warning,
+              currency: currency,
+            ),
+            KpiMetricCard(
+              title: 'مستحقات الموردين',
+              value: Money(metrics.totalSupplierPayableMinor, currency).format(),
+              subtitle:
+                  'مصروفات اليوم: ${Money(metrics.expensesMinor, currency).format()}',
+              icon: Icons.local_shipping_outlined,
+              toneColor: pal.accent,
+              currency: currency,
+            ),
+          ],
         ),
-        KpiMetricCard(
-          title: 'صافي التدفق النقدي',
-          value: Money(metrics.cashNetFlowMinor, currency).format(),
-          subtitle: 'سندات قبض: ${Money(metrics.customerReceiptsMinor, currency).format()}',
-          icon: Icons.account_balance_wallet_outlined,
-          toneColor: metrics.cashNetFlowMinor >= 0 ? pal.success : pal.danger,
-          currency: currency,
-        ),
-        KpiMetricCard(
-          title: 'ديون العملاء القائمة',
-          value: Money(metrics.totalCustomerDebtMinor, currency).format(),
-          subtitle: 'آجل اليوم: ${Money(metrics.salesCreditMinor, currency).format()}',
-          icon: Icons.people_outline,
-          toneColor: pal.warning,
-          currency: currency,
-        ),
-        KpiMetricCard(
-          title: 'مستحقات الموردين',
-          value: Money(metrics.totalSupplierPayableMinor, currency).format(),
-          subtitle: 'مصروفات اليوم: ${Money(metrics.expensesMinor, currency).format()}',
-          icon: Icons.local_shipping_outlined,
-          toneColor: pal.accent,
-          currency: currency,
-        ),
+        if (val != null && val.batchCount > 0) ...[
+          const SizedBox(height: 8),
+          ErpSummaryBar(
+            metrics: [
+              ErpSummaryMetric(
+                label: 'الدفعات المتوفرة',
+                value: '${val.batchCount}',
+              ),
+              ErpSummaryMetric(
+                label: 'رصيد الكمية',
+                value: QuantityMath.formatMilli(val.totalQtyMilli),
+              ),
+              ErpSummaryMetric(
+                label: 'قيمة المخزون بالتكلفة',
+                value: Money(val.totalCostMinor, currency).format(),
+              ),
+              ErpSummaryMetric(
+                label: 'الربح المتوقع بالمخزون',
+                value: Money(val.expectedProfitMinor, currency).format(),
+                toneColor: pal.success,
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }
@@ -354,7 +536,8 @@ class _DualCurrencyEstimateCard extends StatelessWidget {
                 const Expanded(
                   child: Text(
                     'إجمالي المبيعات التقديري بالريال اليمني (للعرض فقط)',
-                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                    style:
+                        TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
                   ),
                 ),
               ],
@@ -368,6 +551,7 @@ class _DualCurrencyEstimateCard extends StatelessWidget {
                 fontSize: 19,
                 fontWeight: FontWeight.w700,
                 color: pal.textPrimary,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
             const SizedBox(height: 4),

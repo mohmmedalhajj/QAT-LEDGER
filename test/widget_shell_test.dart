@@ -61,11 +61,20 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Navigate all 5 sections on small viewport without overflow
+    // Navigate all 5 sections and sub-tabs on small viewport without overflow
     for (int i = 0; i < 5; i++) {
       controller.setSection(i);
       await tester.pumpAndSettle();
     }
+    controller.setSection(2, subTab: 2); // Reconciliation & Settlement
+    await tester.pumpAndSettle();
+    expect(find.text('جرد المخزون'), findsOneWidget);
+    expect(find.text('تحاسب الصندوق'), findsOneWidget);
+
+    controller.setSection(1, subTab: 3); // Account statements
+    await tester.pumpAndSettle();
+    controller.setSection(3, subTab: 2); // Financial reports
+    await tester.pumpAndSettle();
 
     // Test large phone viewport (412x915)
     tester.view.physicalSize = const Size(412, 915);
@@ -78,6 +87,16 @@ void main() {
     expect(find.text('المخزون'), findsOneWidget);
     expect(find.text('الحوالات'), findsOneWidget);
     expect(find.text('الإعدادات'), findsOneWidget);
+    expect(find.text('إجراءات سريعة'), findsOneWidget);
+    expect(find.text('فاتورة بيع'), findsOneWidget);
+
+    // Tablet wide viewport (1024x768) renders NavigationRail
+    tester.view.physicalSize = const Size(1024, 768);
+    await tester.pumpAndSettle();
+    expect(find.byType(NavigationRail), findsOneWidget);
+
+    tester.view.physicalSize = const Size(412, 915);
+    await tester.pumpAndSettle();
 
     // Switch to Pure Black Dark mode
     await controller.setThemeChoice(AppThemeModeChoice.darkBlack);

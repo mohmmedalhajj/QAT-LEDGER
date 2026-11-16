@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart';
 
 import '../core/date_utils.dart';
@@ -1962,6 +1964,124 @@ class QatRepository {
       out[cur] = lines;
     }
     return out;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Daily Settlement & Inventory Reconciliation Audit Logs
+  // ---------------------------------------------------------------------------
+
+  Future<List<DailySettlementSnapshot>> getDailySettlements() async {
+    final raw = await getSetting('daily_settlements_v1');
+    if (raw == null || raw.trim().isEmpty) return const [];
+    try {
+      final Object? decoded = jsonDecode(raw);
+      if (decoded is! List<Object?>) return const [];
+      return decoded
+          .whereType<Map<Object?, Object?>>()
+          .map(
+            (m) => DailySettlementSnapshot.fromJson(
+              m.map<String, dynamic>(
+                (k, v) => MapEntry<String, dynamic>(k.toString(), v),
+              ),
+            ),
+          )
+          .toList()
+        ..sort((a, b) => b.epochMs.compareTo(a.epochMs));
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> saveDailySettlement(DailySettlementSnapshot snapshot) async {
+    final existing = await getDailySettlements();
+    final updated = [snapshot, ...existing.where((e) => e.id != snapshot.id)];
+    final trimmed = updated.take(180).map((e) => e.toJson()).toList();
+    await setSetting('daily_settlements_v1', jsonEncode(trimmed));
+  }
+
+  Future<List<InventoryReconciliationEntry>> getInventoryReconciliations() async {
+    final raw = await getSetting('inventory_reconciliation_v1');
+    if (raw == null || raw.trim().isEmpty) return const [];
+    try {
+      final Object? decoded = jsonDecode(raw);
+      if (decoded is! List<Object?>) return const [];
+      return decoded
+          .whereType<Map<Object?, Object?>>()
+          .map(
+            (m) => InventoryReconciliationEntry.fromJson(
+              m.map<String, dynamic>(
+                (k, v) => MapEntry<String, dynamic>(k.toString(), v),
+              ),
+            ),
+          )
+          .toList()
+        ..sort((a, b) => b.epochMs.compareTo(a.epochMs));
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> applyInventoryReconciliation({
+    required List<({InventoryBatch batch, int countedQtyMilli})> counts,
+    required String notes,
+    required String createdBy,
+  }) async {
+    if (counts.isEmpty) return;
+    final db = await _db;
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final iso = QatDateUtils.toIsoDate(DateTime.fromMillisecondsSinceEpoch(nowMs));
+    final existingLogs = await getInventoryReconciliations();
+    final newEntries = <InventoryReconciliationEntry>[];
+
+    await db.transaction<void>((txn) async {
+      for (final item in counts) {
+        final b = item.batch;
+        final safeCounted = item.countedQtyMilli < 0 ? 0 : item.countedQtyMilli;
+        final diff = safeCounted - b.remainingQtyMilli;
+        if (diff == 0) continue;
+
+        final nextInitial = safeCounted > b.initialQtyMilli
+            ? safeCounted
+            : b.initialQtyMilli;
+        await txn.update(
+          'inventory_batches',
+          {
+            'remaining_qty_milli': safeCounted,
+            'initial_qty_milli': nextInitial,
+          },
+          where: 'id = ?',
+          whereArgs: [b.id],
+        );
+
+        final impactMinor = ((diff * b.buyPriceMinor) / 1000).round();
+        newEntries.add(
+          InventoryReconciliationEntry(
+            id: '${nowMs}_${b.id}',
+            dateIso: iso,
+            epochMs: nowMs,
+            batchId: b.id,
+            qatTypeName: b.qatTypeName,
+            unit: b.unit,
+            currency: b.currency,
+            systemQtyMilli: b.remainingQtyMilli,
+            countedQtyMilli: safeCounted,
+            diffQtyMilli: diff,
+            unitCostMinor: b.buyPriceMinor,
+            financialImpactMinor: impactMinor,
+            notes: notes.trim(),
+            createdBy: createdBy,
+          ),
+        );
+      }
+    });
+
+    if (newEntries.isNotEmpty) {
+      final merged = [...newEntries, ...existingLogs]
+          .take(250)
+          .map((e) => e.toJson())
+          .toList();
+      await setSetting('inventory_reconciliation_v1', jsonEncode(merged));
+    }
   }
 
   // ---------------------------------------------------------------------------
