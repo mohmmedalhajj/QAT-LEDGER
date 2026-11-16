@@ -120,7 +120,7 @@ class QatRepository {
       'saved_printer_address': s.savedPrinterAddress,
       'printer_paper_mm': s.printerPaperMm.toString(),
     };
-    await db.transaction((txn) async {
+    await db.transaction<void>((txn) async {
       for (final e in pairs.entries) {
         await txn.insert(
           'app_settings',
@@ -326,7 +326,7 @@ class QatRepository {
       'notes': notes.trim(),
     };
     if (id != null && id > 0) {
-      await db.transaction((txn) async {
+      await db.transaction<void>((txn) async {
         await txn.update('customers', data, where: 'id = ?', whereArgs: [id]);
         await txn.update('sales', {'customer_name': cleanName},
             where: 'customer_id = ?', whereArgs: [id]);
@@ -462,7 +462,7 @@ class QatRepository {
         ? PaymentType.paid
         : (finalTotals.paidAmountMinor == 0 ? PaymentType.credit : PaymentType.partial);
 
-    return db.transaction((txn) async {
+    return db.transaction<int>((txn) async {
       // 1. Validate and deduct inventory batches atomically
       for (final item in items) {
         if (item.qtyMilli <= 0) {
@@ -596,7 +596,7 @@ class QatRepository {
         ? PaymentType.paid
         : (totals.paidAmountMinor == 0 ? PaymentType.credit : PaymentType.partial);
 
-    await db.transaction((txn) async {
+    await db.transaction<void>((txn) async {
       final rows = await txn.query('sales', where: 'id = ?', whereArgs: [saleId], limit: 1);
       if (rows.isEmpty) throw StateError('فاتورة المبيعات غير موجودة.');
       final old = rows.first;
@@ -714,7 +714,7 @@ class QatRepository {
 
   Future<void> deleteSale(int saleId) async {
     final db = await _db;
-    await db.transaction((txn) async {
+    await db.transaction<void>((txn) async {
       final rows = await txn.query('sales', where: 'id = ?', whereArgs: [saleId], limit: 1);
       if (rows.isEmpty) return;
       final sale = rows.first;
@@ -787,7 +787,7 @@ class QatRepository {
     final ts = dateMs ?? DateTime.now().millisecondsSinceEpoch;
     final iso = QatDateUtils.toIsoDate(DateTime.fromMillisecondsSinceEpoch(ts));
 
-    return db.transaction((txn) async {
+    return db.transaction<int>((txn) async {
       final id = await txn.insert('customer_payments', {
         'customer_id': customerId,
         'customer_name': customerName.trim(),
@@ -811,7 +811,7 @@ class QatRepository {
 
   Future<void> deleteCustomerPayment(int paymentId) async {
     final db = await _db;
-    await db.transaction((txn) async {
+    await db.transaction<void>((txn) async {
       final rows = await txn.query(
         'customer_payments',
         where: 'id = ?',
@@ -874,7 +874,7 @@ class QatRepository {
       'notes': notes.trim(),
     };
     if (id != null && id > 0) {
-      await db.transaction((txn) async {
+      await db.transaction<void>((txn) async {
         await txn.update('suppliers', data, where: 'id = ?', whereArgs: [id]);
         await txn.update('supplier_purchases', {'supplier_name': cleanName},
             where: 'supplier_id = ?', whereArgs: [id]);
@@ -988,7 +988,7 @@ class QatRepository {
         ? PaymentType.paid
         : (totals.paidAmountMinor == 0 ? PaymentType.credit : PaymentType.partial);
 
-    return db.transaction((txn) async {
+    return db.transaction<int>((txn) async {
       final purchaseId = await txn.insert('supplier_purchases', {
         'purchase_number': 'TMP-$ts',
         'supplier_id': supplierId,
@@ -1076,7 +1076,7 @@ class QatRepository {
     if (newItems.isEmpty) throw ArgumentError('يجب وجود صنف واحد على الأقل.');
     final db = await _db;
 
-    await db.transaction((txn) async {
+    await db.transaction<void>((txn) async {
       final rows = await txn.query(
         'supplier_purchases',
         where: 'id = ?',
@@ -1223,7 +1223,7 @@ class QatRepository {
 
   Future<void> deleteSupplierPurchase(int purchaseId) async {
     final db = await _db;
-    await db.transaction((txn) async {
+    await db.transaction<void>((txn) async {
       final rows = await txn.query(
         'supplier_purchases',
         where: 'id = ?',
@@ -1280,7 +1280,7 @@ class QatRepository {
     final ts = dateMs ?? DateTime.now().millisecondsSinceEpoch;
     final iso = QatDateUtils.toIsoDate(DateTime.fromMillisecondsSinceEpoch(ts));
 
-    return db.transaction((txn) async {
+    return db.transaction<int>((txn) async {
       final id = await txn.insert('supplier_payments', {
         'supplier_id': supplierId,
         'supplier_name': supplierName.trim(),
@@ -1304,7 +1304,7 @@ class QatRepository {
 
   Future<void> deleteSupplierPayment(int paymentId) async {
     final db = await _db;
-    await db.transaction((txn) async {
+    await db.transaction<void>((txn) async {
       final rows = await txn.query(
         'supplier_payments',
         where: 'id = ?',
@@ -1523,7 +1523,7 @@ class QatRepository {
       'notes': notes.trim(),
     };
     if (id != null && id > 0) {
-      await db.transaction((txn) async {
+      await db.transaction<void>((txn) async {
         await txn.update('transfer_recipients', data, where: 'id = ?', whereArgs: [id]);
         await txn.update('money_transfers', {'receiver_name': cleanName},
             where: 'recipient_id = ?', whereArgs: [id]);
@@ -1982,7 +1982,7 @@ class QatRepository {
     if (!allowed.contains(tableName)) throw ArgumentError('جدول غير مدعوم للأرشفة: $tableName');
     final db = await _db;
 
-    await db.transaction((txn) async {
+    await db.transaction<void>((txn) async {
       final rows = await txn.query(tableName, where: 'id = ?', whereArgs: [id], limit: 1);
       if (rows.isEmpty) return;
       final r = rows.first;

@@ -144,7 +144,7 @@ class RoomMigrator {
       return res.isNotEmpty;
     }
 
-    await targetDb.transaction((txn) async {
+    await targetDb.transaction<void>((txn) async {
       // Clear target tables in safe dependency order only if importing a fresh migration
       const clearOrder = [
         'money_transfers',

@@ -669,7 +669,7 @@ class _RecipientStatusReportPageState extends State<_RecipientStatusReportPage> 
       firstDate: DateTime(2020),
       lastDate: DateTime(now.year + 1),
     );
-    if (range == null) return;
+    if (range == null || !mounted) return;
     setState(() {
       _preset = _ReportPeriodPreset.custom;
       _fromIso = QatDateUtils.toIsoDate(range.start);
@@ -866,7 +866,7 @@ class _FinancialReportsViewState extends State<_FinancialReportsView> {
         firstDate: DateTime(2020),
         lastDate: DateTime(DateTime.now().year + 1),
       );
-      if (range == null) return;
+      if (range == null || !mounted) return;
       setState(() {
         _preset = _ReportPeriodPreset.custom;
         _fromIso = QatDateUtils.toIsoDate(range.start);

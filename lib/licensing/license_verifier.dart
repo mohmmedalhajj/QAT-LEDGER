@@ -127,7 +127,7 @@ class OfflineLicenseVerifier {
     int? remDays;
     if (!payload.isPerpetual()) {
       final diffMs = payload.expiresAtEpochMs - clock.effectiveNowMs;
-      remDays = (diffMs / const Duration(days: 1).inMilliseconds).ceil().clamp(0, 99999);
+      remDays = (diffMs / Duration.millisecondsPerDay).ceil().clamp(0, 99999);
     }
 
     return LicenseVerificationResult(

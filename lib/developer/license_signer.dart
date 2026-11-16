@@ -85,7 +85,7 @@ class DeveloperLicenseSigner {
     );
 
     final db = await devDb.database;
-    await db.transaction((txn) async {
+    await db.transaction<void>((txn) async {
       await txn.insert('issued_licenses', {
         'license_id': licenseId,
         'plan_code': payload.planCode,
