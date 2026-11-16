@@ -1,0 +1,165 @@
+name: Flutter Analyze, Test & Release APK Build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter SDK (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Linux SQLite runtime for sqflite_common_ffi
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-0 libsqlite3-dev zip
+
+      - name: Show toolchain & environment info
+        run: |
+          flutter --version
+          dart --version
+          java -version
+          ls -l /dev/kvm || echo "NO_KVM_DEVICE"
+
+      - name: Fetch Dart & Flutter packages
+        run: flutter pub get
+
+      - name: Run Flutter static analyzer
+        run: flutter analyze
+
+      - name: Run unit & widget tests
+        run: flutter test -r expanded
+
+      - name: Ensure Android Gradle wrapper exists
+        run: |
+          if [ ! -f android/gradlew ]; then
+            flutter create --platforms=android --org com.aistudio.tofanqat /tmp/flutter_gradle_scaffold
+            cp /tmp/flutter_gradle_scaffold/android/gradlew android/gradlew
+            cp /tmp/flutter_gradle_scaffold/android/gradlew.bat android/gradlew.bat
+            mkdir -p android/gradle/wrapper
+            cp /tmp/flutter_gradle_scaffold/android/gradle/wrapper/gradle-wrapper.jar android/gradle/wrapper/gradle-wrapper.jar
+            chmod +x android/gradlew
+          fi
+
+      - name: Configure original release keystore from GitHub Secrets
+        id: keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > android/app/release.jks
+            printf "storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n" \
+              "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
+            echo "signed_by=release_keystore" >> "$GITHUB_OUTPUT"
+            echo "Release keystore configured cleanly from GitHub Secrets."
+          else
+            echo "signed_by=debug_fallback" >> "$GITHUB_OUTPUT"
+            echo "::warning::Release keystore secrets missing (KEYSTORE_B64/KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD); signed with debug key."
+          fi
+
+      - name: Build Customer Release APK (Top Priority)
+        env:
+          QAT_LICENSE_PUBLIC_KEYS: ${{ secrets.QAT_LICENSE_PUBLIC_KEYS }}
+        run: |
+          flutter build apk --release --flavor customer \
+            --dart-define=APP_EDITION=customer \
+            --dart-define=QAT_LICENSE_PUBLIC_KEYS="${QAT_LICENSE_PUBLIC_KEYS}"
+
+      - name: Build Developer Release APK
+        env:
+          QAT_LICENSE_PUBLIC_KEYS: ${{ secrets.QAT_LICENSE_PUBLIC_KEYS }}
+        run: |
+          flutter build apk --release --flavor developer \
+            --dart-define=APP_EDITION=developer \
+            --dart-define=QAT_LICENSE_PUBLIC_KEYS="${QAT_LICENSE_PUBLIC_KEYS}"
+
+      - name: Verify APK manifests, package IDs, signatures, and bundle deliverables
+        run: |
+          mkdir -p ci-dist
+          cp build/app/outputs/flutter-apk/app-customer-release.apk ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk
+          cp build/app/outputs/flutter-apk/app-developer-release.apk ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk
+          git archive --format=zip --output=ci-dist/QAT_LEDGER_FLUTTER_SOURCE.zip HEAD -- . ':!backup'
+
+          BUILD_TOOLS_DIR=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)
+          AAPT2="$BUILD_TOOLS_DIR/aapt2"
+          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
+          echo "Using aapt2: $AAPT2"
+          echo "Using apksigner: $APKSIGNER"
+
+          "$AAPT2" dump badging ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk | head -n 20 | tee ci-dist/customer-badging.txt
+          "$AAPT2" dump badging ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk | head -n 20 | tee ci-dist/developer-badging.txt
+          grep -q "package: name='com.aistudio.tofanqat.nxzwmb'" ci-dist/customer-badging.txt
+          grep -q "package: name='com.aistudio.tofanqat.nxzwmb.dev'" ci-dist/developer-badging.txt
+
+          "$APKSIGNER" verify --print-certs --verbose ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk | tee ci-dist/customer-signature.txt
+          "$APKSIGNER" verify --print-certs --verbose ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk | tee ci-dist/developer-signature.txt
+
+          (cd ci-dist && sha256sum QAT_LEDGER_CUSTOMER_RELEASE.apk QAT_LEDGER_DEVELOPER_RELEASE.apk QAT_LEDGER_FLUTTER_SOURCE.zip | tee SHA256SUMS.txt)
+          ls -lh ci-dist/
+
+      - name: Smoke-test Customer & Developer APKs on Android Emulator (when KVM available)
+        if: always()
+        run: |
+          if [ ! -f ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk ]; then
+            echo "Customer APK was not built; skipping emulator smoke test." | tee ci-dist/emulator_smoke.log
+            exit 0
+          fi
+          if [ ! -e /dev/kvm ]; then
+            echo "NO_KVM_DEVICE: Android Emulator hardware virtualization unavailable on this runner; install/launch test NOT EXECUTED." | tee ci-dist/emulator_smoke.log
+            exit 0
+          fi
+          SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator" "system-images;android-34;default;x86_64"
+          echo "no" | "$SDK_ROOT/cmdline-tools/latest/bin/avdmanager" create avd -f -n qat_smoke -k "system-images;android-34;default;x86_64" --abi x86_64
+          nohup "$SDK_ROOT/emulator/emulator" -avd qat_smoke -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect > ci-dist/emulator_boot.log 2>&1 &
+          EMU_PID=$!
+          "$SDK_ROOT/platform-tools/adb" wait-for-device
+          for i in $(seq 1 90); do
+            BOOT=$("$SDK_ROOT/platform-tools/adb" shell getprop sys.boot_completed | tr -d '\r')
+            if [ "$BOOT" = "1" ]; then break; fi
+            sleep 2
+          done
+          "$SDK_ROOT/platform-tools/adb" logcat -c
+          "$SDK_ROOT/platform-tools/adb" install -r ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk | tee ci-dist/emulator_smoke.log
+          "$SDK_ROOT/platform-tools/adb" shell am start -W -n com.aistudio.tofanqat.nxzwmb/.MainActivity | tee -a ci-dist/emulator_smoke.log
+          sleep 6
+          CUST_PID=$("$SDK_ROOT/platform-tools/adb" shell pidof com.aistudio.tofanqat.nxzwmb || true)
+          echo "CUSTOMER_PID=$CUST_PID" | tee -a ci-dist/emulator_smoke.log
+          "$SDK_ROOT/platform-tools/adb" exec-out screencap -p > ci-dist/customer_launch.png || true
+          "$SDK_ROOT/platform-tools/adb" logcat -d -s AndroidRuntime:E flutter:E >> ci-dist/emulator_smoke.log
+          if [ -f ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk ]; then
+            "$SDK_ROOT/platform-tools/adb" install -r ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk | tee -a ci-dist/emulator_smoke.log
+            "$SDK_ROOT/platform-tools/adb" shell am start -W -n com.aistudio.tofanqat.nxzwmb.dev/.MainActivity | tee -a ci-dist/emulator_smoke.log
+            sleep 5
+            DEV_PID=$("$SDK_ROOT/platform-tools/adb" shell pidof com.aistudio.tofanqat.nxzwmb.dev || true)
+            echo "DEVELOPER_PID=$DEV_PID" | tee -a ci-dist/emulator_smoke.log
+          fi
+          kill "$EMU_PID" || true
+          test -n "$CUST_PID"
+
+      - name: Upload release APKs and verification reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qat-ledger-release-apks
+          path: ci-dist/
