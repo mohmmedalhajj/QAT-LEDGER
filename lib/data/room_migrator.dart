@@ -91,7 +91,9 @@ class RoomMigrator {
       // Checkpoint WAL & verify integrity before importing
       try {
         await sourceDb.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
-      } catch (_) {}
+      } catch (_) {
+        // Legacy Room source may be opened without active WAL; continue to integrity check.
+      }
       final integrityRows = await sourceDb.rawQuery('PRAGMA integrity_check');
       final integrityOk = integrityRows.isNotEmpty &&
           integrityRows.first.values.first?.toString().toLowerCase() == 'ok';

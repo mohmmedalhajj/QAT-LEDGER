@@ -439,13 +439,19 @@ class _AgencyOnboardingScreenState extends State<AgencyOnboardingScreen> {
                 children: [
                   Text('نظام العملة والمظهر', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  for (final m in CurrencyMode.values)
-                    RadioListTile<CurrencyMode>(
-                      value: m,
-                      groupValue: _currencyMode,
-                      title: Text(m.arabicLabel),
-                      onChanged: (v) => setState(() => _currencyMode = v ?? CurrencyMode.yerOnly),
+                  RadioGroup<CurrencyMode>(
+                    groupValue: _currencyMode,
+                    onChanged: (v) => setState(() => _currencyMode = v ?? CurrencyMode.yerOnly),
+                    child: Column(
+                      children: [
+                        for (final m in CurrencyMode.values)
+                          RadioListTile<CurrencyMode>(
+                            value: m,
+                            title: Text(m.arabicLabel),
+                          ),
+                      ],
                     ),
+                  ),
                   if (_currencyMode == CurrencyMode.dualCurrency) ...[
                     const SizedBox(height: 6),
                     AccountingNumberField(

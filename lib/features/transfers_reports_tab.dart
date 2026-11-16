@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
@@ -98,7 +100,7 @@ class _TransfersLedgerViewState extends State<_TransfersLedgerView> {
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<int?>(
-                  value: selectedRecipientId,
+                  initialValue: selectedRecipientId,
                   decoration: const InputDecoration(labelText: 'المستلم المسجل (اختياري)'),
                   items: [
                     const DropdownMenuItem<int?>(
@@ -633,7 +635,7 @@ class _RecipientStatusReportPageState extends State<_RecipientStatusReportPage> 
   @override
   void initState() {
     super.initState();
-    _load();
+    unawaited(_load());
   }
 
   Future<void> _load() async {
@@ -845,7 +847,7 @@ class _FinancialReportsViewState extends State<_FinancialReportsView> {
   @override
   void initState() {
     super.initState();
-    _load();
+    unawaited(_load());
   }
 
   Future<void> _load() async {
@@ -1238,7 +1240,7 @@ class _ArchiveCenterViewState extends State<_ArchiveCenterView> {
         subtitle: 'تم إخفاء مركز الأرشيف من إدارة الصلاحيات',
       );
     }
-    return FutureBuilder<List<_ArchivedRow>>(
+    return FutureBuilder<List<({String table, int id, String title, String subtitle})>>(
       future: _loadArchived(ctrl),
       builder: (context, snap) {
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());

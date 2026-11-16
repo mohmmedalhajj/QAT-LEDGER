@@ -80,11 +80,11 @@ abstract final class LicenseCanonical {
     required LicensePayload payload,
     required List<int> signatureBytes,
   }) {
-    final obj = {
+    final obj = <String, Object?>{
       'format': licenseEnvelopeFormat,
       'keyId': keyId,
       'algorithm': algorithmEd25519,
-      'payload': jsonDecode(serializePayloadCanonical(payload)),
+      'payload': jsonDecode(serializePayloadCanonical(payload)) as Object?,
       'signature': encodeBase64UrlNoPad(signatureBytes),
     };
     return const JsonEncoder.withIndent('  ').convert(obj);
@@ -146,9 +146,9 @@ abstract final class LicenseCanonical {
     if (fmt != canonicalPayloadFormat) {
       throw FormatException('نسخة حمولة الترخيص غير مدعومة: $fmt');
     }
-    final rawFeatures = map['features'];
+    final Object? rawFeatures = map['features'];
     final features = <String>[];
-    if (rawFeatures is List) {
+    if (rawFeatures is List<Object?>) {
       for (final f in rawFeatures) {
         features.add(f.toString());
       }

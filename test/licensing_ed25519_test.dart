@@ -19,7 +19,7 @@ void main() {
     final keyId = TrustedPublicKeyRegistry.computeKeyIdFromRaw(pub.bytes);
     final registry = TrustedPublicKeyRegistry.fromCsv(spkiB64);
 
-    final payload = LicensePayload(
+    const payload = LicensePayload(
       format: LicenseCanonical.canonicalPayloadFormat,
       licenseId: 'QAT-2026-ABCD1234',
       product: 'QAT_LEDGER',
@@ -31,7 +31,7 @@ void main() {
       expiresAtEpochMs: 1731536000000,
       installationId: 'QLD-1111-2222-3333-4444',
       maxDevices: 1,
-      features: const ['REPORTS', 'BACKUP'],
+      features: ['REPORTS', 'BACKUP'],
     );
 
     final canonicalStr = LicenseCanonical.serializePayloadCanonical(payload);

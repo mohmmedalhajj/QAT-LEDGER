@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class TrustedTimeGuard {
   TrustedTimeGuard({
     SharedPreferences? prefs,
-    this.maxAllowedRollbackMs = const Duration(hours: 6).inMilliseconds,
+    this.maxAllowedRollbackMs = Duration.millisecondsPerHour * 6,
   }) : _prefs = prefs;
 
   static const String _prefMaxSeenMs = 'qat_license_max_seen_epoch_ms';

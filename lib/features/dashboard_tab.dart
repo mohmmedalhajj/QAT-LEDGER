@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import '../core/money.dart';
 import '../core/theme.dart';
 import '../data/models.dart';
-import '../licensing/license_models.dart';
 import '../state/app_controller.dart';
 import 'widgets/common_widgets.dart';
 
@@ -334,8 +333,12 @@ class _DualCurrencyEstimateCard extends StatelessWidget {
     final pal = context.pal;
     final yerSales = metricsByCurrency[CurrencyCode.yer]?.salesTotalMinor ?? 0;
     final sarSales = metricsByCurrency[CurrencyCode.sar]?.salesTotalMinor ?? 0;
-    final sarAsYer = policy.convertSarMinorToYerPreview(sarSales) ?? 0;
-    final combinedYer = yerSales + sarAsYer;
+    final sarAsYer = policy.convertSarMinorToYerPreview(sarSales);
+    final combinedBig = sarAsYer == null
+        ? null
+        : BigInt.from(yerSales) + BigInt.from(sarAsYer);
+    final combinedYer =
+        combinedBig != null && combinedBig.isValidInt ? combinedBig.toInt() : null;
 
     return Card(
       color: pal.accentSoft,
@@ -358,7 +361,9 @@ class _DualCurrencyEstimateCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              Money(combinedYer, CurrencyCode.yer).format(),
+              combinedYer == null
+                  ? 'تجاوز الحد الأقصى للعرض'
+                  : Money(combinedYer, CurrencyCode.yer).format(),
               style: TextStyle(
                 fontSize: 19,
                 fontWeight: FontWeight.w700,

@@ -86,7 +86,7 @@ class _ExpensesAndAccountsView extends StatelessWidget {
                 const SizedBox(height: 8),
                 if (ctrl.accounts.isNotEmpty)
                   DropdownButtonFormField<int>(
-                    value: selectedAcc?.id,
+                    initialValue: selectedAcc?.id,
                     decoration: const InputDecoration(labelText: 'حساب / بند المصروف'),
                   items: ctrl.accounts
                       .where((a) => a.isActive)
@@ -378,13 +378,19 @@ class _BrandingCurrencyThemeViewState extends State<_BrandingCurrencyThemeView> 
               children: [
                 Text('إدارة العملة المركزية', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
-                for (final m in CurrencyMode.values)
-                  RadioListTile<CurrencyMode>(
-                    value: m,
-                    groupValue: _mode,
-                    title: Text(m.arabicLabel),
-                    onChanged: (v) => setState(() => _mode = v ?? CurrencyMode.yerOnly),
+                RadioGroup<CurrencyMode>(
+                  groupValue: _mode,
+                  onChanged: (v) => setState(() => _mode = v ?? CurrencyMode.yerOnly),
+                  child: Column(
+                    children: [
+                      for (final m in CurrencyMode.values)
+                        RadioListTile<CurrencyMode>(
+                          value: m,
+                          title: Text(m.arabicLabel),
+                        ),
+                    ],
                   ),
+                ),
                 if (_mode == CurrencyMode.dualCurrency) ...[
                   const SizedBox(height: 6),
                   AccountingNumberField(

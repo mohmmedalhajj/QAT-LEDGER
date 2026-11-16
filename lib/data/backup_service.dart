@@ -75,7 +75,9 @@ class BackupService {
     } catch (_) {
       try {
         await db.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
-      } catch (_) {}
+      } catch (_) {
+        // Best-effort WAL checkpoint before copying database file.
+      }
       await File(dbPath).copy(stagedDbPath);
     }
 

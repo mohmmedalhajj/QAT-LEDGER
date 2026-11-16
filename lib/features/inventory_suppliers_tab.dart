@@ -718,11 +718,11 @@ class _SuppliersDirectoryViewState extends State<_SuppliersDirectoryView> {
                               label: const Text('سند صرف'),
                             ),
                             OutlinedButton.icon(
-                              onPressed: () {
+                              onPressed: () async {
                                 final payments = ctrl.supplierPayments
                                     .where((p) => p.supplierId == s.id)
                                     .toList();
-                                showDialog<void>(
+                                await showDialog<void>(
                                   context: context,
                                   builder: (ctx) => AlertDialog(
                                     title: Text('سندات صرف — ${s.name}'),

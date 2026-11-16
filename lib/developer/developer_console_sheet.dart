@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -54,7 +55,7 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
     super.initState();
     _tabs = TabController(length: 3, vsync: this);
     _signer = DeveloperLicenseSigner(keyManager: widget.keyManager, devDb: widget.devDb);
-    _loadAll();
+    unawaited(_loadAll());
   }
 
   @override
@@ -168,7 +169,9 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  value: _plans.any((p) => p['code'] == _selectedPlan) ? _selectedPlan : null,
+                  key: ValueKey('plan_${_plans.length}_$_selectedPlan'),
+                  initialValue:
+                      _plans.any((p) => p['code'] == _selectedPlan) ? _selectedPlan : null,
                   decoration: const InputDecoration(labelText: 'الباقة'),
                   items: _plans
                       .map((pl) => DropdownMenuItem<String>(

@@ -174,16 +174,18 @@ class AppController extends ChangeNotifier {
     final usersJson = await _repo.getSetting('app_users_json');
     if (usersJson != null && usersJson.isNotEmpty) {
       try {
-        final decoded = jsonDecode(usersJson);
-        if (decoded is List) {
+        final Object? decoded = jsonDecode(usersJson);
+        if (decoded is List<Object?>) {
           _users = decoded
-              .whereType<Map<dynamic, dynamic>>()
+              .whereType<Map<Object?, Object?>>()
               .map((m) => AppUser.fromJson(
                     m.map((k, v) => MapEntry(k.toString(), v)),
                   ))
               .toList();
         }
-      } catch (_) {}
+      } catch (_) {
+        // Ignore malformed persisted user list and fall back to defaults.
+      }
     }
     if (_users.isEmpty) {
       _users = [
@@ -207,13 +209,15 @@ class AppController extends ChangeNotifier {
     final secJson = await _repo.getSetting('section_permissions_json');
     if (secJson != null && secJson.isNotEmpty) {
       try {
-        final map = jsonDecode(secJson);
-        if (map is Map<dynamic, dynamic>) {
+        final Object? map = jsonDecode(secJson);
+        if (map is Map<Object?, Object?>) {
           _sectionPermissions = SectionPermissions.fromJson(
             map.map((k, v) => MapEntry(k.toString(), v)),
           );
         }
-      } catch (_) {}
+      } catch (_) {
+        // Ignore malformed persisted section permissions JSON.
+      }
     }
   }
 

@@ -114,11 +114,16 @@ class PlatformBridge {
     try {
       final raw = await _channel.invokeMapMethod<String, dynamic>('getLegacyMigrationSources');
       if (raw == null) return LegacyMigrationSources.empty;
-      final prefsRaw = (raw['legacyPrefs'] as Map?) ?? {};
+      final prefsRaw = raw['legacyPrefs'];
       final prefs = <String, Map<String, Object?>>{};
-      for (final entry in prefsRaw.entries) {
-        final sub = (entry.value as Map?) ?? {};
-        prefs[entry.key.toString()] = sub.map((k, v) => MapEntry(k.toString(), v));
+      if (prefsRaw is Map<Object?, Object?>) {
+        for (final entry in prefsRaw.entries) {
+          final sub = entry.value;
+          if (sub is Map<Object?, Object?>) {
+            prefs[entry.key.toString()] =
+                sub.map((k, v) => MapEntry(k.toString(), v));
+          }
+        }
       }
       return LegacyMigrationSources(
         legacyRoomDbExists: (raw['legacyRoomDbExists'] as bool?) ?? false,

@@ -53,7 +53,7 @@ class PdfExportService {
           _infoRow('حالة الدفع:', sale.paymentType.arabicLabel),
           pw.SizedBox(height: 12),
           pw.TableHelper.fromTextArray(
-            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.white),
+            headerStyle: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.white),
             headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF144D3A)),
             cellStyle: const pw.TextStyle(fontSize: 9.5),
             cellAlignment: pw.Alignment.centerRight,
@@ -138,7 +138,7 @@ class PdfExportService {
           _summaryBox(summaryLines),
           pw.SizedBox(height: 12),
           pw.TableHelper.fromTextArray(
-            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9.5, color: PdfColors.white),
+            headerStyle: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9.5, color: PdfColors.white),
             headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF144D3A)),
             cellStyle: const pw.TextStyle(fontSize: 9),
             cellAlignment: pw.Alignment.centerRight,
@@ -202,13 +202,13 @@ class PdfExportService {
                   padding: const pw.EdgeInsets.symmetric(vertical: 6),
                   child: pw.Text(
                     _ar('دفتر العملة: ${cur.arabicName} (${cur.code})'),
-                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12),
+                    style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12),
                   ),
                 ),
               );
               widgets.add(
                 pw.TableHelper.fromTextArray(
-                  headerStyle: pw.TextStyle(
+                  headerStyle: const pw.TextStyle(
                       fontWeight: pw.FontWeight.bold, fontSize: 9.5, color: PdfColors.white),
                   headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF144D3A)),
                   cellStyle: const pw.TextStyle(fontSize: 9),
@@ -268,7 +268,7 @@ class PdfExportService {
             final m = entry.value;
             widgets.add(pw.Text(
               _ar('ملخص ${cur.arabicName} (${cur.code})'),
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12),
+              style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12),
             ));
             widgets.add(pw.SizedBox(height: 6));
             widgets.add(_summaryBox([
@@ -303,10 +303,10 @@ class PdfExportService {
         children: [
           pw.Text(
             _ar(agency.agencyName),
-            style: pw.TextStyle(
+            style: const pw.TextStyle(
               fontWeight: pw.FontWeight.bold,
               fontSize: 16,
-              color: const PdfColor.fromInt(0xFF144D3A),
+              color: PdfColor.fromInt(0xFF144D3A),
             ),
           ),
           if (agency.agencyPhone.isNotEmpty || agency.agencyAddress.isNotEmpty)
@@ -317,7 +317,7 @@ class PdfExportService {
           pw.Divider(color: const PdfColor.fromInt(0xFFB8862D)),
           pw.Text(
             _ar(title),
-            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13),
+            style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13),
           ),
         ],
       ),
@@ -332,7 +332,7 @@ class PdfExportService {
         children: [
           pw.Text(_ar(value), style: const pw.TextStyle(fontSize: 10)),
           pw.SizedBox(width: 6),
-          pw.Text(_ar(label), style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
+          pw.Text(_ar(label), style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
         ],
       ),
     );
@@ -353,7 +353,7 @@ class PdfExportService {
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text(_ar(pair.$2), style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
+                    pw.Text(_ar(pair.$2), style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
                     pw.Text(_ar(pair.$1), style: const pw.TextStyle(fontSize: 10)),
                   ],
                 ),

@@ -4,6 +4,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:qat_ledger/core/money.dart';
+import 'package:qat_ledger/core/theme.dart';
 import 'package:qat_ledger/data/models.dart';
 import 'package:qat_ledger/services/esc_pos_service.dart';
 import 'package:qat_ledger/services/pdf_export_service.dart';
@@ -28,7 +29,7 @@ void main() {
       printerPaperMm: 80,
     );
 
-    final sale = Sale(
+    const sale = Sale(
       id: 1,
       invoiceNumber: 'INV-20261115-0001',
       customerId: 1,
@@ -47,7 +48,7 @@ void main() {
       status: 'دفع جزئي',
       notes: 'فاتورة اختبارية',
       isArchived: false,
-      items: const [
+      items: [
         SaleItem(
           id: 1,
           saleId: 1,
@@ -70,8 +71,8 @@ void main() {
     expect(pdfBytes.length, greaterThan(1500));
     expect(String.fromCharCodes(pdfBytes.take(5)), '%PDF-');
 
-    final summary = TransferRecipientSummary(
-      recipient: const TransferRecipient(
+    const summary = TransferRecipientSummary(
+      recipient: TransferRecipient(
         id: 1,
         name: 'عادل المستلم',
         phone: '771222333',
@@ -83,11 +84,11 @@ void main() {
       deliveredCount: 1,
       pendingCount: 0,
       cancelledCount: 0,
-      deliveredByCurrency: const {CurrencyCode.yer: 2500000},
-      pendingByCurrency: const {},
-      cancelledByCurrency: const {},
-      feesByCurrency: const {CurrencyCode.yer: 5000},
-      transfers: const [
+      deliveredByCurrency: {CurrencyCode.yer: 2500000},
+      pendingByCurrency: {},
+      cancelledByCurrency: {},
+      feesByCurrency: {CurrencyCode.yer: 5000},
+      transfers: [
         MoneyTransfer(
           id: 1,
           senderName: 'الوكالة',

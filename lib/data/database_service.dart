@@ -36,7 +36,9 @@ class DatabaseService {
           if (dbPath != ':memory:') {
             try {
               await db.rawQuery('PRAGMA journal_mode = WAL');
-            } catch (_) {}
+            } catch (_) {
+              // Fall back to default SQLite journal mode when WAL is unsupported.
+            }
           }
         },
         onCreate: (db, version) async {

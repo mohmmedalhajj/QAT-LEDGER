@@ -87,9 +87,13 @@ class CurrencyPolicy {
   /// Never use this to overwrite or merge persisted accounting ledgers.
   int? convertSarMinorToYerPreview(int sarMinor) {
     if (!hasExplicitDisplayRate) return null;
-    return ((BigInt.from(sarMinor) * BigInt.from(userDisplaySarToYerMilli)) +
-            BigInt.from(500)) ~/
-        BigInt.from(1000);
+    final numerator =
+        BigInt.from(sarMinor) * BigInt.from(userDisplaySarToYerMilli);
+    final BigInt rounded = numerator >= BigInt.zero
+        ? (numerator + BigInt.from(500)) ~/ BigInt.from(1000)
+        : -(((-numerator) + BigInt.from(500)) ~/ BigInt.from(1000));
+    if (!rounded.isValidInt) return null;
+    return rounded.toInt();
   }
 }
 
@@ -123,7 +127,7 @@ class Money {
     if (parts.length == 2 && parts[1].isNotEmpty) {
       final fracRaw = parts[1];
       if (!RegExp(r'^\d+$').hasMatch(fracRaw)) return fallback;
-      final padded = (fracRaw + '000').substring(0, 3);
+      final padded = '${fracRaw}000'.substring(0, 3);
       final firstTwo = int.parse(padded.substring(0, 2));
       final thirdDigit = int.parse(padded.substring(2, 3));
       frac = thirdDigit >= 5 ? firstTwo + 1 : firstTwo;
@@ -186,7 +190,7 @@ abstract final class QuantityMath {
     if (parts.length == 2 && parts[1].isNotEmpty) {
       final fracRaw = parts[1];
       if (!RegExp(r'^\d+$').hasMatch(fracRaw)) return fallback;
-      final padded = (fracRaw + '0000').substring(0, 4);
+      final padded = '${fracRaw}0000'.substring(0, 4);
       final firstThree = int.parse(padded.substring(0, 3));
       final fourth = int.parse(padded.substring(3, 4));
       frac = fourth >= 5 ? firstThree + 1 : firstThree;
@@ -218,10 +222,13 @@ abstract final class InvoiceMath {
   /// roundHalfUp(qtyMilli * unitPriceMinor / 1000).
   static int lineTotalMinor({required int qtyMilli, required int unitPriceMinor}) {
     final numerator = BigInt.from(qtyMilli) * BigInt.from(unitPriceMinor);
-    if (numerator >= BigInt.zero) {
-      return ((numerator + BigInt.from(500)) ~/ BigInt.from(1000)).toInt();
+    final BigInt rounded = numerator >= BigInt.zero
+        ? (numerator + BigInt.from(500)) ~/ BigInt.from(1000)
+        : -(((-numerator) + BigInt.from(500)) ~/ BigInt.from(1000));
+    if (!rounded.isValidInt) {
+      throw RangeError('Line total exceeds 64-bit integer bounds');
     }
-    return -(((-numerator) + BigInt.from(500)) ~/ BigInt.from(1000)).toInt();
+    return rounded.toInt();
   }
 
   /// Parses percentage text (e.g., "5" or "2.5") into basis points (500 or 250 bps).

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
@@ -282,7 +284,11 @@ class _PosInvoiceBuilderViewState extends State<_PosInvoiceBuilderView> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int?>(
-                  value: ctrl.customers.any((c) => c.id == _customerId) ? _customerId : null,
+                  key: ValueKey(
+                    'pos_cust_${ctrl.customers.any((c) => c.id == _customerId) ? _customerId : 'none'}',
+                  ),
+                  initialValue:
+                      ctrl.customers.any((c) => c.id == _customerId) ? _customerId : null,
                   decoration: const InputDecoration(labelText: 'العميل'),
                   items: [
                     const DropdownMenuItem<int?>(value: null, child: Text('عميل نقدي (مباشر)')),
@@ -306,7 +312,10 @@ class _PosInvoiceBuilderViewState extends State<_PosInvoiceBuilderView> {
                 Text('إضافة أصناف الفاتورة', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<int?>(
-                  value: availableBatches.any((b) => b.id == _selectedBatchId)
+                  key: ValueKey(
+                    'pos_batch_${activeCur.code}_${availableBatches.any((b) => b.id == _selectedBatchId) ? _selectedBatchId : 'none'}',
+                  ),
+                  initialValue: availableBatches.any((b) => b.id == _selectedBatchId)
                       ? _selectedBatchId
                       : null,
                   decoration: const InputDecoration(labelText: 'دفعة المخزون'),
@@ -563,7 +572,7 @@ class _SalesLedgerViewState extends State<_SalesLedgerView> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<int?>(
-                  value: ctrl.customers.any((c) => c.id == custId) ? custId : null,
+                  initialValue: ctrl.customers.any((c) => c.id == custId) ? custId : null,
                   decoration: const InputDecoration(labelText: 'العميل'),
                   items: [
                     const DropdownMenuItem<int?>(value: null, child: Text('عميل نقدي')),
@@ -1103,7 +1112,8 @@ class _CustomersDirectoryViewState extends State<_CustomersDirectoryView> {
                                   ),
                                   if (c.phone.isNotEmpty)
                                     OutlinedButton.icon(
-                                      onPressed: () => WhatsappShareService.instance.openWhatsApp(
+                                      onPressed: () async =>
+                                          WhatsappShareService.instance.openWhatsApp(
                                         phone: c.phone,
                                         text:
                                             'مرحباً ${c.name}، رصيدكم الحالي لدى ${ctrl.settings.agencyName}:\n'
@@ -1197,7 +1207,8 @@ class _StatementViewState extends State<_StatementView> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
-                  value: partyList.any((e) => e.id == _partyId) ? _partyId : null,
+                  key: ValueKey('stmt_party_${_isCustomer}_$_partyId'),
+                  initialValue: partyList.any((e) => e.id == _partyId) ? _partyId : null,
                   decoration: InputDecoration(
                     labelText: _isCustomer ? 'اختر العميل' : 'اختر المورد',
                   ),
@@ -1206,7 +1217,7 @@ class _StatementViewState extends State<_StatementView> {
                       .toList(),
                   onChanged: (v) {
                     setState(() => _partyId = v);
-                    _loadStatement(ctrl);
+                    unawaited(_loadStatement(ctrl));
                   },
                 ),
                 if (_partyId != null && _lines.isNotEmpty) ...[

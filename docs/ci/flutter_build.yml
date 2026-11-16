@@ -99,7 +99,7 @@ jobs:
           cp build/app/outputs/flutter-apk/app-developer-release.apk ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk
           git archive --format=zip --output=ci-dist/QAT_LEDGER_FLUTTER_SOURCE.zip HEAD -- . ':!backup'
 
-          BUILD_TOOLS_DIR=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)
+          BUILD_TOOLS_DIR=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
           AAPT2="$BUILD_TOOLS_DIR/aapt2"
           APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
           echo "Using aapt2: $AAPT2"
@@ -119,12 +119,13 @@ jobs:
       - name: Smoke-test Customer & Developer APKs on Android Emulator (when KVM available)
         if: always()
         run: |
+          mkdir -p ci-dist
           if [ ! -f ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk ]; then
-            echo "Customer APK was not built; skipping emulator smoke test." | tee ci-dist/emulator_smoke.log
+            echo "NOT_EXECUTED: Customer APK was not built because an earlier build or verification step failed." | tee ci-dist/emulator_smoke.log
             exit 0
           fi
           if [ ! -e /dev/kvm ]; then
-            echo "NO_KVM_DEVICE: Android Emulator hardware virtualization unavailable on this runner; install/launch test NOT EXECUTED." | tee ci-dist/emulator_smoke.log
+            echo "NOT_EXECUTED (NO_KVM_DEVICE): Android Emulator hardware virtualization unavailable on this runner; install/launch test NOT EXECUTED." | tee ci-dist/emulator_smoke.log
             exit 0
           fi
           SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
