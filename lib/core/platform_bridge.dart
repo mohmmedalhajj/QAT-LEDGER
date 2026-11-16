@@ -102,7 +102,9 @@ class PlatformBridge {
     try {
       final raw = await _channel.invokeMapMethod<String, dynamic>('getInstallationHardwareAnchor');
       if (raw != null) {
-        return raw.map((k, v) => MapEntry(k, (v ?? '').toString()));
+        return raw.map<String, String>(
+          (k, v) => MapEntry<String, String>(k, (v ?? '').toString()),
+        );
       }
     } on MissingPluginException {
       // Test/desktop fallback
@@ -120,8 +122,9 @@ class PlatformBridge {
         for (final entry in prefsRaw.entries) {
           final sub = entry.value;
           if (sub is Map<Object?, Object?>) {
-            prefs[entry.key.toString()] =
-                sub.map((k, v) => MapEntry(k.toString(), v));
+            prefs[entry.key.toString()] = sub.map<String, Object?>(
+              (k, v) => MapEntry<String, Object?>(k.toString(), v),
+            );
           }
         }
       }

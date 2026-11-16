@@ -94,7 +94,12 @@ class _InventoryBatchesViewState extends State<_InventoryBatchesView> {
                   DropdownButtonFormField<String>(
                     decoration: const InputDecoration(labelText: 'اختيار من الأصناف المعرفة'),
                     items: ctrl.qatTypes
-                        .map((qt) => DropdownMenuItem(value: qt.name, child: Text(qt.name)))
+                        .map(
+                          (qt) => DropdownMenuItem<String>(
+                            value: qt.name,
+                            child: Text(qt.name),
+                          ),
+                        )
                         .toList(),
                     onChanged: (v) {
                       if (v == null) return;

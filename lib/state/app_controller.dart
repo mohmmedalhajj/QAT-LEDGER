@@ -178,9 +178,13 @@ class AppController extends ChangeNotifier {
         if (decoded is List<Object?>) {
           _users = decoded
               .whereType<Map<Object?, Object?>>()
-              .map((m) => AppUser.fromJson(
-                    m.map((k, v) => MapEntry(k.toString(), v)),
-                  ))
+              .map(
+                (m) => AppUser.fromJson(
+                  m.map<String, dynamic>(
+                    (k, v) => MapEntry<String, dynamic>(k.toString(), v),
+                  ),
+                ),
+              )
               .toList();
         }
       } catch (_) {
@@ -212,7 +216,9 @@ class AppController extends ChangeNotifier {
         final Object? map = jsonDecode(secJson);
         if (map is Map<Object?, Object?>) {
           _sectionPermissions = SectionPermissions.fromJson(
-            map.map((k, v) => MapEntry(k.toString(), v)),
+            map.map<String, dynamic>(
+              (k, v) => MapEntry<String, dynamic>(k.toString(), v),
+            ),
           );
         }
       } catch (_) {

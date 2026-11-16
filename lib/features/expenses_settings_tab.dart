@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -337,6 +338,10 @@ class _BrandingCurrencyThemeViewState extends State<_BrandingCurrencyThemeView> 
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
+    final ImageProvider<Object> logoProvider =
+        (_logoPath.isNotEmpty && File(_logoPath).existsSync())
+            ? FileImage(File(_logoPath))
+            : const AssetImage('assets/images/app_logo.png');
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -415,18 +420,15 @@ class _BrandingCurrencyThemeViewState extends State<_BrandingCurrencyThemeView> 
                   children: [
                     CircleAvatar(
                       radius: 26,
-                      backgroundImage: (_logoPath.isNotEmpty && File(_logoPath).existsSync())
-                          ? FileImage(File(_logoPath))
-                          : const AssetImage('assets/images/app_logo.png') as ImageProvider,
+                      backgroundImage: logoProvider,
                     ),
                     const SizedBox(width: 12),
                     OutlinedButton.icon(
                       onPressed: () async {
                         final picked =
                             await ImagePicker().pickImage(source: ImageSource.gallery);
-                        if (picked != null) {
-                          setState(() => _logoPath = picked.path);
-                        }
+                        if (!mounted || picked == null) return;
+                        setState(() => _logoPath = picked.path);
                       },
                       icon: const Icon(Icons.image_outlined, size: 18),
                       label: const Text('تغيير شعار الوكالة'),
@@ -943,7 +945,7 @@ class _LicenseAndSecurityViewState extends State<_LicenseAndSecurityView> {
                     ),
                     IconButton(
                       onPressed: () {
-                        Clipboard.setData(ClipboardData(text: ctrl.installationId));
+                        unawaited(Clipboard.setData(ClipboardData(text: ctrl.installationId)));
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('تم نسخ معرف الجهاز')),
                         );

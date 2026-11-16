@@ -284,7 +284,7 @@ class _PosInvoiceBuilderViewState extends State<_PosInvoiceBuilderView> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int?>(
-                  key: ValueKey(
+                  key: ValueKey<String>(
                     'pos_cust_${ctrl.customers.any((c) => c.id == _customerId) ? _customerId : 'none'}',
                   ),
                   initialValue:
@@ -312,7 +312,7 @@ class _PosInvoiceBuilderViewState extends State<_PosInvoiceBuilderView> {
                 Text('إضافة أصناف الفاتورة', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<int?>(
-                  key: ValueKey(
+                  key: ValueKey<String>(
                     'pos_batch_${activeCur.code}_${availableBatches.any((b) => b.id == _selectedBatchId) ? _selectedBatchId : 'none'}',
                   ),
                   initialValue: availableBatches.any((b) => b.id == _selectedBatchId)
@@ -1207,7 +1207,7 @@ class _StatementViewState extends State<_StatementView> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
-                  key: ValueKey('stmt_party_${_isCustomer}_$_partyId'),
+                  key: ValueKey<String>('stmt_party_${_isCustomer}_$_partyId'),
                   initialValue: partyList.any((e) => e.id == _partyId) ? _partyId : null,
                   decoration: InputDecoration(
                     labelText: _isCustomer ? 'اختر العميل' : 'اختر المورد',

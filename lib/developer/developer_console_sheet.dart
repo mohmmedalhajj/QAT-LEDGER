@@ -169,7 +169,7 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  key: ValueKey('plan_${_plans.length}_$_selectedPlan'),
+                  key: ValueKey<String>('plan_${_plans.length}_$_selectedPlan'),
                   initialValue:
                       _plans.any((p) => p['code'] == _selectedPlan) ? _selectedPlan : null,
                   decoration: const InputDecoration(labelText: 'الباقة'),
@@ -260,7 +260,9 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: () {
-                            Clipboard.setData(ClipboardData(text: _lastIssued!.compactToken));
+                            unawaited(
+                              Clipboard.setData(ClipboardData(text: _lastIssued!.compactToken)),
+                            );
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('تم نسخ رمز الترخيص QL1')),
                             );
@@ -352,7 +354,7 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
                     onPressed: () {
-                      Clipboard.setData(ClipboardData(text: _keyInfo!.spkiBase64));
+                      unawaited(Clipboard.setData(ClipboardData(text: _keyInfo!.spkiBase64)));
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('تم نسخ المفتاح العام SPKI Base64')),
                       );
