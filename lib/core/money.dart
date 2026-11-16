@@ -247,18 +247,19 @@ abstract final class InvoiceMath {
     int paidMinor = 0,
   }) {
     final subtotal = lineTotalsMinor.fold<int>(0, (a, b) => a + b);
-    final safeDiscount = discountMinor.clamp(0, subtotal < 0 ? 0 : subtotal);
+    final safeDiscount = discountMinor.clamp(0, subtotal < 0 ? 0 : subtotal).toInt();
+    final safeTaxBps = taxBps.clamp(0, 10000).toInt();
     final taxable = subtotal - safeDiscount;
-    final taxAmount = ((BigInt.from(taxable) * BigInt.from(taxBps.clamp(0, 10000))) +
+    final taxAmount = ((BigInt.from(taxable) * BigInt.from(safeTaxBps)) +
             BigInt.from(5000)) ~/
         BigInt.from(10000);
     final total = taxable + taxAmount.toInt();
-    final safePaid = paidMinor.clamp(0, total);
+    final safePaid = paidMinor.clamp(0, total).toInt();
     final remaining = total - safePaid;
     return InvoiceTotals(
       subtotalMinor: subtotal,
       discountMinor: safeDiscount,
-      taxBps: taxBps.clamp(0, 10000),
+      taxBps: safeTaxBps,
       taxAmountMinor: taxAmount.toInt(),
       totalAmountMinor: total,
       paidAmountMinor: safePaid,

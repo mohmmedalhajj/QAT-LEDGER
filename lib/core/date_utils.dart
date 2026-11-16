@@ -43,18 +43,18 @@ abstract final class QatDateUtils {
     final isoMatch = RegExp(r'^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2}))?').firstMatch(clean);
     if (isoMatch != null) {
       final y = int.parse(isoMatch.group(1)!);
-      final m = int.parse(isoMatch.group(2)!).clamp(1, 12);
-      final d = int.parse(isoMatch.group(3)!).clamp(1, 31);
+      final m = int.parse(isoMatch.group(2)!).clamp(1, 12).toInt();
+      final d = int.parse(isoMatch.group(3)!).clamp(1, 31).toInt();
       final hh = int.tryParse(isoMatch.group(4) ?? '12') ?? 12;
       final mm = int.tryParse(isoMatch.group(5) ?? '0') ?? 0;
-      final dt = DateTime(y, m, d, hh.clamp(0, 23), mm.clamp(0, 59));
+      final dt = DateTime(y, m, d, hh.clamp(0, 23).toInt(), mm.clamp(0, 59).toInt());
       return ParsedDate(epochMs: dt.millisecondsSinceEpoch, isoDate: toIsoDate(dt));
     }
 
     final dmyMatch = RegExp(r'^(\d{1,2})[-/](\d{1,2})[-/](\d{4})').firstMatch(clean);
     if (dmyMatch != null) {
-      final d = int.parse(dmyMatch.group(1)!).clamp(1, 31);
-      final m = int.parse(dmyMatch.group(2)!).clamp(1, 12);
+      final d = int.parse(dmyMatch.group(1)!).clamp(1, 31).toInt();
+      final m = int.parse(dmyMatch.group(2)!).clamp(1, 12).toInt();
       final y = int.parse(dmyMatch.group(3)!);
       final dt = DateTime(y, m, d, 12, 0);
       return ParsedDate(epochMs: dt.millisecondsSinceEpoch, isoDate: toIsoDate(dt));

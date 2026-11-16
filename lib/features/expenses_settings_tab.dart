@@ -26,7 +26,7 @@ class ExpensesSettingsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
-    final subTab = ctrl.settingsSubTab.clamp(0, 3);
+    final subTab = ctrl.settingsSubTab.clamp(0, 3).toInt();
 
     return Column(
       children: [

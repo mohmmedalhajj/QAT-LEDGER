@@ -161,8 +161,8 @@ class QatRepository {
     }
     final data = {
       'name': cleanName,
-      'default_buy_price_minor': defaultBuyPriceMinor.clamp(0, 1 << 60),
-      'default_sell_price_minor': defaultSellPriceMinor.clamp(0, 1 << 60),
+      'default_buy_price_minor': defaultBuyPriceMinor.clamp(0, 1 << 60).toInt(),
+      'default_sell_price_minor': defaultSellPriceMinor.clamp(0, 1 << 60).toInt(),
       'default_currency': defaultCurrency.code,
       'notes': notes.trim(),
       'is_hidden': isHidden ? 1 : 0,
@@ -212,11 +212,11 @@ class QatRepository {
       'qat_type_name': qatTypeName.trim(),
       'supplier_id': supplierId,
       'supplier_name': supplierName.trim(),
-      'remaining_qty_milli': qtyMilli.clamp(0, 1 << 60),
-      'initial_qty_milli': qtyMilli.clamp(0, 1 << 60),
+      'remaining_qty_milli': qtyMilli.clamp(0, 1 << 60).toInt(),
+      'initial_qty_milli': qtyMilli.clamp(0, 1 << 60).toInt(),
       'unit': unit.trim().isEmpty ? 'ربطة' : unit.trim(),
-      'buy_price_minor': buyPriceMinor.clamp(0, 1 << 60),
-      'sell_price_minor': sellPriceMinor.clamp(0, 1 << 60),
+      'buy_price_minor': buyPriceMinor.clamp(0, 1 << 60).toInt(),
+      'sell_price_minor': sellPriceMinor.clamp(0, 1 << 60).toInt(),
       'currency_code': currency.code,
       'purchase_date_ms': ts,
       'purchase_date_iso': iso,
@@ -238,10 +238,10 @@ class QatRepository {
       'inventory_batches',
       {
         'qat_type_name': qatTypeName.trim(),
-        'remaining_qty_milli': remainingQtyMilli.clamp(0, 1 << 60),
+        'remaining_qty_milli': remainingQtyMilli.clamp(0, 1 << 60).toInt(),
         'unit': unit.trim().isEmpty ? 'ربطة' : unit.trim(),
-        'buy_price_minor': buyPriceMinor.clamp(0, 1 << 60),
-        'sell_price_minor': sellPriceMinor.clamp(0, 1 << 60),
+        'buy_price_minor': buyPriceMinor.clamp(0, 1 << 60).toInt(),
+        'sell_price_minor': sellPriceMinor.clamp(0, 1 << 60).toInt(),
         'currency_code': currency.code,
       },
       where: 'id = ?',
@@ -448,7 +448,7 @@ class QatRepository {
     final effectivePaidMinor = switch (paymentType) {
       PaymentType.paid => prelimTotals.totalAmountMinor,
       PaymentType.credit => 0,
-      PaymentType.partial => paidAmountMinor.clamp(0, prelimTotals.totalAmountMinor),
+      PaymentType.partial => paidAmountMinor.clamp(0, prelimTotals.totalAmountMinor).toInt(),
     };
 
     final finalTotals = InvoiceMath.computeTotals(
@@ -584,7 +584,7 @@ class QatRepository {
     final effectivePaid = switch (paymentType) {
       PaymentType.paid => prelim.totalAmountMinor,
       PaymentType.credit => 0,
-      PaymentType.partial => paidAmountMinor.clamp(0, prelim.totalAmountMinor),
+      PaymentType.partial => paidAmountMinor.clamp(0, prelim.totalAmountMinor).toInt(),
     };
     final totals = InvoiceMath.computeTotals(
       lineTotalsMinor: lineTotals,
@@ -976,7 +976,7 @@ class QatRepository {
     final effectivePaid = switch (paymentType) {
       PaymentType.paid => prelim.totalAmountMinor,
       PaymentType.credit => 0,
-      PaymentType.partial => paidAmountMinor.clamp(0, prelim.totalAmountMinor),
+      PaymentType.partial => paidAmountMinor.clamp(0, prelim.totalAmountMinor).toInt(),
     };
     final totals = InvoiceMath.computeTotals(
       lineTotalsMinor: lineTotals,
@@ -1117,7 +1117,7 @@ class QatRepository {
       final effectivePaid = switch (paymentType) {
         PaymentType.paid => prelim.totalAmountMinor,
         PaymentType.credit => 0,
-        PaymentType.partial => paidAmountMinor.clamp(0, prelim.totalAmountMinor),
+        PaymentType.partial => paidAmountMinor.clamp(0, prelim.totalAmountMinor).toInt(),
       };
       final totals = InvoiceMath.computeTotals(
         lineTotalsMinor: lineTotals,
@@ -1177,8 +1177,8 @@ class QatRepository {
           final b = matchedBatch.first;
           final oldBatchQty = (b['initial_qty_milli'] as num).toInt();
           final oldRemainingQty = (b['remaining_qty_milli'] as num).toInt();
-          final soldQty = (oldBatchQty - oldRemainingQty).clamp(0, 1 << 60);
-          final newRemainingQty = (it.qtyMilli - soldQty).clamp(0, 1 << 60);
+          final soldQty = (oldBatchQty - oldRemainingQty).clamp(0, 1 << 60).toInt();
+          final newRemainingQty = (it.qtyMilli - soldQty).clamp(0, 1 << 60).toInt();
           await txn.update(
             'inventory_batches',
             {
@@ -1401,7 +1401,7 @@ class QatRepository {
       'description': description.trim(),
       'category': category.trim().isEmpty ? 'مصروفات عامة' : category.trim(),
       'account_id': accountId,
-      'amount_minor': amountMinor.clamp(0, 1 << 60),
+      'amount_minor': amountMinor.clamp(0, 1 << 60).toInt(),
       'currency_code': currency.code,
       'date_ms': ts,
       'date_iso': iso,
@@ -1426,7 +1426,7 @@ class QatRepository {
         'description': description.trim(),
         'category': category.trim().isEmpty ? 'مصروفات عامة' : category.trim(),
         'account_id': accountId,
-        'amount_minor': amountMinor.clamp(0, 1 << 60),
+        'amount_minor': amountMinor.clamp(0, 1 << 60).toInt(),
         'currency_code': currency.code,
         'notes': notes.trim(),
       },
@@ -1481,9 +1481,9 @@ class QatRepository {
     return db.insert('qat_tax_entries', {
       'date_ms': ts,
       'date_iso': iso,
-      'total_qty_milli': totalQtyMilli.clamp(0, 1 << 60),
-      'tax_rate_minor': taxRateMinor.clamp(0, 1 << 60),
-      'tax_amount_minor': taxAmountMinor.clamp(0, 1 << 60),
+      'total_qty_milli': totalQtyMilli.clamp(0, 1 << 60).toInt(),
+      'tax_rate_minor': taxRateMinor.clamp(0, 1 << 60).toInt(),
+      'tax_amount_minor': taxAmountMinor.clamp(0, 1 << 60).toInt(),
       'currency_code': currency.code,
       'source': source,
       'notes': notes.trim(),
@@ -1622,8 +1622,8 @@ class QatRepository {
       'sender_name': senderName.trim().isEmpty ? 'الوكالة' : senderName.trim(),
       'receiver_name': resolvedReceiver,
       'recipient_id': safeRecipientId,
-      'amount_minor': amountMinor.clamp(0, 1 << 60),
-      'fee_minor': feeMinor.clamp(0, 1 << 60),
+      'amount_minor': amountMinor.clamp(0, 1 << 60).toInt(),
+      'fee_minor': feeMinor.clamp(0, 1 << 60).toInt(),
       'currency_code': currency.code,
       'transfer_company': transferCompany.trim(),
       'transfer_number': transferNumber.trim(),

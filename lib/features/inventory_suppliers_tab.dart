@@ -15,7 +15,7 @@ class InventorySuppliersTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
-    final subTab = ctrl.inventorySubTab.clamp(0, 3);
+    final subTab = ctrl.inventorySubTab.clamp(0, 3).toInt();
 
     return Column(
       children: [

@@ -96,7 +96,7 @@ class DeveloperKeyManager {
     final spkiB64 = TrustedPublicKeyRegistry.encodeSpkiBase64(pub.bytes);
     final wrapped = StringBuffer();
     for (int i = 0; i < spkiB64.length; i += 64) {
-      final end = (i + 64).clamp(0, spkiB64.length);
+      final end = (i + 64).clamp(0, spkiB64.length).toInt();
       wrapped.writeln(spkiB64.substring(i, end));
     }
     final pem = '-----BEGIN PUBLIC KEY-----\n$wrapped-----END PUBLIC KEY-----';

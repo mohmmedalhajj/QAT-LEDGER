@@ -438,7 +438,7 @@ class AppController extends ChangeNotifier {
   }
 
   void setSection(int index, {int? subTab}) {
-    _sectionIndex = index.clamp(0, 4);
+    _sectionIndex = index.clamp(0, 4).toInt();
     if (subTab != null) {
       switch (_sectionIndex) {
         case 1:

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
@@ -477,7 +479,7 @@ class _AgencyOnboardingScreenState extends State<AgencyOnboardingScreen> {
                     onSelectionChanged: (s) {
                       final next = s.first;
                       setState(() => _themeChoice = next);
-                      context.read<AppController>().setThemeChoice(next);
+                      unawaited(context.read<AppController>().setThemeChoice(next));
                     },
                   ),
                 ],

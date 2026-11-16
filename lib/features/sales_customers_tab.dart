@@ -28,7 +28,7 @@ class _SalesCustomersTabState extends State<SalesCustomersTab> {
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
-    final subTab = ctrl.salesSubTab.clamp(0, 3);
+    final subTab = ctrl.salesSubTab.clamp(0, 3).toInt();
 
     return Column(
       children: [

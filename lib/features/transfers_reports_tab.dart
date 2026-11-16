@@ -22,7 +22,7 @@ class TransfersReportsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
-    final subTab = ctrl.transfersSubTab.clamp(0, 4);
+    final subTab = ctrl.transfersSubTab.clamp(0, 4).toInt();
 
     return Column(
       children: [

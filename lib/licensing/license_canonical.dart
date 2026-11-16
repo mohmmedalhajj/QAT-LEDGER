@@ -164,7 +164,7 @@ abstract final class LicenseCanonical {
       issuedAtEpochMs: (map['issuedAtEpochMs'] as num).toInt(),
       expiresAtEpochMs: (map['expiresAtEpochMs'] as num).toInt(),
       installationId: (map['installationId'] ?? '').toString(),
-      maxDevices: ((map['maxDevices'] as num?)?.toInt() ?? 1).clamp(1, 999),
+      maxDevices: ((map['maxDevices'] as num?)?.toInt() ?? 1).clamp(1, 999).toInt(),
       features: normalizeFeatures(features),
     );
   }

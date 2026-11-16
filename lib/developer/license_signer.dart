@@ -68,7 +68,7 @@ class DeveloperLicenseSigner {
       issuedAtEpochMs: nowMs,
       expiresAtEpochMs: expiresMs,
       installationId: installationId.trim().isEmpty ? '*' : installationId.trim().toUpperCase(),
-      maxDevices: maxDevices.clamp(1, 999),
+      maxDevices: maxDevices.clamp(1, 999).toInt(),
       features: LicenseCanonical.normalizeFeatures(features),
     );
 

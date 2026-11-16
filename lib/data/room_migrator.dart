@@ -267,7 +267,7 @@ class RoomMigrator {
           final id = (r['id'] as num).toInt();
           final qatName = (r['qatType'] ?? '').toString().trim();
           final supName = (r['supplierName'] ?? '').toString().trim();
-          final qtyMilli = QuantityMath.fromLegacyDouble(r['remainingQty'] as num?).clamp(0, 1 << 60);
+          final qtyMilli = QuantityMath.fromLegacyDouble(r['remainingQty'] as num?).clamp(0, 1 << 60).toInt();
           final pd = QatDateUtils.parseLegacyDate(r['purchaseDate']?.toString(), fallbackMs: nowMs);
           final currency = cols.contains('currency')
               ? CurrencyCode.fromRaw(r['currency']?.toString())
@@ -281,8 +281,8 @@ class RoomMigrator {
             'remaining_qty_milli': qtyMilli,
             'initial_qty_milli': qtyMilli,
             'unit': (r['unit'] ?? 'ربطة').toString(),
-            'buy_price_minor': Money.fromLegacyDouble(r['buyPrice'] as num?).clamp(0, 1 << 60),
-            'sell_price_minor': Money.fromLegacyDouble(r['sellPrice'] as num?).clamp(0, 1 << 60),
+            'buy_price_minor': Money.fromLegacyDouble(r['buyPrice'] as num?).clamp(0, 1 << 60).toInt(),
+            'sell_price_minor': Money.fromLegacyDouble(r['sellPrice'] as num?).clamp(0, 1 << 60).toInt(),
             'currency_code': currency.code,
             'purchase_date_ms': pd.epochMs,
             'purchase_date_iso': pd.isoDate,
@@ -314,12 +314,12 @@ class RoomMigrator {
           final pd = QatDateUtils.parseLegacyDate(r['date']?.toString(), fallbackMs: nowMs);
           final totalMinor = Money.fromLegacyDouble(r['totalAmount'] as num?);
           final discountMinor = cols.contains('discount')
-              ? Money.fromLegacyDouble(r['discount'] as num?).clamp(0, 1 << 60)
+              ? Money.fromLegacyDouble(r['discount'] as num?).clamp(0, 1 << 60).toInt()
               : 0;
           final taxBps = cols.contains('taxPercent')
-              ? Money.fromLegacyDouble(r['taxPercent'] as num?).clamp(0, 10000)
+              ? Money.fromLegacyDouble(r['taxPercent'] as num?).clamp(0, 10000).toInt()
               : 0;
-          final paidMinor = Money.fromLegacyDouble(r['paidAmount'] as num?).clamp(0, 1 << 60);
+          final paidMinor = Money.fromLegacyDouble(r['paidAmount'] as num?).clamp(0, 1 << 60).toInt();
           final remainingMinor = Money.fromLegacyDouble(r['remainingAmount'] as num?);
           final pType = PaymentType.fromRaw(r['paymentType']?.toString());
           final isArchived = cols.contains('isArchived')
@@ -371,7 +371,7 @@ class RoomMigrator {
           final currency = cols.contains('currency')
               ? CurrencyCode.fromRaw(r['currency']?.toString())
               : CurrencyCode.yer;
-          final qtyMilli = QuantityMath.fromLegacyDouble(r['quantity'] as num?).clamp(1, 1 << 60);
+          final qtyMilli = QuantityMath.fromLegacyDouble(r['quantity'] as num?).clamp(1, 1 << 60).toInt();
           await txn.insert('sales_invoice_items', {
             'id': id,
             'sale_id': saleId,
@@ -379,8 +379,8 @@ class RoomMigrator {
             'qat_type_name': (r['qatType'] ?? '').toString(),
             'qty_milli': qtyMilli,
             'unit': (r['unit'] ?? 'ربطة').toString(),
-            'unit_price_minor': Money.fromLegacyDouble(r['unitPrice'] as num?).clamp(0, 1 << 60),
-            'buy_price_minor': Money.fromLegacyDouble(r['buyPrice'] as num?).clamp(0, 1 << 60),
+            'unit_price_minor': Money.fromLegacyDouble(r['unitPrice'] as num?).clamp(0, 1 << 60).toInt(),
+            'buy_price_minor': Money.fromLegacyDouble(r['buyPrice'] as num?).clamp(0, 1 << 60).toInt(),
             'line_total_minor': Money.fromLegacyDouble(r['total'] as num?),
             'currency_code': currency.code,
           });
@@ -409,7 +409,7 @@ class RoomMigrator {
           final currency = cols.contains('currency')
               ? CurrencyCode.fromRaw(r['currency']?.toString())
               : CurrencyCode.yer;
-          final amountMinor = Money.fromLegacyDouble(r['amount'] as num?).clamp(1, 1 << 60);
+          final amountMinor = Money.fromLegacyDouble(r['amount'] as num?).clamp(1, 1 << 60).toInt();
           final pd = QatDateUtils.parseLegacyDate(r['date']?.toString(), fallbackMs: nowMs);
           final isArchived = cols.contains('isArchived')
               ? ((r['isArchived'] as num?)?.toInt() ?? 0)
@@ -504,12 +504,12 @@ class RoomMigrator {
           final pd = QatDateUtils.parseLegacyDate(r['date']?.toString(), fallbackMs: nowMs);
           final totalMinor = Money.fromLegacyDouble(r['totalAmount'] as num?);
           final discountMinor = cols.contains('discount')
-              ? Money.fromLegacyDouble(r['discount'] as num?).clamp(0, 1 << 60)
+              ? Money.fromLegacyDouble(r['discount'] as num?).clamp(0, 1 << 60).toInt()
               : 0;
           final taxBps = cols.contains('taxPercent')
-              ? Money.fromLegacyDouble(r['taxPercent'] as num?).clamp(0, 10000)
+              ? Money.fromLegacyDouble(r['taxPercent'] as num?).clamp(0, 10000).toInt()
               : 0;
-          final paidMinor = Money.fromLegacyDouble(r['paidAmount'] as num?).clamp(0, 1 << 60);
+          final paidMinor = Money.fromLegacyDouble(r['paidAmount'] as num?).clamp(0, 1 << 60).toInt();
           final remainingMinor = Money.fromLegacyDouble(r['remainingAmount'] as num?);
           final pType = PaymentType.fromRaw(r['paymentType']?.toString());
           final isArchived = cols.contains('isArchived')
@@ -560,14 +560,14 @@ class RoomMigrator {
           final currency = cols.contains('currency')
               ? CurrencyCode.fromRaw(r['currency']?.toString())
               : CurrencyCode.yer;
-          final qtyMilli = QuantityMath.fromLegacyDouble(r['quantity'] as num?).clamp(1, 1 << 60);
+          final qtyMilli = QuantityMath.fromLegacyDouble(r['quantity'] as num?).clamp(1, 1 << 60).toInt();
           await txn.insert('supplier_purchase_items', {
             'id': id,
             'purchase_id': purchaseId,
             'qat_type_name': (r['qatType'] ?? '').toString(),
             'qty_milli': qtyMilli,
             'unit': (r['unit'] ?? 'ربطة').toString(),
-            'buy_price_minor': Money.fromLegacyDouble(r['buyPrice'] as num?).clamp(0, 1 << 60),
+            'buy_price_minor': Money.fromLegacyDouble(r['buyPrice'] as num?).clamp(0, 1 << 60).toInt(),
             'line_total_minor': Money.fromLegacyDouble(r['total'] as num?),
             'currency_code': currency.code,
           });
@@ -596,7 +596,7 @@ class RoomMigrator {
           final currency = cols.contains('currency')
               ? CurrencyCode.fromRaw(r['currency']?.toString())
               : CurrencyCode.yer;
-          final amountMinor = Money.fromLegacyDouble(r['amount'] as num?).clamp(1, 1 << 60);
+          final amountMinor = Money.fromLegacyDouble(r['amount'] as num?).clamp(1, 1 << 60).toInt();
           final pd = QatDateUtils.parseLegacyDate(r['date']?.toString(), fallbackMs: nowMs);
           final isArchived = cols.contains('isArchived')
               ? ((r['isArchived'] as num?)?.toInt() ?? 0)
@@ -683,7 +683,7 @@ class RoomMigrator {
             'description': (r['description'] ?? '').toString(),
             'category': (r['category'] ?? 'عام').toString(),
             'account_id': null,
-            'amount_minor': Money.fromLegacyDouble(r['amount'] as num?).clamp(0, 1 << 60),
+            'amount_minor': Money.fromLegacyDouble(r['amount'] as num?).clamp(0, 1 << 60).toInt(),
             'currency_code': currency.code,
             'date_ms': pd.epochMs,
             'date_iso': pd.isoDate,
@@ -770,9 +770,9 @@ class RoomMigrator {
             'sender_name': (r['senderName'] ?? '').toString(),
             'receiver_name': (r['receiverName'] ?? '').toString(),
             'recipient_id': resolvedRecId,
-            'amount_minor': Money.fromLegacyDouble(r['amount'] as num?).clamp(0, 1 << 60),
+            'amount_minor': Money.fromLegacyDouble(r['amount'] as num?).clamp(0, 1 << 60).toInt(),
             'fee_minor': cols.contains('fee')
-                ? Money.fromLegacyDouble(r['fee'] as num?).clamp(0, 1 << 60)
+                ? Money.fromLegacyDouble(r['fee'] as num?).clamp(0, 1 << 60).toInt()
                 : 0,
             'currency_code': currency.code,
             'transfer_company': (r['transferCompany'] ?? '').toString(),
