@@ -1,0 +1,92 @@
+name: Flutter Analyze, Test & Release APK Build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter SDK (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Linux SQLite runtime for sqflite_common_ffi
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-0 libsqlite3-dev
+
+      - name: Show toolchain & environment info
+        run: |
+          flutter --version
+          dart --version
+          java -version
+          ls -l /dev/kvm || echo "NO_KVM_DEVICE"
+
+      - name: Fetch Dart & Flutter packages
+        run: flutter pub get
+
+      - name: Run Flutter static analyzer
+        run: flutter analyze
+
+      - name: Run unit & widget tests
+        run: flutter test -r expanded
+
+      - name: Ensure Android Gradle wrapper exists
+        run: |
+          if [ ! -f android/gradlew ]; then
+            flutter create --platforms=android --org com.aistudio.tofanqat /tmp/flutter_gradle_scaffold
+            cp /tmp/flutter_gradle_scaffold/android/gradlew android/gradlew
+            cp /tmp/flutter_gradle_scaffold/android/gradlew.bat android/gradlew.bat
+            mkdir -p android/gradle/wrapper
+            cp /tmp/flutter_gradle_scaffold/android/gradle/wrapper/gradle-wrapper.jar android/gradle/wrapper/gradle-wrapper.jar
+            chmod +x android/gradlew
+          fi
+
+      - name: Build Customer Release APK
+        env:
+          QAT_LICENSE_PUBLIC_KEYS: ${{ secrets.QAT_LICENSE_PUBLIC_KEYS }}
+        run: |
+          flutter build apk --release --flavor customer \
+            --dart-define=APP_EDITION=customer \
+            --dart-define=QAT_LICENSE_PUBLIC_KEYS="${QAT_LICENSE_PUBLIC_KEYS}"
+
+      - name: Build Developer Release APK
+        env:
+          QAT_LICENSE_PUBLIC_KEYS: ${{ secrets.QAT_LICENSE_PUBLIC_KEYS }}
+        run: |
+          flutter build apk --release --flavor developer \
+            --dart-define=APP_EDITION=developer \
+            --dart-define=QAT_LICENSE_PUBLIC_KEYS="${QAT_LICENSE_PUBLIC_KEYS}"
+
+      - name: Verify APK manifests, package IDs, and SHA-256 checksums
+        run: |
+          mkdir -p ci-dist
+          cp build/app/outputs/flutter-apk/app-customer-release.apk ci-dist/
+          cp build/app/outputs/flutter-apk/app-developer-release.apk ci-dist/
+          AAPT2=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name aapt2 | sort | tail -n 1)
+          echo "Using aapt2: $AAPT2"
+          "$AAPT2" dump badging ci-dist/app-customer-release.apk | head -n 15 | tee ci-dist/customer-badging.txt
+          "$AAPT2" dump badging ci-dist/app-developer-release.apk | head -n 15 | tee ci-dist/developer-badging.txt
+          grep -q "package: name='com.aistudio.tofanqat.nxzwmb'" ci-dist/customer-badging.txt
+          grep -q "package: name='com.aistudio.tofanqat.nxzwmb.dev'" ci-dist/developer-badging.txt
+          (cd ci-dist && sha256sum app-customer-release.apk app-developer-release.apk | tee SHA256SUMS.txt)
+
+      - name: Upload release APKs and verification reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: qat-ledger-release-apks
+          path: ci-dist/

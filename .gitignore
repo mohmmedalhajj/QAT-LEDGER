@@ -1,23 +1,32 @@
-*.iml
-.gradle
-.kotlin
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
-.env
-debug.keystore
+# Flutter & Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
 
-# Generated Android packages and build output
+# Android / Gradle
+android/.gradle/
+android/local.properties
+android/captures/
+android/**/build/
 *.apk
-/build-output/
-/build-outputs/
+*.aab
+*.ap_
+*.jks
+*.keystore
+!android/app/debug.keystore
+
+# IDE & OS
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Ephemeral release packaging
+dist/
+*.qbak
+*.qlic

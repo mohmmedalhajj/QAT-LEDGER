@@ -1,25 +1,29 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# ميزان القات — QAT LEDGER (Flutter Edition)
 
-# Run and deploy your AI Studio app
+نظام محاسبي وإداري متكامل لوكالات ومكاتب القات — يعمل بالكامل **بدون إنترنت (Offline-First)** وبواجهة عربية 100% (RTL) مع دعم كامل لتعدد العملات المنفصلة (**YER** و **SAR**)، وترحيل آلي من قاعدة البيانات القديمة Room v18 (`tofan_al_aqsa_qat_db`).
 
-This contains everything you need to run your app locally.
+## أبرز المميزات
+- **هندسة مالية دقيقة بالأعداد الصحيحة (`int` minor/milli units):** صفر أخطاء تقريب عشرية (`double`).
+- **فصل تام للعملات (`YER` / `SAR`):** إدارة مركزية لأنماط العملة (`YER_ONLY`, `SAR_ONLY`, `DUAL_CURRENCY`) دون خلط الدفاتر.
+- **5 أقسام رئيسية منظمة:**
+  1. **الرئيسية** (ملخص المؤشرات اليومية السريع)
+  2. **المبيعات والعملاء** (POS الفوري، الخصم والضريبة، سجل المبيعات، العملاء، سندات القبض، كشف الحساب)
+  3. **المخزون والموردون** (الدفعات، أصناف القات، الموردون، تعديل فواتير الشراء، سندات الصرف)
+  4. **الحوالات والتقارير** (الحوالات، المستلمون وتقارير حالة التسليم المستقلة، التقارير المالية، الضرائب، الأرشيف)
+  5. **المصاريف والإعدادات** (المصاريف، دليل الحسابات، الهوية والمظهر الفاتح المؤسسي والأسود الداكن، النسخ الاحتياطي الذري `.qbak`، الطابعة الحرارية Bluetooth ESC/POS، والترخيص الرقمي Ed25519)
+- **توافق ترخيص كامل دون إنترنت (`QL1.` / `.qlic`):** توقيع وتحقق Ed25519 مع حماية الساعة وتفريق كامل بين نسخة العميل (`customer`) ونسخة المطور (`developer`).
 
-View your app in AI Studio: https://ai.studio/apps/ed8e7b28-904f-42f7-b45c-78e1bc01ef90
+## التوثيق الهندسي المرفق
+- [`PROJECT_AUDIT.md`](PROJECT_AUDIT.md) — التدقيق الكامل للمشروع القديم وأعطاله
+- [`DATABASE_MIGRATION.md`](DATABASE_MIGRATION.md) — مخطط SQLite v2 وآلية الترحيل من Room v18
+- [`FLUTTER_ARCHITECTURE.md`](FLUTTER_ARCHITECTURE.md) — البنية المعمارية للمشروع
+- [`TEST_REPORT.md`](TEST_REPORT.md) — تقرير الفحوصات المنفذة وما تعذر تنفيذه في بيئة Sandbox
+- [`BUILD_AND_RELEASE.md`](BUILD_AND_RELEASE.md) — أوامر البناء والتوقيع وتمرير المفاتيح
 
-## Run Locally
-
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
-
-
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
-7. If you have already published your app in AI Studio, please [request upload key reset](https://support.google.com/googleplay/android-developer/answer/9842756#zippy=%2Crequest-an-upload-key-reset) in Google Play Console.
-# tofan-al-aqsa-accounting-system-end2
-
-# QAT-LEDGER
+## الأوامر الأساسية (في بيئة Flutter مثبتة)
+```bash
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --release --flavor customer --dart-define=APP_EDITION=customer
+```
