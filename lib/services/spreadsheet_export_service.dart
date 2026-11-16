@@ -16,21 +16,22 @@ class SpreadsheetExportService {
     final excel = Excel.createExcel();
     final sheet = excel['المبيعات'];
     excel.delete('Sheet1');
-    sheet.appendRow([
-      TextCellValue('رقم الفاتورة'),
-      TextCellValue('التاريخ'),
-      TextCellValue('العميل'),
-      TextCellValue('العملة'),
-      TextCellValue('المجموع الفرعي'),
-      TextCellValue('الخصم'),
-      TextCellValue('الضريبة'),
-      TextCellValue('الإجمالي'),
-      TextCellValue('المدفوع'),
-      TextCellValue('المتبقي'),
-      TextCellValue('الحالة'),
-    ]);
+    const headers = [
+      'رقم الفاتورة',
+      'التاريخ',
+      'العميل',
+      'العملة',
+      'المجموع الفرعي',
+      'الخصم',
+      'الضريبة',
+      'الإجمالي',
+      'المدفوع',
+      'المتبقي',
+      'الحالة',
+    ];
+    sheet.appendRow(<CellValue?>[for (final h in headers) TextCellValue(h)]);
     for (final s in sales) {
-      sheet.appendRow([
+      sheet.appendRow(<CellValue?>[
         TextCellValue(s.invoiceNumber),
         TextCellValue(s.dateIso),
         TextCellValue(s.customerName),
@@ -59,21 +60,22 @@ class SpreadsheetExportService {
     final excel = Excel.createExcel();
     final sheet = excel[title];
     excel.delete('Sheet1');
-    sheet.appendRow([
-      TextCellValue('التاريخ'),
-      TextCellValue('المرسل'),
-      TextCellValue('المستلم'),
-      TextCellValue('حالة الربط'),
-      TextCellValue('المبلغ'),
-      TextCellValue('العمولة'),
-      TextCellValue('العملة'),
-      TextCellValue('الشركة'),
-      TextCellValue('رقم الحوالة'),
-      TextCellValue('الحالة'),
-      TextCellValue('ملاحظات'),
-    ]);
+    const headers = [
+      'التاريخ',
+      'المرسل',
+      'المستلم',
+      'حالة الربط',
+      'المبلغ',
+      'العمولة',
+      'العملة',
+      'الشركة',
+      'رقم الحوالة',
+      'الحالة',
+      'ملاحظات',
+    ];
+    sheet.appendRow(<CellValue?>[for (final h in headers) TextCellValue(h)]);
     for (final t in transfers) {
-      sheet.appendRow([
+      sheet.appendRow(<CellValue?>[
         TextCellValue(t.dateIso),
         TextCellValue(t.senderName),
         TextCellValue(t.receiverName.isEmpty ? 'غير محدد' : t.receiverName),
@@ -101,39 +103,45 @@ class SpreadsheetExportService {
     final excel = Excel.createExcel();
     final sumSheet = excel['ملخص المستلم'];
     excel.delete('Sheet1');
-    sumSheet.appendRow([TextCellValue('المستلم'), TextCellValue(summary.recipient.name)]);
-    sumSheet.appendRow([TextCellValue('الهاتف'), TextCellValue(summary.recipient.phone)]);
-    sumSheet.appendRow([TextCellValue('الشركة'), TextCellValue(summary.recipient.company)]);
-    sumSheet.appendRow([TextCellValue('إجمالي الحوالات'), IntCellValue(summary.totalTransfers)]);
-    sumSheet.appendRow([TextCellValue('تم التسليم (عدد)'), IntCellValue(summary.deliveredCount)]);
-    sumSheet.appendRow([TextCellValue('جاري التسليم (عدد)'), IntCellValue(summary.pendingCount)]);
-    sumSheet.appendRow([TextCellValue('ملغي (عدد)'), IntCellValue(summary.cancelledCount)]);
+
+    void addSummaryRow(String label, CellValue value) {
+      sumSheet.appendRow(<CellValue?>[TextCellValue(label), value]);
+    }
+
+    addSummaryRow('المستلم', TextCellValue(summary.recipient.name));
+    addSummaryRow('الهاتف', TextCellValue(summary.recipient.phone));
+    addSummaryRow('الشركة', TextCellValue(summary.recipient.company));
+    addSummaryRow('إجمالي الحوالات', IntCellValue(summary.totalTransfers));
+    addSummaryRow('تم التسليم (عدد)', IntCellValue(summary.deliveredCount));
+    addSummaryRow('جاري التسليم (عدد)', IntCellValue(summary.pendingCount));
+    addSummaryRow('ملغي (عدد)', IntCellValue(summary.cancelledCount));
 
     for (final cur in CurrencyCode.values) {
-      sumSheet.appendRow([
+      sumSheet.appendRow(<CellValue?>[
         TextCellValue('المسلّم (${cur.code})'),
         TextCellValue(Money.formatMinor(summary.deliveredByCurrency[cur] ?? 0, showZeroDecimals: true)),
       ]);
-      sumSheet.appendRow([
+      sumSheet.appendRow(<CellValue?>[
         TextCellValue('المعلق (${cur.code})'),
         TextCellValue(Money.formatMinor(summary.pendingByCurrency[cur] ?? 0, showZeroDecimals: true)),
       ]);
     }
 
     final detailSheet = excel['تفاصيل الحوالات'];
-    detailSheet.appendRow([
-      TextCellValue('التاريخ'),
-      TextCellValue('المرسل'),
-      TextCellValue('المبلغ'),
-      TextCellValue('العمولة'),
-      TextCellValue('العملة'),
-      TextCellValue('الشركة'),
-      TextCellValue('رقم الحوالة'),
-      TextCellValue('الحالة'),
-      TextCellValue('ملاحظات'),
-    ]);
+    const detailHeaders = [
+      'التاريخ',
+      'المرسل',
+      'المبلغ',
+      'العمولة',
+      'العملة',
+      'الشركة',
+      'رقم الحوالة',
+      'الحالة',
+      'ملاحظات',
+    ];
+    detailSheet.appendRow(<CellValue?>[for (final h in detailHeaders) TextCellValue(h)]);
     for (final t in summary.transfers) {
-      detailSheet.appendRow([
+      detailSheet.appendRow(<CellValue?>[
         TextCellValue(t.dateIso),
         TextCellValue(t.senderName),
         TextCellValue(Money.formatMinor(t.amountMinor, showZeroDecimals: true)),
