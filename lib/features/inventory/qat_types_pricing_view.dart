@@ -46,9 +46,11 @@ class _QatTypesPricingViewState extends State<QatTypesPricingView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: Text(existing == null ? 'صنف قات جديد' : 'تعديل الصنف والتسعير'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [nameCtrl, buyCtrl, sellCtrl, notesCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text(existing == null ? 'صنف قات جديد' : 'تعديل الصنف والتسعير'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -126,12 +128,9 @@ class _QatTypesPricingViewState extends State<QatTypesPricingView> {
             ),
           ],
         ),
+        ),
       ),
     );
-    nameCtrl.dispose();
-    buyCtrl.dispose();
-    sellCtrl.dispose();
-    notesCtrl.dispose();
   }
 
   @override

@@ -26,9 +26,11 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('قيد ضريبة قات'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [qtyCtrl, rateCtrl, amountCtrl, notesCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: const Text('قيد ضريبة قات'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -84,12 +86,9 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
             ),
           ],
         ),
+        ),
       ),
     );
-    qtyCtrl.dispose();
-    rateCtrl.dispose();
-    amountCtrl.dispose();
-    notesCtrl.dispose();
   }
 
   @override

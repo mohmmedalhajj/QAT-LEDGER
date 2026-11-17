@@ -76,10 +76,12 @@ class _RecipientsAndReportsViewState extends State<RecipientsAndReportsView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(
-          existing == null ? 'مستلم حوالات جديد' : 'تعديل بيانات المستلم',
-        ),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [nameCtrl, phoneCtrl, compCtrl, notesCtrl],
+        child: AlertDialog(
+          title: Text(
+            existing == null ? 'مستلم حوالات جديد' : 'تعديل بيانات المستلم',
+          ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -157,12 +159,9 @@ class _RecipientsAndReportsViewState extends State<RecipientsAndReportsView> {
             child: const Text('حفظ'),
           ),
         ],
+        ),
       ),
     );
-    nameCtrl.dispose();
-    phoneCtrl.dispose();
-    compCtrl.dispose();
-    notesCtrl.dispose();
   }
 
   Future<void> _openRecipientReportSheet(

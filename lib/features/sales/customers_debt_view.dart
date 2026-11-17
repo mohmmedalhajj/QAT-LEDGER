@@ -39,8 +39,10 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(existing == null ? 'إضافة عميل جديد' : 'تعديل بيانات العميل'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [nameCtrl, phoneCtrl, addrCtrl, notesCtrl],
+        child: AlertDialog(
+          title: Text(existing == null ? 'إضافة عميل جديد' : 'تعديل بيانات العميل'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -117,12 +119,9 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
             child: const Text('حفظ'),
           ),
         ],
+        ),
       ),
     );
-    nameCtrl.dispose();
-    phoneCtrl.dispose();
-    addrCtrl.dispose();
-    notesCtrl.dispose();
   }
 
   Future<void> _openCustomerReceiptsDialog(
@@ -196,9 +195,11 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: Text('سند قبض — ${customer.name}'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [amountCtrl, notesCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text('سند قبض — ${customer.name}'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -257,10 +258,9 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
             ),
           ],
         ),
+        ),
       ),
     );
-    amountCtrl.dispose();
-    notesCtrl.dispose();
   }
 
   @override

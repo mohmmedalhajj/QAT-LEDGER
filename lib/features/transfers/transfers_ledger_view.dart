@@ -50,9 +50,19 @@ class _TransfersLedgerViewState extends State<TransfersLedgerView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('تسجيل حوالة مالية'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [
+          senderCtrl,
+          customRecCtrl,
+          amountCtrl,
+          feeCtrl,
+          companyCtrl,
+          numberCtrl,
+          notesCtrl,
+        ],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: const Text('تسجيل حوالة مالية'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -216,15 +226,9 @@ class _TransfersLedgerViewState extends State<TransfersLedgerView> {
             ),
           ],
         ),
+        ),
       ),
     );
-    senderCtrl.dispose();
-    customRecCtrl.dispose();
-    amountCtrl.dispose();
-    feeCtrl.dispose();
-    companyCtrl.dispose();
-    numberCtrl.dispose();
-    notesCtrl.dispose();
   }
 
   Widget _buildExchangeCalculatorCard(AppController ctrl, QatPalette pal) {

@@ -169,9 +169,19 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: Text('تعديل الفاتورة ${sale.invoiceNumber}'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [
+          itemCtrl,
+          qtyCtrl,
+          priceCtrl,
+          discCtrl,
+          taxCtrl,
+          paidCtrl,
+          notesCtrl,
+        ],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text('تعديل الفاتورة ${sale.invoiceNumber}'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -346,15 +356,9 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
             ),
           ],
         ),
+        ),
       ),
     );
-    itemCtrl.dispose();
-    qtyCtrl.dispose();
-    priceCtrl.dispose();
-    discCtrl.dispose();
-    taxCtrl.dispose();
-    paidCtrl.dispose();
-    notesCtrl.dispose();
   }
 
   @override

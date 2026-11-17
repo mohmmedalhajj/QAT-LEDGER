@@ -32,8 +32,10 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(existing == null ? 'مورد جديد' : 'تعديل بيانات المورد'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [nameCtrl, phoneCtrl, addrCtrl, notesCtrl],
+        child: AlertDialog(
+          title: Text(existing == null ? 'مورد جديد' : 'تعديل بيانات المورد'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -110,12 +112,9 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
             child: const Text('حفظ'),
           ),
         ],
+        ),
       ),
     );
-    nameCtrl.dispose();
-    phoneCtrl.dispose();
-    addrCtrl.dispose();
-    notesCtrl.dispose();
   }
 
   Future<void> _openSupplierPaymentDialog(
@@ -128,9 +127,11 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: Text('سند صرف لمورد — ${supplier.name}'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [amountCtrl, notesCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text('سند صرف لمورد — ${supplier.name}'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -183,10 +184,9 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
             ),
           ],
         ),
+        ),
       ),
     );
-    amountCtrl.dispose();
-    notesCtrl.dispose();
   }
 
   Future<void> _openNewPurchaseDialog(
@@ -204,9 +204,11 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: Text('فاتورة شراء من ${supplier.name}'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [qatCtrl, qtyCtrl, buyCtrl, sellCtrl, paidCtrl, notesCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text('فاتورة شراء من ${supplier.name}'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -346,14 +348,9 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
             ),
           ],
         ),
+        ),
       ),
     );
-    qatCtrl.dispose();
-    qtyCtrl.dispose();
-    buyCtrl.dispose();
-    sellCtrl.dispose();
-    paidCtrl.dispose();
-    notesCtrl.dispose();
   }
 
   @override

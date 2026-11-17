@@ -50,9 +50,13 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: Text(existing == null ? 'إضافة دفعة مخزون' : 'تعديل دفعة مخزون'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [nameCtrl, qtyCtrl, unitCtrl, buyCtrl, sellCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text(
+              existing == null ? 'إضافة دفعة مخزون' : 'تعديل دفعة مخزون',
+            ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -175,13 +179,9 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
             ),
           ],
         ),
+        ),
       ),
     );
-    nameCtrl.dispose();
-    qtyCtrl.dispose();
-    unitCtrl.dispose();
-    buyCtrl.dispose();
-    sellCtrl.dispose();
   }
 
   @override

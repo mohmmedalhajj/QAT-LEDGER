@@ -129,41 +129,43 @@ class _LoginScreenState extends State<LoginScreen> {
     final passCtrl = TextEditingController();
     final verified = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('بوابة الإدارة'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'أدخل رمز الإدارة السري للدخول إلى إعدادات الصلاحيات:',
-              style: TextStyle(fontSize: 13),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [passCtrl],
+        child: AlertDialog(
+          title: const Text('بوابة الإدارة'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'أدخل رمز الإدارة السري للدخول إلى إعدادات الصلاحيات:',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: passCtrl,
+                obscureText: true,
+                textDirection: TextDirection.ltr,
+                decoration: const InputDecoration(labelText: 'رمز الإدارة'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
             ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: passCtrl,
-              obscureText: true,
-              textDirection: TextDirection.ltr,
-              decoration: const InputDecoration(labelText: 'رمز الإدارة'),
+            FilledButton(
+              onPressed: () {
+                final ok = ctrl.verifyAdminGatePasscode(passCtrl.text);
+                Navigator.pop(ctx, ok);
+              },
+              child: const Text('دخول'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final ok = ctrl.verifyAdminGatePasscode(passCtrl.text);
-              Navigator.pop(ctx, ok);
-            },
-            child: const Text('دخول'),
-          ),
-        ],
       ),
     );
-    passCtrl.dispose();
     if (!mounted) return;
     if (verified == true) {
       await _showHiddenAdminDialog(ctrl);
@@ -180,92 +182,100 @@ class _LoginScreenState extends State<LoginScreen> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('بوابة الإدارة المخفية'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: 'اسم الوكالة'),
-                ),
-                const SizedBox(height: 10),
-                const Text(
-                  'صلاحيات ظهور الأقسام:',
-                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
-                ),
-                SwitchListTile(
-                  dense: true,
-                  title: const Text('المبيعات والعملاء'),
-                  value: perms.sales,
-                  onChanged: (v) =>
-                      setModalState(() => perms = perms.copyWith(sales: v)),
-                ),
-                SwitchListTile(
-                  dense: true,
-                  title: const Text('المخزون والموردون'),
-                  value: perms.inventory,
-                  onChanged: (v) =>
-                      setModalState(() => perms = perms.copyWith(inventory: v)),
-                ),
-                SwitchListTile(
-                  dense: true,
-                  title: const Text('الحوالات'),
-                  value: perms.transfers,
-                  onChanged: (v) =>
-                      setModalState(() => perms = perms.copyWith(transfers: v)),
-                ),
-                SwitchListTile(
-                  dense: true,
-                  title: const Text('التقارير المالية'),
-                  value: perms.reports,
-                  onChanged: (v) =>
-                      setModalState(() => perms = perms.copyWith(reports: v)),
-                ),
-                SwitchListTile(
-                  dense: true,
-                  title: const Text('الأرشيف'),
-                  value: perms.archive,
-                  onChanged: (v) =>
-                      setModalState(() => perms = perms.copyWith(archive: v)),
-                ),
-                SwitchListTile(
-                  dense: true,
-                  title: const Text('المصاريف'),
-                  value: perms.expenses,
-                  onChanged: (v) =>
-                      setModalState(() => perms = perms.copyWith(expenses: v)),
-                ),
-              ],
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [nameCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: const Text('بوابة الإدارة المخفية'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(labelText: 'اسم الوكالة'),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'صلاحيات ظهور الأقسام:',
+                    style:
+                        TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                  ),
+                  SwitchListTile(
+                    dense: true,
+                    title: const Text('المبيعات والعملاء'),
+                    value: perms.sales,
+                    onChanged: (v) =>
+                        setModalState(() => perms = perms.copyWith(sales: v)),
+                  ),
+                  SwitchListTile(
+                    dense: true,
+                    title: const Text('المخزون والموردون'),
+                    value: perms.inventory,
+                    onChanged: (v) => setModalState(
+                      () => perms = perms.copyWith(inventory: v),
+                    ),
+                  ),
+                  SwitchListTile(
+                    dense: true,
+                    title: const Text('الحوالات'),
+                    value: perms.transfers,
+                    onChanged: (v) => setModalState(
+                      () => perms = perms.copyWith(transfers: v),
+                    ),
+                  ),
+                  SwitchListTile(
+                    dense: true,
+                    title: const Text('التقارير المالية'),
+                    value: perms.reports,
+                    onChanged: (v) => setModalState(
+                      () => perms = perms.copyWith(reports: v),
+                    ),
+                  ),
+                  SwitchListTile(
+                    dense: true,
+                    title: const Text('الأرشيف'),
+                    value: perms.archive,
+                    onChanged: (v) => setModalState(
+                      () => perms = perms.copyWith(archive: v),
+                    ),
+                  ),
+                  SwitchListTile(
+                    dense: true,
+                    title: const Text('المصاريف'),
+                    value: perms.expenses,
+                    onChanged: (v) => setModalState(
+                      () => perms = perms.copyWith(expenses: v),
+                    ),
+                  ),
+                ],
+              ),
             ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إغلاق'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final trimmed = nameCtrl.text.trim();
+                  if (trimmed.isNotEmpty) {
+                    await ctrl.updateSettings(
+                      ctrl.settings.copyWith(agencyName: trimmed),
+                    );
+                  }
+                  await ctrl.updateSectionPermissions(perms);
+                  if (!ctx.mounted) return;
+                  Navigator.pop(ctx);
+                },
+                child: const Text('حفظ التغييرات'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('إغلاق'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                final trimmed = nameCtrl.text.trim();
-                if (trimmed.isNotEmpty) {
-                  await ctrl.updateSettings(
-                    ctrl.settings.copyWith(agencyName: trimmed),
-                  );
-                }
-                await ctrl.updateSectionPermissions(perms);
-                if (!ctx.mounted) return;
-                Navigator.pop(ctx);
-              },
-              child: const Text('حفظ التغييرات'),
-            ),
-          ],
         ),
       ),
     );
-    nameCtrl.dispose();
   }
 
   @override

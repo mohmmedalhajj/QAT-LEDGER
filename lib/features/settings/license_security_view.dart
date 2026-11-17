@@ -61,9 +61,11 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('إضافة مستخدم وصلاحياته'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [userCtrl, nameCtrl, passCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: const Text('إضافة مستخدم وصلاحياته'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -159,41 +161,41 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
             ),
           ],
         ),
+        ),
       ),
     );
-    userCtrl.dispose();
-    nameCtrl.dispose();
-    passCtrl.dispose();
   }
 
   Future<void> _openDeveloperConsoleWithPasscode(AppController ctrl) async {
     final passCtrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('بوابة المطور'),
-        content: TextField(
-          controller: passCtrl,
-          obscureText: true,
-          textDirection: TextDirection.ltr,
-          decoration: const InputDecoration(labelText: 'رمز المطور'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('إلغاء'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [passCtrl],
+        child: AlertDialog(
+          title: const Text('بوابة المطور'),
+          content: TextField(
+            controller: passCtrl,
+            obscureText: true,
+            textDirection: TextDirection.ltr,
+            decoration: const InputDecoration(labelText: 'رمز المطور'),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(
-              ctx,
-              ctrl.verifyAdminGatePasscode(passCtrl.text),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
             ),
-            child: const Text('دخول'),
-          ),
-        ],
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                ctrl.verifyAdminGatePasscode(passCtrl.text),
+              ),
+              child: const Text('دخول'),
+            ),
+          ],
+        ),
       ),
     );
-    passCtrl.dispose();
     if (ok == true && mounted && ctrl.developerKeyManager != null) {
       await Navigator.of(context).push<void>(
         MaterialPageRoute<void>(

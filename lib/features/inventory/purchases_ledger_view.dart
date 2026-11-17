@@ -50,9 +50,19 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: Text('تعديل فاتورة شراء ${p.purchaseNumber}'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [
+          qatCtrl,
+          qtyCtrl,
+          buyCtrl,
+          sellCtrl,
+          discCtrl,
+          paidCtrl,
+          notesCtrl,
+        ],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text('تعديل فاتورة شراء ${p.purchaseNumber}'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -181,15 +191,9 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
             ),
           ],
         ),
+        ),
       ),
     );
-    qatCtrl.dispose();
-    qtyCtrl.dispose();
-    buyCtrl.dispose();
-    sellCtrl.dispose();
-    discCtrl.dispose();
-    paidCtrl.dispose();
-    notesCtrl.dispose();
   }
 
   @override

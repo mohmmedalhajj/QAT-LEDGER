@@ -34,9 +34,11 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => AlertDialog(
-          title: const Text('تسجيل مصروف يومي'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [descCtrl, amountCtrl, notesCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: const Text('تسجيل مصروف يومي'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -122,11 +124,9 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
             ),
           ],
         ),
+        ),
       ),
     );
-    descCtrl.dispose();
-    amountCtrl.dispose();
-    notesCtrl.dispose();
   }
 
   Future<void> _addAccountDialog(
@@ -137,8 +137,10 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
     final catCtrl = TextEditingController(text: 'مصروفات تشغيلية');
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('إضافة حساب / تصنيف'),
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [nameCtrl, catCtrl],
+        child: AlertDialog(
+          title: const Text('إضافة حساب / تصنيف'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -173,10 +175,9 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
             child: const Text('إضافة'),
           ),
         ],
+        ),
       ),
     );
-    nameCtrl.dispose();
-    catCtrl.dispose();
   }
 
   @override

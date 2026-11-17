@@ -507,3 +507,34 @@ Future<bool> showErpConfirmDialog(
   );
   return result ?? false;
 }
+
+/// Disposes dialog controllers only when the dialog widget tree itself unmounts
+/// (after any [DialogRoute] exit transition finishes), avoiding premature
+/// disposal errors in child [EditableText] fields.
+class ErpDialogControllerScope extends StatefulWidget {
+  const ErpDialogControllerScope({
+    super.key,
+    required this.controllers,
+    required this.child,
+  });
+
+  final List<ChangeNotifier> controllers;
+  final Widget child;
+
+  @override
+  State<ErpDialogControllerScope> createState() =>
+      _ErpDialogControllerScopeState();
+}
+
+class _ErpDialogControllerScopeState extends State<ErpDialogControllerScope> {
+  @override
+  void dispose() {
+    for (final c in widget.controllers) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
