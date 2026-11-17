@@ -401,9 +401,9 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                           confirmLabel: 'إزالة الترخيص',
                           destructive: true,
                         );
-                        if (!ok || !mounted) return;
+                        if (!ok || !context.mounted) return;
                         await ctrl.clearActiveLicense();
-                        if (!mounted) return;
+                        if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('تم إزالة الترخيص والعودة للباقة الأساسية'),
