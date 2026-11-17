@@ -114,4 +114,117 @@ void main() {
       await tempDir.delete(recursive: true);
     }
   });
+
+  test('Developer 4-tab registry lifecycle: secret pricing, official kotlinLineV1 issue, payment confirm, renew, upgrade, revoke, and backup export/import', () async {
+    final tempDir = await Directory.systemTemp.createTemp('qat_dev_lifecycle_');
+    try {
+      SharedPreferences.setMockInitialValues({});
+      final devPrefs = await SharedPreferences.getInstance();
+      final devDb = DeveloperDatabaseService(
+        factory: databaseFactoryFfi,
+        customPath: p.join(tempDir.path, 'dev_lifecycle.db'),
+      );
+      final keyMgr = DeveloperKeyManager(devPrefs);
+      final signer = DeveloperLicenseSigner(keyManager: keyMgr, devDb: devDb);
+
+      await signer.saveSecretPackagePricing(
+        packageTier: PackageTier.pro,
+        currency: 'YER',
+        monthlyPrice: 12000,
+        perpetualPrice: 150000,
+      );
+      final devSql = await devDb.database;
+      final prices = await devSql.query('dev_package_prices');
+      expect(prices.any((r) => r['package_code'] == 'PRO' && r['perpetual_price'] == 150000.0), true);
+
+      final issued = await signer.issueOfficialLicense(
+        agencyName: 'وكالة الخولاني',
+        ownerName: 'عميل الخولاني',
+        phone: '777123456',
+        installationId: 'QAT-1111-2222-3333',
+        packageTier: PackageTier.basic,
+        licenseType: LicenseType.subscription,
+        durationDays: 30,
+        priceCharged: 12000,
+        priceCurrency: 'YER',
+        requestedPaidConfirmed: false,
+      );
+      final issuedRows = await devSql.query(
+        'issued_licenses',
+        where: 'license_id = ?',
+        whereArgs: [issued.payload.licenseId],
+      );
+      expect(issuedRows.single['payment_status'], 'UNPAID');
+      expect(issuedRows.single['package_code'], 'BASIC');
+
+      final keyInfo = await keyMgr.getPublicKeyInfo();
+      final verifier = OfflineLicenseVerifier(
+        registry: TrustedPublicKeyRegistry.fromCsv(keyInfo!.kotlinConfigLine),
+        timeGuard: TrustedTimeGuard(),
+      );
+      final verifiedBasic = await verifier.verify(
+        rawLicenseInput: issued.compactToken,
+        currentInstallationId: 'QAT-1111-2222-3333',
+        nowEpochMs: issued.payload.issuedAtEpochMs + 1000,
+      );
+      expect(verifiedBasic.isValid, true);
+      expect(verifiedBasic.hasFeature(LicenseFeature.reports), false);
+
+      // Confirm payment -> Renew -> Upgrade to PRO PERPETUAL -> Revoke
+      await signer.confirmOrUpdatePayment(
+        licenseId: issued.payload.licenseId,
+        priceCharged: 12000,
+        paidAmount: 12000,
+        explicitlyConfirmedPaid: true,
+      );
+      final renewed = await signer.renewSubscription(
+        previousLicenseId: issued.payload.licenseId,
+        additionalDays: 60,
+      );
+      expect(renewed, isNotNull);
+
+      final upgraded = await signer.upgradeToPerpetual(
+        previousLicenseId: renewed!.payload.licenseId,
+        targetPackage: PackageTier.pro,
+      );
+      expect(upgraded, isNotNull);
+      final verifiedPro = await verifier.verify(
+        rawLicenseInput: upgraded!.qlicJson,
+        currentInstallationId: 'QAT-1111-2222-3333',
+        nowEpochMs: upgraded.payload.issuedAtEpochMs + 5000,
+      );
+      expect(verifiedPro.isPro, true);
+      expect(verifiedPro.hasFeature(LicenseFeature.reports), true);
+
+      await signer.revokeLicense(
+        licenseId: upgraded.payload.licenseId,
+        reason: 'انتهاء التعاقد التجاري',
+      );
+      final recRows = await devSql.query(
+        'issued_licenses',
+        where: 'license_id = ?',
+        whereArgs: [upgraded.payload.licenseId],
+      );
+      expect(recRows.single['status'], 'REVOKED');
+
+      // Export & Re-import QAT_LEDGER_DEV_REGISTRY_V1 backup into a fresh DB
+      final backupJson = await signer.exportRegistryBackupJson();
+      expect(backupJson.contains('QAT_LEDGER_DEV_REGISTRY_V1'), true);
+      final restoredDb = DeveloperDatabaseService(
+        factory: databaseFactoryFfi,
+        customPath: p.join(tempDir.path, 'dev_restored.db'),
+      );
+      final restoredSigner = DeveloperLicenseSigner(keyManager: keyMgr, devDb: restoredDb);
+      final ok = await restoredSigner.importRegistryBackupJson(backupJson);
+      expect(ok, true);
+      final restoredSql = await restoredDb.database;
+      expect((await restoredSql.query('issued_licenses')).length, 3);
+      expect((await restoredSql.query('dev_package_prices')).length, greaterThanOrEqualTo(1));
+
+      await devSql.close();
+      await restoredSql.close();
+    } finally {
+      await tempDir.delete(recursive: true);
+    }
+  });
 }

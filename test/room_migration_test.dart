@@ -113,4 +113,89 @@ void main() {
       await tempDir.delete(recursive: true);
     }
   });
+
+  test('migrates Room v18 split dual-currency sales_invoices, qat_import_weights, and suppliers.region cleanly', () async {
+    final tempDir = await Directory.systemTemp.createTemp('qat_room_split_test_');
+    try {
+      final legacyPath = p.join(tempDir.path, 'tofan_al_aqsa_qat_db');
+      final targetPath = p.join(tempDir.path, 'qat_ledger_v3.db');
+
+      final legacyDb = await databaseFactoryFfi.openDatabase(
+        legacyPath,
+        options: OpenDatabaseOptions(version: 18),
+      );
+      await legacyDb.execute('PRAGMA user_version = 18');
+      await legacyDb.execute('CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, address TEXT, notes TEXT, totalDebt REAL)');
+      await legacyDb.execute('CREATE TABLE suppliers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, address TEXT, region TEXT, notes TEXT, totalBalance REAL)');
+      await legacyDb.execute('CREATE TABLE sales_invoices (id INTEGER PRIMARY KEY, customerId INTEGER, customerName TEXT, date TEXT, totalAmount REAL, taxApplied REAL, discount REAL, paidAmount REAL, debtAmount REAL, paymentMethod TEXT, currency TEXT, totalAmountYer REAL, totalAmountSar REAL, paidAmountYer REAL, paidAmountSar REAL, debtAmountYer REAL, debtAmountSar REAL, paymentMethodYer TEXT, paymentMethodSar TEXT, notes TEXT, isArchived INTEGER)');
+      await legacyDb.execute('CREATE TABLE qat_import_weights (id INTEGER PRIMARY KEY, date TEXT, weight REAL, notes TEXT, receiverName TEXT)');
+
+      await legacyDb.insert('customers', {'id': 1, 'name': 'عميل مزدوج', 'phone': '', 'address': '', 'notes': '', 'totalDebt': 0});
+      await legacyDb.insert('suppliers', {'id': 1, 'name': 'مورد آنس', 'phone': '', 'address': '', 'region': 'آنس', 'notes': '', 'totalBalance': 0});
+      // One legacy Room v18 sales_invoices row carrying BOTH YER and SAR amounts simultaneously
+      await legacyDb.insert('sales_invoices', {
+        'id': 10,
+        'customerId': 1,
+        'customerName': 'عميل مزدوج',
+        'date': '2026-11-10',
+        'totalAmount': 10000.0,
+        'taxApplied': 0.0,
+        'discount': 0.0,
+        'paidAmount': 2000.0,
+        'debtAmount': 8000.0,
+        'paymentMethod': 'آجل',
+        'currency': 'YER',
+        'totalAmountYer': 10000.0,
+        'paidAmountYer': 2000.0,
+        'debtAmountYer': 8000.0,
+        'paymentMethodYer': 'دفعة جزئية',
+        'totalAmountSar': 300.0,
+        'paidAmountSar': 50.0,
+        'debtAmountSar': 250.0,
+        'paymentMethodSar': 'دفعة جزئية',
+        'notes': '',
+        'isArchived': 0,
+      });
+      await legacyDb.insert('qat_import_weights', {
+        'id': 1,
+        'date': '2026-11-10',
+        'weight': 45.5,
+        'receiverName': 'مورد آنس',
+        'notes': 'وارد الصباح',
+      });
+      await legacyDb.close();
+
+      final dbService = DatabaseService(factory: databaseFactoryFfi, customPath: targetPath);
+      final migrator = RoomMigrator(dbService: dbService, sourceFactory: databaseFactoryFfi);
+      final summary = await migrator.migrateIfNeeded(
+        explicitSourceDbPath: legacyPath,
+        snapshotDirectory: p.join(tempDir.path, 'snaps'),
+      );
+      expect(summary.performed, true);
+
+      final repo = QatRepository(dbService);
+      final sales = await repo.getSales();
+      // Split into two strictly separated single-currency invoices!
+      expect(sales.length, 2);
+      final yerSale = sales.firstWhere((s) => s.currency == CurrencyCode.yer);
+      final sarSale = sales.firstWhere((s) => s.currency == CurrencyCode.sar);
+      expect(yerSale.remainingAmountMinor, 800000);
+      expect(sarSale.remainingAmountMinor, 25000);
+
+      final cust = (await repo.getCustomers()).single;
+      expect(cust.balanceFor(CurrencyCode.yer), 800000);
+      expect(cust.balanceFor(CurrencyCode.sar), 25000);
+
+      final sup = (await repo.getSuppliers()).single;
+      expect(sup.region, 'آنس');
+
+      final weights = await repo.getImportWeights();
+      expect(weights.length, 1);
+      expect(weights.single.weightMilli, 45500);
+
+      await dbService.close();
+    } finally {
+      await tempDir.delete(recursive: true);
+    }
+  });
 }

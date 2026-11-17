@@ -15,8 +15,30 @@ import '../data/room_migrator.dart';
 import '../developer/developer_database.dart';
 import '../developer/developer_key_manager.dart';
 import '../licensing/license_models.dart';
+import '../licensing/license_verifier.dart';
 import '../licensing/local_license_store.dart';
 import '../licensing/trusted_key_registry.dart';
+import '../licensing/trusted_time_guard.dart';
+
+/// Official 12-screen navigation structure matching original Android QAT LEDGER.
+enum AppScreenRoute {
+  dashboard('لوحة التحكم الرئيسية', Icons.dashboard_rounded),
+  sales('إدارة المبيعات', Icons.point_of_sale_rounded),
+  customers('العملاء والديون', Icons.people_rounded),
+  suppliers('الرعيّة والموردين', Icons.local_shipping_rounded),
+  statement('كشف الحساب المعتمد', Icons.description_rounded),
+  inventory('المخزون وأوزان الوارد', Icons.inventory_2_rounded),
+  accounts('الميزانية والحسابات', Icons.account_balance_wallet_rounded),
+  transfers('الحوالات والمستلمين', Icons.swap_horiz_rounded),
+  expenses('المصروفات والضريبة', Icons.receipt_long_rounded),
+  reports('التقارير المالية والأرباح', Icons.analytics_rounded),
+  archive('الأرشيف الشامل', Icons.archive_rounded),
+  settings('الإعدادات والنظام', Icons.settings_rounded);
+
+  const AppScreenRoute(this.arabicTitle, this.icon);
+  final String arabicTitle;
+  final IconData icon;
+}
 
 class AppController extends ChangeNotifier {
   AppController({
@@ -40,12 +62,18 @@ class AppController extends ChangeNotifier {
   LocalLicenseStore? _licenseStore;
   DeveloperKeyManager? _devKeyManager;
 
-  // Navigation
+  // Navigation (supports both 12-screen Android routing and legacy 5-section compatibility)
+  AppScreenRoute _activeRoute = AppScreenRoute.dashboard;
   int _sectionIndex = 0;
   int _salesSubTab = 0;
   int _inventorySubTab = 0;
   int _transfersSubTab = 0;
   int _settingsSubTab = 0;
+  int? _statementCustomerId;
+  int? _statementSupplierId;
+
+  // Active Date/Period Filter (Today, Yesterday, Week 1-5, Month, Year, Custom Range, All)
+  LedgerPeriodFilter _periodFilter = LedgerPeriodFilter.defaultToday();
 
   // Boot & Auth
   bool _initialized = false;
@@ -65,9 +93,13 @@ class AppController extends ChangeNotifier {
   // Live Domain State
   AgencySettings _settings = AgencySettings.defaults;
   Map<CurrencyCode, CurrencyDashboardMetrics> _todayMetrics = {};
+  Map<CurrencyCode, CurrencyDashboardMetrics> _filteredMetrics = {};
+  List<DailyChartPoint> _chartSeriesYer = [];
+  List<DailyChartPoint> _chartSeriesSar = [];
   Map<CurrencyCode, InventoryValuation> _inventoryValuation = {};
   List<QatType> _qatTypes = [];
   List<InventoryBatch> _batches = [];
+  List<QatImportWeight> _importWeights = [];
   List<Customer> _customers = [];
   List<Sale> _sales = [];
   List<CustomerPayment> _customerPayments = [];
@@ -100,16 +132,24 @@ class AppController extends ChangeNotifier {
       ? ThemeMode.dark
       : ThemeMode.light;
 
+  AppScreenRoute get activeRoute => _activeRoute;
   int get sectionIndex => _sectionIndex;
   int get salesSubTab => _salesSubTab;
   int get inventorySubTab => _inventorySubTab;
   int get transfersSubTab => _transfersSubTab;
   int get settingsSubTab => _settingsSubTab;
+  int? get statementCustomerId => _statementCustomerId;
+  int? get statementSupplierId => _statementSupplierId;
+  LedgerPeriodFilter get periodFilter => _periodFilter;
 
   Map<CurrencyCode, CurrencyDashboardMetrics> get todayMetrics => _todayMetrics;
+  Map<CurrencyCode, CurrencyDashboardMetrics> get filteredMetrics => _filteredMetrics;
+  List<DailyChartPoint> get chartSeriesYer => _chartSeriesYer;
+  List<DailyChartPoint> get chartSeriesSar => _chartSeriesSar;
   Map<CurrencyCode, InventoryValuation> get inventoryValuation => _inventoryValuation;
   List<QatType> get qatTypes => _qatTypes;
   List<InventoryBatch> get batches => _batches;
+  List<QatImportWeight> get importWeights => _importWeights;
   List<Customer> get customers => _customers;
   List<Sale> get sales => _sales;
   List<CustomerPayment> get customerPayments => _customerPayments;
@@ -137,6 +177,11 @@ class AppController extends ChangeNotifier {
   bool get canViewReportsCurrent =>
       (_currentUser?.canViewReports ?? true) && _sectionPermissions.reports;
 
+  bool hasLicenseFeature(LicenseFeature feature) {
+    if (!feature.isProOnly) return true;
+    return _licenseStatus.hasFeature(feature);
+  }
+
   QatRepository get repo => _repo;
   BackupService get backupService => _backupService;
   DeveloperKeyManager? get developerKeyManager => _devKeyManager;
@@ -156,6 +201,16 @@ class AppController extends ChangeNotifier {
     await _ensureDefaultCredentials();
     await refreshLicense();
     await reloadAll();
+
+    // Sync launcher display identity from migrated/saved branding
+    if (_settings.appDisplayName.isNotEmpty || _settings.logoPath.isNotEmpty) {
+      await PlatformBridge.instance.applyLauncherIdentity(
+        appName: _settings.appDisplayName.isNotEmpty
+            ? _settings.appDisplayName
+            : _settings.agencyName,
+        logoPath: _settings.logoPath,
+      );
+    }
 
     _initialized = true;
     notifyListeners();
@@ -387,6 +442,7 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Verifies strictly BEFORE overwriting any valid active license.
   Future<LicenseVerificationResult> activateLicense(String rawInput) async {
     if (_licenseStore == null) {
       return const LicenseVerificationResult(kind: LicenseStateKind.corrupted);
@@ -398,36 +454,48 @@ class AppController extends ChangeNotifier {
         devReg = TrustedPublicKeyRegistry.fromRawPublicKeys([info.rawPublicBytes]);
       }
     }
-    final tempVerifier = await _licenseStore!.loadAndVerify(
-      editionConfig: _editionConfig,
+    final installId = await _licenseStore!.getOrCreateInstallationId();
+    final registry = TrustedPublicKeyRegistry.fromCsv(_editionConfig.publicKeysCsv);
+    final verifier = OfflineLicenseVerifier(
+      registry: registry,
+      timeGuard: TrustedTimeGuard(prefs: _prefs),
+    );
+    final candidateResult = await verifier.verify(
+      rawLicenseInput: rawInput,
+      currentInstallationId: installId,
+      allowUntrustedLocalKeyInDev: _editionConfig.isDeveloper,
       extraDevRegistry: devReg,
     );
-    // Save temporarily then verify cleanly; revert if invalid signature/corrupted
-    final prev = _licenseStore!.getStoredRawLicense();
+    if (!candidateResult.isValid) {
+      return candidateResult;
+    }
     await _licenseStore!.saveRawLicense(rawInput);
     await refreshLicense();
-    if (!_licenseStatus.isValid) {
-      final result = _licenseStatus;
-      if (prev != null) {
-        await _licenseStore!.saveRawLicense(prev);
-      } else {
-        await _licenseStore!.clearLicense();
-      }
-      _licenseStatus = tempVerifier;
-      notifyListeners();
-      return result;
-    }
     return _licenseStatus;
+  }
+
+  Future<void> clearActiveLicense() async {
+    if (_licenseStore == null) return;
+    await _licenseStore!.clearLicense();
+    await refreshLicense();
   }
 
   Future<void> reloadAll() async {
     final today = QatDateUtils.todayIso();
+    final range = _periodFilter.resolveBounds();
     await _loadUsersAndPermissions();
     _settings = await _repo.getAgencySettings();
     _todayMetrics = await _repo.getDashboardMetrics(fromIso: today, toIso: today);
+    _filteredMetrics = await _repo.getDashboardMetrics(
+      fromIso: range.fromIso,
+      toIso: range.toIso,
+    );
+    _chartSeriesYer = await _repo.getDailyChartSeries(currency: CurrencyCode.yer);
+    _chartSeriesSar = await _repo.getDailyChartSeries(currency: CurrencyCode.sar);
     _inventoryValuation = await _repo.getInventoryValuation();
     _qatTypes = await _repo.getQatTypes();
     _batches = await _repo.getInventoryBatches();
+    _importWeights = await _repo.getImportWeights();
     _customers = await _repo.getCustomers();
     _sales = await _repo.getSales();
     _customerPayments = await _repo.getCustomerPayments();
@@ -442,6 +510,16 @@ class AppController extends ChangeNotifier {
     _recipientReports = await _repo.getAllRecipientsReports();
     _dailySettlements = await _repo.getDailySettlements();
     _reconciliationLogs = await _repo.getInventoryReconciliations();
+    notifyListeners();
+  }
+
+  Future<void> setPeriodFilter(LedgerPeriodFilter filter) async {
+    _periodFilter = filter;
+    final range = filter.resolveBounds();
+    _filteredMetrics = await _repo.getDashboardMetrics(
+      fromIso: range.fromIso,
+      toIso: range.toIso,
+    );
     notifyListeners();
   }
 
@@ -462,6 +540,60 @@ class AppController extends ChangeNotifier {
     await reloadAll();
   }
 
+  void navigateToRoute(AppScreenRoute route) {
+    _activeRoute = route;
+    switch (route) {
+      case AppScreenRoute.dashboard:
+        _sectionIndex = 0;
+      case AppScreenRoute.sales:
+        _sectionIndex = 1;
+        _salesSubTab = 0;
+      case AppScreenRoute.customers:
+        _sectionIndex = 1;
+        _salesSubTab = 2;
+      case AppScreenRoute.statement:
+        _sectionIndex = 1;
+        _salesSubTab = 3;
+      case AppScreenRoute.inventory:
+        _sectionIndex = 2;
+        _inventorySubTab = 0;
+      case AppScreenRoute.suppliers:
+        _sectionIndex = 2;
+        _inventorySubTab = 3;
+      case AppScreenRoute.accounts:
+        _sectionIndex = 2;
+        _inventorySubTab = 2;
+      case AppScreenRoute.transfers:
+        _sectionIndex = 3;
+        _transfersSubTab = 0;
+      case AppScreenRoute.reports:
+        _sectionIndex = 3;
+        _transfersSubTab = 2;
+      case AppScreenRoute.archive:
+        _sectionIndex = 3;
+        _transfersSubTab = 4;
+      case AppScreenRoute.expenses:
+        _sectionIndex = 4;
+        _settingsSubTab = 0;
+      case AppScreenRoute.settings:
+        _sectionIndex = 4;
+        _settingsSubTab = 1;
+    }
+    notifyListeners();
+  }
+
+  void openStatementForCustomer(int customerId) {
+    _statementCustomerId = customerId;
+    _statementSupplierId = null;
+    navigateToRoute(AppScreenRoute.statement);
+  }
+
+  void openStatementForSupplier(int supplierId) {
+    _statementSupplierId = supplierId;
+    _statementCustomerId = null;
+    navigateToRoute(AppScreenRoute.statement);
+  }
+
   void setSection(int index, {int? subTab}) {
     _sectionIndex = index.clamp(0, 4).toInt();
     if (subTab != null) {
@@ -476,52 +608,104 @@ class AppController extends ChangeNotifier {
           _settingsSubTab = subTab;
       }
     }
+    _activeRoute = switch (_sectionIndex) {
+      0 => AppScreenRoute.dashboard,
+      1 => switch (_salesSubTab) {
+          2 => AppScreenRoute.customers,
+          3 => AppScreenRoute.statement,
+          _ => AppScreenRoute.sales,
+        },
+      2 => switch (_inventorySubTab) {
+          2 => AppScreenRoute.accounts,
+          3 || 4 => AppScreenRoute.suppliers,
+          _ => AppScreenRoute.inventory,
+        },
+      3 => switch (_transfersSubTab) {
+          2 => AppScreenRoute.reports,
+          4 => AppScreenRoute.archive,
+          _ => AppScreenRoute.transfers,
+        },
+      _ => switch (_settingsSubTab) {
+          0 => AppScreenRoute.expenses,
+          _ => AppScreenRoute.settings,
+        },
+    };
     notifyListeners();
   }
 
   void setSalesSubTab(int idx) {
     _salesSubTab = idx;
+    _activeRoute = switch (idx) {
+      2 => AppScreenRoute.customers,
+      3 => AppScreenRoute.statement,
+      _ => AppScreenRoute.sales,
+    };
     notifyListeners();
   }
 
   void setInventorySubTab(int idx) {
     _inventorySubTab = idx;
+    _activeRoute = switch (idx) {
+      2 => AppScreenRoute.accounts,
+      3 || 4 => AppScreenRoute.suppliers,
+      _ => AppScreenRoute.inventory,
+    };
     notifyListeners();
   }
 
   void setTransfersSubTab(int idx) {
     _transfersSubTab = idx;
+    _activeRoute = switch (idx) {
+      2 => AppScreenRoute.reports,
+      4 => AppScreenRoute.archive,
+      _ => AppScreenRoute.transfers,
+    };
     notifyListeners();
   }
 
   void setSettingsSubTab(int idx) {
     _settingsSubTab = idx;
+    _activeRoute = idx == 0 ? AppScreenRoute.expenses : AppScreenRoute.settings;
     notifyListeners();
   }
 
   Future<void> updateSettings(AgencySettings updated) async {
     await _repo.saveAgencySettings(updated);
     _settings = updated;
+    await PlatformBridge.instance.applyLauncherIdentity(
+      appName: updated.appDisplayName.isNotEmpty
+          ? updated.appDisplayName
+          : updated.agencyName,
+      logoPath: updated.logoPath,
+    );
     notifyListeners();
   }
 
   Future<void> setThemeChoice(AppThemeModeChoice choice) async {
     await _repo.setSetting('theme_choice', choice.key);
-    _settings = AgencySettings(
-      agencyName: _settings.agencyName,
-      agencyPhone: _settings.agencyPhone,
-      agencyAddress: _settings.agencyAddress,
-      footerNote: _settings.footerNote,
-      logoPath: _settings.logoPath,
-      currencyMode: _settings.currencyMode,
-      displaySarToYerMilli: _settings.displaySarToYerMilli,
-      themeChoice: choice,
-      onboardingComplete: _settings.onboardingComplete,
-      savedPrinterName: _settings.savedPrinterName,
-      savedPrinterAddress: _settings.savedPrinterAddress,
-      printerPaperMm: _settings.printerPaperMm,
-    );
+    _settings = _settings.copyWith(themeChoice: choice);
     notifyListeners();
+  }
+
+  Future<void> setColorPalette({
+    required String paletteId,
+    String? customPrimaryHex,
+    String? customAccentHex,
+    String? customCanvasHex,
+    String? customCardHex,
+    String? customTextHex,
+    bool? syncColorsWithPdf,
+  }) async {
+    final updated = _settings.copyWith(
+      paletteId: paletteId,
+      customPrimaryHex: customPrimaryHex ?? _settings.customPrimaryHex,
+      customAccentHex: customAccentHex ?? _settings.customAccentHex,
+      customCanvasHex: customCanvasHex ?? _settings.customCanvasHex,
+      customCardHex: customCardHex ?? _settings.customCardHex,
+      customTextHex: customTextHex ?? _settings.customTextHex,
+      syncColorsWithPdf: syncColorsWithPdf ?? _settings.syncColorsWithPdf,
+    );
+    await updateSettings(updated);
   }
 
   Future<void> setCurrencyMode(CurrencyMode mode, {int? displayRateMilli}) async {

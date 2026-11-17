@@ -12,7 +12,11 @@ class TrustedTimeGuard {
   final int maxAllowedRollbackMs;
   int _inMemoryMaxSeenMs = 0;
 
-  Future<ClockCheckResult> evaluateNow(int nowEpochMs, {int? anchorEpochMs}) async {
+  Future<ClockCheckResult> evaluateNow(
+    int nowEpochMs, {
+    int? anchorEpochMs,
+    int? overrideMaxRollbackMs,
+  }) async {
     int storedMax = _inMemoryMaxSeenMs;
     if (_prefs != null) {
       storedMax = _prefs.getInt(_prefMaxSeenMs) ?? _inMemoryMaxSeenMs;
@@ -21,7 +25,8 @@ class TrustedTimeGuard {
       storedMax = anchorEpochMs;
     }
 
-    if (storedMax > 0 && nowEpochMs + maxAllowedRollbackMs < storedMax) {
+    final allowed = overrideMaxRollbackMs ?? maxAllowedRollbackMs;
+    if (storedMax > 0 && nowEpochMs + allowed < storedMax) {
       return ClockCheckResult(
         trusted: false,
         effectiveNowMs: storedMax,

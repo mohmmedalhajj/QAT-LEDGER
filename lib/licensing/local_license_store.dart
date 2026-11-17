@@ -20,7 +20,22 @@ class LocalLicenseStore {
 
   Future<String> getOrCreateInstallationId() async {
     final existing = _prefs.getString(_prefInstallId);
-    if (existing != null && existing.isNotEmpty) return existing;
+    if (existing != null && existing.trim().isNotEmpty) {
+      return existing.trim().toUpperCase();
+    }
+
+    // Check if an upgraded legacy Kotlin install already had a `QAT-XXXX-XXXX-XXXX` install ID.
+    try {
+      final legacy = await PlatformBridge.instance.collectLegacySources();
+      final installPrefs = legacy.legacyPrefs['qat_license_install_prefs'];
+      final legacyInstallId = installPrefs?['installation_id']?.trim().toUpperCase() ?? '';
+      if (RegExp(r'^QAT-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$').hasMatch(legacyInstallId)) {
+        await _prefs.setString(_prefInstallId, legacyInstallId);
+        return legacyInstallId;
+      }
+    } catch (_) {
+      // Ignore native bridge issues in pure Dart unit test environments
+    }
 
     final anchor = await PlatformBridge.instance.getHardwareAnchor();
     final androidId = anchor['androidId'] ?? '';
@@ -32,11 +47,12 @@ class LocalLicenseStore {
     final hex = sha256
         .convert(seedInput)
         .bytes
-        .take(8)
+        .take(6)
         .map((b) => b.toRadixString(16).padLeft(2, '0'))
         .join()
         .toUpperCase();
-    final formatted = 'QLD-${hex.substring(0, 4)}-${hex.substring(4, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}';
+    // Matches Kotlin `QAT-XXXX-XXXX-XXXX` 12-char format cleanly!
+    final formatted = 'QAT-${hex.substring(0, 4)}-${hex.substring(4, 8)}-${hex.substring(8, 12)}';
     await _prefs.setString(_prefInstallId, formatted);
     return formatted;
   }
@@ -51,10 +67,39 @@ class LocalLicenseStore {
     await _prefs.remove(_prefActiveLicense);
   }
 
+  /// Imports legacy `.qlic` or compact token from native `noBackupFilesDir/active_license.qlic`
+  /// or `qat_active_license_store` / `qat_ledger_license_store` if present during first run.
+  Future<void> importLegacyLicenseIfUnset() async {
+    final current = getStoredRawLicense();
+    if (current != null && current.trim().isNotEmpty) return;
+    try {
+      final legacy = await PlatformBridge.instance.collectLegacySources();
+      if (legacy.legacyActiveLicenseDoc != null &&
+          legacy.legacyActiveLicenseDoc!.trim().isNotEmpty) {
+        await saveRawLicense(legacy.legacyActiveLicenseDoc!);
+        return;
+      }
+      for (final storeName in const ['qat_active_license_store', 'qat_ledger_license_store']) {
+        final store = legacy.legacyPrefs[storeName];
+        if (store == null) continue;
+        for (final key in const ['signed_license_doc', 'active_license_doc', 'license_json', 'compact_token']) {
+          final val = store[key]?.trim() ?? '';
+          if (val.isNotEmpty) {
+            await saveRawLicense(val);
+            return;
+          }
+        }
+      }
+    } catch (_) {
+      // Safe fallback
+    }
+  }
+
   Future<LicenseVerificationResult> loadAndVerify({
     required EditionConfig editionConfig,
     TrustedPublicKeyRegistry? extraDevRegistry,
   }) async {
+    await importLegacyLicenseIfUnset();
     final raw = getStoredRawLicense();
     if (raw == null || raw.trim().isEmpty) {
       return const LicenseVerificationResult(kind: LicenseStateKind.unlicensed);

@@ -1,7 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
-/// App theme options: Enterprise Light (Yemeni heritage emerald + subtle copper-gold)
-/// and Pure Black OLED Dark (charcoal layered cards + luminous emerald + muted gold).
+/// App theme options: Enterprise Light and Pure Black OLED Dark.
 enum AppThemeModeChoice {
   lightEnterprise('light_enterprise', 'المظهر الفاتح المؤسسي'),
   darkBlack('dark_black', 'المظهر الأسود الداكن');
@@ -12,6 +11,210 @@ enum AppThemeModeChoice {
 
   static AppThemeModeChoice fromKey(String? raw) {
     return raw == darkBlack.key ? darkBlack : lightEnterprise;
+  }
+}
+
+/// 8 built-in institutional palettes matching original Android `AppPalettes`, plus Custom Hex.
+@immutable
+class AppColorPreset {
+  const AppColorPreset({
+    required this.id,
+    required this.nameAr,
+    required this.subtitleAr,
+    required this.primaryDark,
+    required this.primaryNormal,
+    required this.primaryLight,
+    required this.primarySoftLight,
+    required this.accentNormal,
+    required this.accentLight,
+    required this.goldColor,
+  });
+
+  final String id;
+  final String nameAr;
+  final String subtitleAr;
+  final Color primaryDark;
+  final Color primaryNormal;
+  final Color primaryLight;
+  final Color primarySoftLight;
+  final Color accentNormal;
+  final Color accentLight;
+  final Color goldColor;
+
+  static const AppColorPreset emeraldGreen = AppColorPreset(
+    id: 'emerald_green',
+    nameAr: 'أخضر ميزان القات المؤسسي (الرسمي)',
+    subtitleAr: 'الهوية الرسمية الهادئة لنظام ميزان القات — QAT LEDGER',
+    primaryDark: Color(0xFF104E39),
+    primaryNormal: Color(0xFF267451),
+    primaryLight: Color(0xFF2EC87E),
+    primarySoftLight: Color(0xFFE2EFE9),
+    accentNormal: Color(0xFFB67D24),
+    accentLight: Color(0xFFDFA94A),
+    goldColor: Color(0xFFC7A45B),
+  );
+
+  static const AppColorPreset sapphireBlue = AppColorPreset(
+    id: 'sapphire_blue',
+    nameAr: 'الأزرق الملكي الياقوتي',
+    subtitleAr: 'نمط مؤسسي رفيع يعكس الدقة والاحترافية الحسابية',
+    primaryDark: Color(0xFF0D2B52),
+    primaryNormal: Color(0xFF15539E),
+    primaryLight: Color(0xFF3B82F6),
+    primarySoftLight: Color(0xFFE3EDF7),
+    accentNormal: Color(0xFFD97706),
+    accentLight: Color(0xFFF59E0B),
+    goldColor: Color(0xFFFFB300),
+  );
+
+  static const AppColorPreset royalBurgundy = AppColorPreset(
+    id: 'royal_burgundy',
+    nameAr: 'العنابي والياقوت الإمبراطوري',
+    subtitleAr: 'هيبة راقية وفخامة عربية متميزة للتقارير والواجهات',
+    primaryDark: Color(0xFF4A0E17),
+    primaryNormal: Color(0xFF8B1E2D),
+    primaryLight: Color(0xFFF87171),
+    primarySoftLight: Color(0xFFF7E8EB),
+    accentNormal: Color(0xFF0284C7),
+    accentLight: Color(0xFF38BDF8),
+    goldColor: Color(0xFFD4AF37),
+  );
+
+  static const AppColorPreset deepTeal = AppColorPreset(
+    id: 'deep_teal',
+    nameAr: 'الفيروزي المحيطي الأنيق',
+    subtitleAr: 'ألوان عصرية مريحة للعين مع تباين فائق للبيانات',
+    primaryDark: Color(0xFF00363A),
+    primaryNormal: Color(0xFF00695C),
+    primaryLight: Color(0xFF14B8A6),
+    primarySoftLight: Color(0xFFDCEDED),
+    accentNormal: Color(0xFFEA580C),
+    accentLight: Color(0xFFFB923C),
+    goldColor: Color(0xFFFFD54F),
+  );
+
+  static const AppColorPreset imperialGold = AppColorPreset(
+    id: 'imperial_gold',
+    nameAr: 'الذهبي الملكي والعنبر الفاخر',
+    subtitleAr: 'طابع الثراء التجاري المالي والتميز الموثوق',
+    primaryDark: Color(0xFF4E3800),
+    primaryNormal: Color(0xFF7A5900),
+    primaryLight: Color(0xFFEAB308),
+    primarySoftLight: Color(0xFFF7EED6),
+    accentNormal: Color(0xFF15803D),
+    accentLight: Color(0xFF4ADE80),
+    goldColor: Color(0xFFFFD700),
+  );
+
+  static const AppColorPreset royalAmethyst = AppColorPreset(
+    id: 'royal_amethyst',
+    nameAr: 'البنفسجي الإمبراطوري الراقي',
+    subtitleAr: 'لمسة أرستقراطية فريدة وجذابة لقراءة الحسابات',
+    primaryDark: Color(0xFF2E114D),
+    primaryNormal: Color(0xFF5B2396),
+    primaryLight: Color(0xFFA855F7),
+    primarySoftLight: Color(0xFFEDE2F5),
+    accentNormal: Color(0xFF0D9488),
+    accentLight: Color(0xFF2DD4BF),
+    goldColor: Color(0xFFD4AF37),
+  );
+
+  static const AppColorPreset slateCharcoal = AppColorPreset(
+    id: 'slate_charcoal',
+    nameAr: 'الرمادي الفحمي والأونيكس المودرن',
+    subtitleAr: 'طابع تقني حديث وهادئ يركز على تباين الأرقام',
+    primaryDark: Color(0xFF1E272E),
+    primaryNormal: Color(0xFF34495E),
+    primaryLight: Color(0xFF94A3B8),
+    primarySoftLight: Color(0xFFEAEDED),
+    accentNormal: Color(0xFFD35400),
+    accentLight: Color(0xFFF97316),
+    goldColor: Color(0xFFF1C40F),
+  );
+
+  static const AppColorPreset navyBronze = AppColorPreset(
+    id: 'navy_bronze',
+    nameAr: 'الكحلي التجاري والبرونزي',
+    subtitleAr: 'توازن مثالي بين الكحلي الداكن ولمسات البرونز والذهب',
+    primaryDark: Color(0xFF0A192F),
+    primaryNormal: Color(0xFF1B3A57),
+    primaryLight: Color(0xFF38BDF8),
+    primarySoftLight: Color(0xFFE2EBF4),
+    accentNormal: Color(0xFFB4690E),
+    accentLight: Color(0xFFDFA94A),
+    goldColor: Color(0xFFD4AF37),
+  );
+
+  static const List<AppColorPreset> allPresets = [
+    emeraldGreen,
+    sapphireBlue,
+    royalBurgundy,
+    deepTeal,
+    imperialGold,
+    royalAmethyst,
+    slateCharcoal,
+    navyBronze,
+  ];
+
+  static Color? tryParseHex(String hex) {
+    final cleaned = hex.trim().replaceFirst('#', '');
+    if (cleaned.length == 6 && RegExp(r'^[0-9a-fA-F]{6}$').hasMatch(cleaned)) {
+      return Color(int.parse('FF$cleaned', radix: 16));
+    }
+    if (cleaned.length == 8 && RegExp(r'^[0-9a-fA-F]{8}$').hasMatch(cleaned)) {
+      return Color(int.parse(cleaned, radix: 16));
+    }
+    return null;
+  }
+
+  static String toHex(Color color) {
+    final r = (color.r * 255).round().clamp(0, 255).toRadixString(16).padLeft(2, '0');
+    final g = (color.g * 255).round().clamp(0, 255).toRadixString(16).padLeft(2, '0');
+    final b = (color.b * 255).round().clamp(0, 255).toRadixString(16).padLeft(2, '0');
+    return '#${r.toUpperCase()}${g.toUpperCase()}${b.toUpperCase()}';
+  }
+
+  static Color _scale(Color c, double factor) {
+    return Color.from(
+      alpha: 1.0,
+      red: (c.r * factor).clamp(0.0, 1.0),
+      green: (c.g * factor).clamp(0.0, 1.0),
+      blue: (c.b * factor).clamp(0.0, 1.0),
+    );
+  }
+
+  static AppColorPreset createCustom({
+    required String primaryHex,
+    String accentHex = '#C83E3B',
+  }) {
+    final p = tryParseHex(primaryHex) ?? emeraldGreen.primaryNormal;
+    final a = tryParseHex(accentHex) ?? const Color(0xFFC83E3B);
+    return AppColorPreset(
+      id: 'custom',
+      nameAr: 'النمط المخصص الفاخر',
+      subtitleAr: 'ألوان مخصصة من اختيارك متناسقة للواجهات وملفات PDF',
+      primaryDark: _scale(p, 0.58),
+      primaryNormal: p,
+      primaryLight: Color.lerp(p, Colors.white, 0.35)!,
+      primarySoftLight: Color.lerp(p, Colors.white, 0.88)!,
+      accentNormal: a,
+      accentLight: Color.lerp(a, Colors.white, 0.3)!,
+      goldColor: const Color(0xFFC7A45B),
+    );
+  }
+
+  static AppColorPreset resolve({
+    required String paletteId,
+    String customPrimaryHex = '#267451',
+    String customAccentHex = '#C83E3B',
+  }) {
+    if (paletteId == 'custom') {
+      return createCustom(primaryHex: customPrimaryHex, accentHex: customAccentHex);
+    }
+    for (final p in allPresets) {
+      if (p.id == paletteId) return p;
+    }
+    return emeraldGreen;
   }
 }
 
@@ -91,6 +294,48 @@ class QatPalette extends ThemeExtension<QatPalette> {
   final Color sarBadgeBg;
   final Color sarBadgeFg;
   final bool isDark;
+
+  static QatPalette forPreset(
+    AppColorPreset preset, {
+    required bool isDark,
+    String customCanvasHex = '',
+    String customCardHex = '',
+    String customTextHex = '',
+  }) {
+    final base = isDark ? dark : light;
+    if (preset.id == AppColorPreset.emeraldGreen.id &&
+        customCanvasHex.isEmpty &&
+        customCardHex.isEmpty &&
+        customTextHex.isEmpty) {
+      return base;
+    }
+
+    final brand = isDark ? preset.primaryLight : preset.primaryDark;
+    final brandSoft = isDark
+        ? Color.lerp(preset.primaryDark, Colors.black, 0.55)!
+        : preset.primarySoftLight;
+    final accent = isDark ? preset.accentLight : preset.accentNormal;
+    final accentSoft = isDark
+        ? Color.lerp(preset.accentNormal, Colors.black, 0.72)!
+        : Color.lerp(preset.accentNormal, Colors.white, 0.88)!;
+
+    final canvasOverride = AppColorPreset.tryParseHex(customCanvasHex);
+    final cardOverride = AppColorPreset.tryParseHex(customCardHex);
+    final textOverride = AppColorPreset.tryParseHex(customTextHex);
+
+    return base.copyWith(
+      canvas: canvasOverride ?? base.canvas,
+      card: cardOverride ?? base.card,
+      textPrimary: textOverride ?? base.textPrimary,
+      brand: brand,
+      brandSoft: brandSoft,
+      accent: accent,
+      accentSoft: accentSoft,
+      tableHeader: isDark ? brandSoft : preset.primarySoftLight,
+      yerBadgeBg: brandSoft,
+      yerBadgeFg: brand,
+    );
+  }
 
   static const QatPalette light = QatPalette(
     canvas: Color(0xFFF4F2EC),
@@ -246,8 +491,43 @@ class QatPalette extends ThemeExtension<QatPalette> {
 abstract final class AppTheme {
   static const String fontFamily = 'IBMPlexSansArabic';
 
-  static ThemeData buildLight() => _build(QatPalette.light, Brightness.light);
-  static ThemeData buildDark() => _build(QatPalette.dark, Brightness.dark);
+  static ThemeData buildLight({
+    AppColorPreset? preset,
+    String customCanvasHex = '',
+    String customCardHex = '',
+    String customTextHex = '',
+  }) =>
+      _build(
+        preset == null
+            ? QatPalette.light
+            : QatPalette.forPreset(
+                preset,
+                isDark: false,
+                customCanvasHex: customCanvasHex,
+                customCardHex: customCardHex,
+                customTextHex: customTextHex,
+              ),
+        Brightness.light,
+      );
+
+  static ThemeData buildDark({
+    AppColorPreset? preset,
+    String customCanvasHex = '',
+    String customCardHex = '',
+    String customTextHex = '',
+  }) =>
+      _build(
+        preset == null
+            ? QatPalette.dark
+            : QatPalette.forPreset(
+                preset,
+                isDark: true,
+                customCanvasHex: customCanvasHex,
+                customCardHex: customCardHex,
+                customTextHex: customTextHex,
+              ),
+        Brightness.dark,
+      );
 
   static ThemeData _build(QatPalette p, Brightness brightness) {
     final scheme = ColorScheme(

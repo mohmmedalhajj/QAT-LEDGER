@@ -8,6 +8,7 @@ import '../../core/date_utils.dart';
 import '../../core/money.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../licensing/license_models.dart';
 import '../../services/pdf_export_service.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common_widgets.dart';
@@ -86,6 +87,14 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
     if (!isActive) {
       _wasActive = false;
       return const SizedBox.shrink();
+    }
+    if (!ctrl.hasLicenseFeature(LicenseFeature.reports)) {
+      return ProFeatureLockedCard(
+        featureTitle: 'التقارير المالية والأرباح المتقدمة',
+        featureDescription:
+            'تتيح لك الباقة الاحترافية (PRO) تحليل المبيعات، الأرباح الصافية، كفاءة الموردين، وتصدير التقارير المعتمدة PDF.',
+        onActivatePressed: () => ctrl.setSection(4, subTab: 3),
+      );
     }
     if (!ctrl.canViewReportsCurrent) {
       return const EmptyLedgerState(

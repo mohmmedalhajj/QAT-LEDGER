@@ -29,6 +29,7 @@ class LegacyMigrationSources {
     required this.legacyDevDbExists,
     required this.legacyDevDbPath,
     required this.legacyPrefs,
+    this.legacyActiveLicenseDoc = '',
   });
 
   final bool legacyRoomDbExists;
@@ -36,6 +37,7 @@ class LegacyMigrationSources {
   final bool legacyDevDbExists;
   final String legacyDevDbPath;
   final Map<String, Map<String, Object?>> legacyPrefs;
+  final String legacyActiveLicenseDoc;
 
   static const empty = LegacyMigrationSources(
     legacyRoomDbExists: false,
@@ -43,14 +45,37 @@ class LegacyMigrationSources {
     legacyDevDbExists: false,
     legacyDevDbPath: '',
     legacyPrefs: {},
+    legacyActiveLicenseDoc: '',
   );
 }
 
 @immutable
 class BondedPrinter {
-  const BondedPrinter({required this.name, required this.address});
+  const BondedPrinter({
+    required this.name,
+    required this.address,
+  });
   final String name;
   final String address;
+
+  bool get isLikelyPrinter {
+    final lower = name.toLowerCase();
+    const audioKeywords = [
+      'earbud', 'airpod', 'headphone', 'speaker', 'watch', 'band',
+      'tv', 'car', 'buds', 'jbl', 'sony', 'bose', 'beats', 'soundbar',
+      'سماعة', 'ساعة', 'تلفاز', 'سيارة',
+    ];
+    if (audioKeywords.any(lower.contains)) return false;
+    const printerKeywords = [
+      'printer', 'pos', 'print', 'thermal', 'mtp', 'rpp', 'xp-', 'pt-',
+      'gp-', 'zj', 'innerprinter', 'bixolon', 'epson', 'star', 'zjiang',
+      'gprinter', 'xprinter', 'sunmi', 'imin', 'rongta', 'milestone', 'طابعة',
+    ];
+    return printerKeywords.any(lower.contains);
+  }
+
+  String get deviceCategoryLabel =>
+      isLikelyPrinter ? 'طابعة حرارية مرشحة' : 'جهاز بلوتوث عام (تحقق قبل الطباعة)';
 }
 
 @immutable
@@ -141,6 +166,7 @@ class PlatformBridge {
         legacyDevDbExists: (raw['legacyDevDbExists'] as bool?) ?? false,
         legacyDevDbPath: (raw['legacyDevDbPath'] as String?) ?? '',
         legacyPrefs: prefs,
+        legacyActiveLicenseDoc: (raw['legacyActiveLicenseDoc'] as String?) ?? '',
       );
     } on MissingPluginException {
       return LegacyMigrationSources.empty;
@@ -180,7 +206,7 @@ class PlatformBridge {
     try {
       final items = await _channel.invokeListMethod<dynamic>('getBondedPrinters');
       if (items == null) return const [];
-      return items
+      final printers = items
           .whereType<Map<dynamic, dynamic>>()
           .map(
             (m) => BondedPrinter(
@@ -190,6 +216,8 @@ class PlatformBridge {
           )
           .where((p) => p.address.isNotEmpty)
           .toList();
+      printers.sort((a, b) => (b.isLikelyPrinter ? 1 : 0) - (a.isLikelyPrinter ? 1 : 0));
+      return printers;
     } on MissingPluginException {
       return const [];
     } on FlutterError catch (e) {
@@ -219,6 +247,24 @@ class PlatformBridge {
     } on FlutterError catch (e) {
       if (!_isUninitializedBindingError(e)) rethrow;
       return null;
+    }
+  }
+
+  Future<bool> applyLauncherIdentity({
+    required String appName,
+    String logoPath = '',
+  }) async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('applyLauncherIdentity', {
+        'appName': appName,
+        'logoPath': logoPath,
+      });
+      return ok ?? false;
+    } on MissingPluginException {
+      return false;
+    } on FlutterError catch (e) {
+      if (!_isUninitializedBindingError(e)) rethrow;
+      return false;
     }
   }
 }

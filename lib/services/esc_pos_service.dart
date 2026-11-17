@@ -4,6 +4,8 @@ import 'package:image/image.dart' as img;
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
+import '../core/date_utils.dart';
+import '../core/money.dart';
 import '../core/platform_bridge.dart';
 import '../data/models.dart';
 import 'pdf_export_service.dart';
@@ -46,7 +48,6 @@ class EscPosService {
           if (x < resized.width) {
             final pixel = resized.getPixel(x, y);
             final luma = img.getLuminance(pixel);
-            // White background -> 0, dark ink -> 1
             if (luma < 145) {
               byteVal |= (1 << (7 - bit));
             }
@@ -61,19 +62,11 @@ class EscPosService {
     return out.toBytes();
   }
 
-  Future<bool> printSaleReceipt({
-    required AgencySettings agency,
-    required Sale sale,
+  Future<bool> printPdfBytes({
+    required Uint8List pdfBytes,
     required String printerAddress,
     int paperMm = 80,
   }) async {
-    final rollFormat = paperMm <= 58 ? PdfPageFormat.roll57 : PdfPageFormat.roll80;
-    final pdfBytes = await PdfExportService.instance.buildSaleInvoicePdf(
-      agency: agency,
-      sale: sale,
-      format: rollFormat,
-    );
-
     final targetWidthPx = paperMm <= 58 ? 384 : 576;
     final escPosBuilder = BytesBuilder();
 
@@ -92,5 +85,136 @@ class EscPosService {
       throw StateError('فشل تجهيز بيانات الطباعة الحرارية.');
     }
     return PlatformBridge.instance.printEscPosBytes(printerAddress, payload);
+  }
+
+  Future<bool> printSaleReceipt({
+    required AgencySettings agency,
+    required Sale sale,
+    required String printerAddress,
+    int paperMm = 80,
+  }) async {
+    final rollFormat = paperMm <= 58 ? PdfPageFormat.roll57 : PdfPageFormat.roll80;
+    final pdfBytes = await PdfExportService.instance.buildSaleInvoicePdf(
+      agency: agency,
+      sale: sale,
+      format: rollFormat,
+    );
+    return printPdfBytes(
+      pdfBytes: pdfBytes,
+      printerAddress: printerAddress,
+      paperMm: paperMm,
+    );
+  }
+
+  Future<bool> printTextReceipt({
+    required AgencySettings agency,
+    required String title,
+    required String receiptText,
+    required String printerAddress,
+    int paperMm = 80,
+  }) async {
+    final rollFormat = paperMm <= 58 ? PdfPageFormat.roll57 : PdfPageFormat.roll80;
+    final pdfBytes = await PdfExportService.instance.buildTextReceiptPdf(
+      agency: agency,
+      title: title,
+      lines: receiptText.split('\n'),
+      format: rollFormat,
+    );
+    return printPdfBytes(
+      pdfBytes: pdfBytes,
+      printerAddress: printerAddress,
+      paperMm: paperMm,
+    );
+  }
+}
+
+/// Centralized Arabic 58mm (32-col) / 80mm (48-col) thermal & preview receipt builders.
+abstract final class ThermalReceiptFormatter {
+  static int columnsForMm(int mm) => mm >= 80 ? 48 : 32;
+
+  static String buildSaleReceiptText(AgencySettings agency, Sale sale, {int paperMm = 80}) {
+    final sb = StringBuffer()
+      ..writeln(agency.agencyName)
+      ..writeln('فاتورة مبيعات: ${sale.invoiceNumber}')
+      ..writeln('التاريخ: ${QatDateUtils.formatArabicDateTime12h(sale.dateMs)}')
+      ..writeln('العميل: ${sale.customerName}')
+      ..writeln('العملة: ${sale.currency.arabicName}')
+      ..writeln('طريقة الدفع: ${sale.effectivePaymentMethodLabel}')
+      ..writeln('--------------------------------');
+    for (final it in sale.items) {
+      sb.writeln(
+        '${it.qatTypeName} (${QuantityMath.formatMilli(it.qtyMilli)} ${it.unit}) = ${Money(it.lineTotalMinor, sale.currency).format()}',
+      );
+    }
+    sb
+      ..writeln('--------------------------------')
+      ..writeln('الإجمالي: ${Money(sale.totalAmountMinor, sale.currency).format()}')
+      ..writeln('المدفوع: ${Money(sale.paidAmountMinor, sale.currency).format()}')
+      ..writeln('المتبقي: ${Money(sale.remainingAmountMinor, sale.currency).format()}');
+    if (sale.notes.isNotEmpty) sb.writeln('ملاحظات: ${sale.notes}');
+    if (agency.footerEnabled && agency.footerNote.isNotEmpty) {
+      sb.writeln('--------------------------------');
+      sb.writeln(agency.footerNote);
+    }
+    return sb.toString().trim();
+  }
+
+  static String buildTransferVoucherText(
+    AgencySettings agency,
+    MoneyTransfer transfer, {
+    TransferRecipient? recipient,
+  }) {
+    final sb = StringBuffer()
+      ..writeln(agency.agencyName)
+      ..writeln('سند حوالة مالية (#${transfer.id})')
+      ..writeln('التاريخ: ${QatDateUtils.formatArabicDateTime12h(transfer.dateMs)}')
+      ..writeln('المرسل: ${transfer.senderName}')
+      ..writeln('المستلم: ${recipient?.name ?? (transfer.receiverName.isEmpty ? 'غير محدد' : transfer.receiverName)}');
+    if (recipient != null && recipient.phone.isNotEmpty) {
+      sb.writeln('هاتف المستلم: ${recipient.phone}');
+    }
+    if (transfer.transferCompany.isNotEmpty) {
+      sb.writeln('الشركة: ${transfer.transferCompany}');
+    }
+    if (transfer.transferNumber.isNotEmpty) {
+      sb.writeln('رقم الحوالة: ${transfer.transferNumber}');
+    }
+    sb
+      ..writeln('--------------------------------')
+      ..writeln('المبلغ: ${Money(transfer.amountMinor, transfer.currency).format()}')
+      ..writeln('العمولة: ${Money(transfer.feeMinor, transfer.currency).format()}')
+      ..writeln('الحالة: ${transfer.status.arabicLabel}');
+    if (transfer.notes.isNotEmpty) sb.writeln('ملاحظات: ${transfer.notes}');
+    return sb.toString().trim();
+  }
+
+  static String buildSupplierPurchaseText(
+    AgencySettings agency,
+    SupplierPurchase purchase,
+  ) {
+    final sb = StringBuffer()
+      ..writeln(agency.agencyName)
+      ..writeln('سند توريد / فاتورة مورد (${purchase.purchaseNumber})')
+      ..writeln('التاريخ: ${QatDateUtils.formatArabicDateTime12h(purchase.dateMs)}')
+      ..writeln('المورد: ${purchase.supplierName}')
+      ..writeln('--------------------------------');
+    for (final it in purchase.items) {
+      sb.writeln(
+        '${it.qatTypeName} (${QuantityMath.formatMilli(it.qtyMilli)} ${it.unit}) = ${Money(it.lineTotalMinor, purchase.currency).format()}',
+      );
+    }
+    sb
+      ..writeln('--------------------------------')
+      ..writeln('الإجمالي: ${Money(purchase.totalAmountMinor, purchase.currency).format()}')
+      ..writeln('المدفوع: ${Money(purchase.paidAmountMinor, purchase.currency).format()}')
+      ..writeln(
+        purchase.remainingAmountMinor < 0
+            ? 'فائض لصالح الوكالة: ${Money(purchase.remainingAmountMinor.abs(), purchase.currency).format()}'
+            : 'المتبقي للمورد: ${Money(purchase.remainingAmountMinor, purchase.currency).format()}',
+      );
+    if (purchase.bankName.isNotEmpty) sb.writeln('البنك: ${purchase.bankName}');
+    if (purchase.transferNumber.isNotEmpty) sb.writeln('رقم الحوالة: ${purchase.transferNumber}');
+    if (purchase.notes.isNotEmpty) sb.writeln('ملاحظات: ${purchase.notes}');
+    return sb.toString().trim();
   }
 }

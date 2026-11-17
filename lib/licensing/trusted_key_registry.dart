@@ -5,7 +5,8 @@ import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart';
 
 /// Manages trusted Ed25519 SPKI/Raw public keys and deterministic `QLK-<8HEX>` key IDs
-/// compatible with `TrustedPublicKeyRegistry.kt`.
+/// compatible with BOTH Kotlin `TrustedPublicKeyRegistry.kt` (`QLK-XXXXXXXX:<base64UrlRaw32>`)
+/// and SPKI/PEM/raw Base64 entries.
 class TrustedPublicKeyRegistry {
   TrustedPublicKeyRegistry._(this._keysById);
 
@@ -21,7 +22,8 @@ class TrustedPublicKeyRegistry {
   Iterable<String> get keyIds => _keysById.keys;
   Iterable<SimplePublicKey> get publicKeys => _keysById.values;
 
-  SimplePublicKey? findById(String keyId) => _keysById[keyId.trim().toUpperCase()];
+  SimplePublicKey? findById(String keyId) =>
+      _keysById[keyId.trim().toUpperCase()];
 
   static TrustedPublicKeyRegistry fromCsv(String csv) {
     final map = <String, SimplePublicKey>{};
@@ -30,9 +32,25 @@ class TrustedPublicKeyRegistry {
       final clean = raw.trim();
       if (clean.isEmpty) continue;
       try {
+        // Kotlin `QAT_LICENSE_PUBLIC_KEYS` format: `QLK-XXXXXXXX:<base64UrlRaw32>`
+        final colonIdx = clean.indexOf(':');
+        if (colonIdx > 0 && colonIdx < clean.length - 1 && !clean.contains('BEGIN PUBLIC KEY')) {
+          final declaredId = clean.substring(0, colonIdx).trim().toUpperCase();
+          final b64Part = clean.substring(colonIdx + 1).trim();
+          final key = parsePublicKey(b64Part);
+          final kotlinId = computeKotlinKeyIdFromRaw(key.bytes);
+          final spkiId = computeKeyIdFromRaw(key.bytes);
+          if (declaredId == kotlinId || declaredId == spkiId) {
+            map[declaredId] = key;
+          }
+          map[kotlinId] = key;
+          map[spkiId] = key;
+          continue;
+        }
         final key = parsePublicKey(clean);
-        final id = computeKeyIdFromRaw(key.bytes);
-        map[id] = key;
+        // Index under BOTH Kotlin raw32 KeyId and SPKI KeyId for full cross-compatibility
+        map[computeKotlinKeyIdFromRaw(key.bytes)] = key;
+        map[computeKeyIdFromRaw(key.bytes)] = key;
       } catch (_) {
         // Skip malformed entry safely without crashing startup
       }
@@ -44,8 +62,9 @@ class TrustedPublicKeyRegistry {
     final map = <String, SimplePublicKey>{};
     for (final bytes in rawKeys32) {
       if (bytes.length != 32) continue;
-      final id = computeKeyIdFromRaw(bytes);
-      map[id] = SimplePublicKey(bytes, type: KeyPairType.ed25519);
+      final k = SimplePublicKey(bytes, type: KeyPairType.ed25519);
+      map[computeKotlinKeyIdFromRaw(bytes)] = k;
+      map[computeKeyIdFromRaw(bytes)] = k;
     }
     return TrustedPublicKeyRegistry._(map);
   }
@@ -58,7 +77,17 @@ class TrustedPublicKeyRegistry {
           .replaceAll('-----END PUBLIC KEY-----', '')
           .replaceAll(RegExp(r'\s+'), '');
     }
-    final bytes = base64.decode(s);
+    // Accept both standard Base64 and RFC 4648 Base64Url (with or without padding)
+    var norm = s.replaceAll(RegExp(r'\s+'), '').replaceAll('+', '-').replaceAll('/', '_');
+    final rem = norm.length % 4;
+    if (rem == 2) {
+      norm += '==';
+    } else if (rem == 3) {
+      norm += '=';
+    } else if (rem == 1) {
+      throw const FormatException('Invalid base64 public key length');
+    }
+    final bytes = base64Url.decode(norm);
     if (bytes.length == 32) {
       return SimplePublicKey(bytes, type: KeyPairType.ed25519);
     }
@@ -79,6 +108,28 @@ class TrustedPublicKeyRegistry {
     return base64.encode(raw32ToSpkiDer44(raw32));
   }
 
+  /// Kotlin `TrustedPublicKeyRegistry.formatBuildConfigEntry` (`QLK-<8HEX>:<base64UrlRaw32>`).
+  static String formatKotlinBuildConfigEntry(List<int> raw32) {
+    final keyId = computeKotlinKeyIdFromRaw(raw32);
+    final rawB64Url = base64Url.encode(raw32).replaceAll('=', '');
+    return '$keyId:$rawB64Url';
+  }
+
+  /// Kotlin `TrustedPublicKeyRegistry.deriveKeyId(raw32)` (`SHA-256(raw32)`).
+  static String computeKotlinKeyIdFromRaw(List<int> raw32) {
+    if (raw32.length != 32) {
+      throw ArgumentError('Ed25519 raw public key must be 32 bytes');
+    }
+    final digest = sha256.convert(raw32).bytes;
+    final hex8 = digest
+        .take(4)
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join()
+        .toUpperCase();
+    return 'QLK-$hex8';
+  }
+
+  /// Legacy Flutter SPKI-hashed KeyId (`SHA-256(spki44)`).
   static String computeKeyIdFromRaw(List<int> raw32) {
     final spki = raw32ToSpkiDer44(raw32);
     final digest = sha256.convert(spki).bytes;

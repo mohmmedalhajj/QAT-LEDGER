@@ -188,6 +188,81 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
     );
   }
 
+  Future<void> _openGroupSmsDialog(
+    AppController ctrl,
+    List<Customer> visibleList,
+  ) async {
+    final debtorsWithPhone = visibleList
+        .where(
+          (c) =>
+              c.phone.trim().isNotEmpty &&
+              (c.balanceFor(CurrencyCode.yer) > 0 ||
+                  c.balanceFor(CurrencyCode.sar) > 0),
+        )
+        .toList();
+    if (debtorsWithPhone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('لا يوجد عملاء مدينون بأرقام هواتف مسجلة في القائمة الحالية'),
+        ),
+      );
+      return;
+    }
+
+    final msgCtrl = TextEditingController(
+      text:
+          'تحية طيبة من ${ctrl.settings.agencyName}، نذكركم بمراجعة رصيد حسابكم القائم لدينا. للاستفسار: ${ctrl.settings.agencyPhone}',
+    );
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [msgCtrl],
+        child: AlertDialog(
+          title: Text('رسالة جماعية للديون (${debtorsWithPhone.length} عميل)'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'سيتم فتح تطبيق الرسائل القصيرة (SMS) لإرسال التذكير دفعة واحدة لـ ${debtorsWithPhone.length} عميل:',
+                style: Theme.of(ctx).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: msgCtrl,
+                maxLines: 3,
+                decoration: const InputDecoration(labelText: 'نص الرسالة الجماعية'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                final ok = await WhatsappShareService.instance.openGroupSms(
+                  phones: debtorsWithPhone.map((e) => e.phone).toList(),
+                  text: msgCtrl.text.trim(),
+                );
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+                if (!ok && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('تعذر فتح تطبيق الرسائل على هذا الجهاز')),
+                  );
+                }
+              },
+              icon: const Icon(Icons.sms_outlined, size: 18),
+              label: const Text('إرسال SMS جماعي'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _openPaymentDialog(AppController ctrl, Customer customer) async {
     final amountCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
@@ -326,22 +401,32 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
           ErpSearchFilterBar(
             searchHint: 'بحث عن عميل بالاسم، الهاتف، أو العنوان...',
             onSearchChanged: (v) => setState(() => _search = v.trim()),
-            trailingAction: PopupMenuButton<_CustomerSort>(
-              tooltip: 'ترتيب العملاء',
-              icon: const Icon(Icons.sort),
-              onSelected: (s) => setState(() => _sort = s),
-              itemBuilder: (_) => const [
-                PopupMenuItem<_CustomerSort>(
-                  value: _CustomerSort.highestDebt,
-                  child: Text('الأعلى مديونية'),
+            trailingAction: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'رسالة SMS جماعية للمدينين',
+                  icon: const Icon(Icons.campaign_outlined),
+                  onPressed: () => _openGroupSmsDialog(ctrl, list),
                 ),
-                PopupMenuItem<_CustomerSort>(
-                  value: _CustomerSort.alphabetical,
-                  child: Text('ترتيب أبجدي'),
-                ),
-                PopupMenuItem<_CustomerSort>(
-                  value: _CustomerSort.newest,
-                  child: Text('الأحدث إضافة'),
+                PopupMenuButton<_CustomerSort>(
+                  tooltip: 'ترتيب العملاء',
+                  icon: const Icon(Icons.sort),
+                  onSelected: (s) => setState(() => _sort = s),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem<_CustomerSort>(
+                      value: _CustomerSort.highestDebt,
+                      child: Text('الأعلى مديونية'),
+                    ),
+                    PopupMenuItem<_CustomerSort>(
+                      value: _CustomerSort.alphabetical,
+                      child: Text('ترتيب أبجدي'),
+                    ),
+                    PopupMenuItem<_CustomerSort>(
+                      value: _CustomerSort.newest,
+                      child: Text('الأحدث إضافة'),
+                    ),
+                  ],
                 ),
               ],
             ),

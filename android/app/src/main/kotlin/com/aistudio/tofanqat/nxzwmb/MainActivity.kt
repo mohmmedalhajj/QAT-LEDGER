@@ -3,12 +3,20 @@ package com.aistudio.tofanqat.nxzwmb
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.ActivityManager
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RectF
 import android.os.Build
 import android.provider.ContactsContract
 import android.provider.Settings
@@ -17,6 +25,9 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -116,6 +127,11 @@ class MainActivity : FlutterActivity() {
                     "pickPhoneContact" -> {
                         handlePickPhoneContact(result)
                     }
+                    "applyLauncherIdentity" -> {
+                        val appName = call.argument<String>("appName") ?: "ميزان القات"
+                        val logoPath = call.argument<String>("logoPath") ?: ""
+                        result.success(applyLauncherIdentity(appName, logoPath))
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -126,6 +142,13 @@ class MainActivity : FlutterActivity() {
         val legacyDevDb: File = getDatabasePath("qat_ledger_developer_registry.db")
         val prefsMap = mutableMapOf<String, Map<String, Any?>>()
         val prefNames = listOf(
+            "app_settings",
+            "branding_prefs",
+            "app_universal_theme_prefs",
+            "printer_prefs",
+            "qat_license_install_prefs",
+            "qat_active_license_store",
+            "qat_license_time_guard",
             "qat_agency_prefs",
             "app_theme_prefs",
             "qat_ledger_license_store",
@@ -144,13 +167,74 @@ class MainActivity : FlutterActivity() {
                 prefsMap[name] = entries
             }
         }
+        val legacyLicenseFile = File(noBackupFilesDir, "active_license.qlic")
+        val legacyActiveLicenseDoc = try {
+            if (legacyLicenseFile.exists()) legacyLicenseFile.readText().trim() else ""
+        } catch (_: Exception) {
+            ""
+        }
         return mapOf(
             "legacyRoomDbExists" to legacyRoomDb.exists(),
             "legacyRoomDbPath" to legacyRoomDb.absolutePath,
             "legacyDevDbExists" to legacyDevDb.exists(),
             "legacyDevDbPath" to legacyDevDb.absolutePath,
+            "legacyActiveLicenseDoc" to legacyActiveLicenseDoc,
             "legacyPrefs" to prefsMap
         )
+    }
+
+    private fun applyLauncherIdentity(appName: String, logoPath: String): Boolean {
+        return try {
+            val cleanName = appName.trim().ifEmpty { "ميزان القات" }
+            val customBmp: Bitmap? = if (logoPath.isNotBlank() && File(logoPath).exists()) {
+                BitmapFactory.decodeFile(logoPath)
+            } else {
+                null
+            }
+            val size = 256
+            val iconBmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(iconBmp)
+            val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#173D2E")
+                style = Paint.Style.FILL
+            }
+            canvas.drawRoundRect(RectF(0f, 0f, size.toFloat(), size.toFloat()), size * 0.22f, size * 0.22f, bgPaint)
+            if (customBmp != null) {
+                val pad = (size * 0.16f).toInt()
+                val dest = Rect(pad, pad, size - pad, size - pad)
+                canvas.drawBitmap(customBmp, null, dest, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            }
+            title = cleanName
+            try {
+                @Suppress("DEPRECATION")
+                setTaskDescription(
+                    ActivityManager.TaskDescription(
+                        cleanName,
+                        if (customBmp != null) iconBmp else null,
+                        Color.parseColor("#173B2F")
+                    )
+                )
+            } catch (_: Exception) {
+            }
+            if (customBmp != null) {
+                val shortcutIntent = Intent(this, MainActivity::class.java).apply {
+                    action = Intent.ACTION_MAIN
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                val shortcut = ShortcutInfoCompat.Builder(this, "qat_ledger_main_identity")
+                    .setShortLabel(cleanName)
+                    .setLongLabel(cleanName)
+                    .setIcon(IconCompat.createWithBitmap(iconBmp))
+                    .setIntent(shortcutIntent)
+                    .build()
+                ShortcutManagerCompat.removeAllDynamicShortcuts(this)
+                ShortcutManagerCompat.addDynamicShortcuts(this, listOf(shortcut))
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun getOrCreateKeystoreSecret(): SecretKey {

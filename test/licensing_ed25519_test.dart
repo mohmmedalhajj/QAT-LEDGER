@@ -103,4 +103,93 @@ void main() {
     );
     expect(untrusted.kind, LicenseStateKind.untrustedKey);
   });
+
+  test('Kotlin line-canonical QL1 format + QLK raw32 key + BASIC/PRO tier gating + PERPETUAL bypass', () async {
+    final ed = Ed25519();
+    final kp = await ed.newKeyPairFromSeed(List<int>.generate(32, (i) => i + 7));
+    final pub = await kp.extractPublicKey();
+    final kotlinKeyId = TrustedPublicKeyRegistry.computeKotlinKeyIdFromRaw(pub.bytes);
+    final kotlinCsv = TrustedPublicKeyRegistry.formatKotlinBuildConfigEntry(pub.bytes);
+    final registry = TrustedPublicKeyRegistry.fromCsv(kotlinCsv);
+
+    // 1. BASIC subscription license -> REPORTS & ARCHIVE locked
+    final basicPayload = LicensePayload(
+      format: LicenseCanonical.canonicalPayloadFormat,
+      canonicalFlavor: LicenseCanonicalFlavor.kotlinLineV1,
+      version: 1,
+      licenseId: 'QLB-2026K1',
+      product: 'QAT_LEDGER',
+      edition: 'CUSTOMER',
+      installationId: 'QAT-AAAA-BBBB-CCCC',
+      customerName: 'مكتب النجاح',
+      businessName: 'وكالة النجاح',
+      packageTier: PackageTier.basic,
+      licenseType: LicenseType.subscription,
+      planCode: 'BASIC_SUBSCRIPTION',
+      features: LicenseFeature.basicFeatures.map((f) => f.code).toList(),
+      issuedAtEpochMs: 1700000000000,
+      expiresAtEpochMs: 1731536000000,
+      maxDevices: 1,
+      maxClockSkewSeconds: 300,
+      keyIdField: kotlinKeyId,
+    );
+    final basicBytes = LicenseCanonical.kotlinCanonicalSigningBytes(basicPayload);
+    final basicSig = await ed.sign(basicBytes, keyPair: kp);
+    final basicToken = LicenseCanonical.encodeCompactToken(
+      payload: basicPayload,
+      signatureBytes: basicSig.bytes,
+    );
+
+    final verifier = OfflineLicenseVerifier(registry: registry, timeGuard: TrustedTimeGuard());
+    final basicRes = await verifier.verify(
+      rawLicenseInput: basicToken,
+      currentInstallationId: 'QAT-AAAA-BBBB-CCCC',
+      nowEpochMs: 1710000000000,
+    );
+    expect(basicRes.isValid, true);
+    expect(basicRes.isProActive, false);
+    expect(basicRes.hasFeature(LicenseFeature.sales), true);
+    expect(basicRes.hasFeature(LicenseFeature.reports), false);
+    expect(basicRes.hasFeature(LicenseFeature.archive), false);
+
+    // 2. PRO PERPETUAL license (expiresAtEpochMs: 0) bypasses expiry regardless of clock date
+    final proPerp = LicensePayload(
+      format: LicenseCanonical.canonicalPayloadFormat,
+      canonicalFlavor: LicenseCanonicalFlavor.kotlinLineV1,
+      version: 1,
+      licenseId: 'QLP-2026P1',
+      product: 'QAT_LEDGER',
+      edition: 'CUSTOMER',
+      installationId: 'QAT-AAAA-BBBB-CCCC',
+      customerName: 'مكتب النجاح',
+      businessName: 'وكالة النجاح',
+      packageTier: PackageTier.pro,
+      licenseType: LicenseType.perpetual,
+      planCode: 'PRO_PERPETUAL',
+      features: LicenseFeature.proFeatures.map((f) => f.code).toList(),
+      issuedAtEpochMs: 1700000000000,
+      expiresAtEpochMs: 0,
+      maxDevices: 1,
+      maxClockSkewSeconds: 300,
+      keyIdField: kotlinKeyId,
+    );
+    final proBytes = LicenseCanonical.kotlinCanonicalSigningBytes(proPerp);
+    final proSig = await ed.sign(proBytes, keyPair: kp);
+    final proQlic = LicenseCanonical.encodeQlicJson(
+      keyId: kotlinKeyId,
+      payload: proPerp,
+      signatureBytes: proSig.bytes,
+    );
+
+    final proRes = await verifier.verify(
+      rawLicenseInput: proQlic,
+      currentInstallationId: 'QAT-AAAA-BBBB-CCCC',
+      nowEpochMs: 1990000000000,
+    );
+    expect(proRes.isValid, true);
+    expect(proRes.isProActive, true);
+    expect(proRes.hasFeature(LicenseFeature.reports), true);
+    expect(proRes.hasFeature(LicenseFeature.archive), true);
+    expect(proRes.remainingDays, isNull);
+  });
 }

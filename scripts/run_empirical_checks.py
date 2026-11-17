@@ -30,8 +30,8 @@ def extract_schema_statements():
         text = f.read()
     create_sqls = re.findall(r"'''(.*?)'''", text, flags=re.DOTALL)
     idx_sqls = re.findall(r"'(CREATE INDEX IF NOT EXISTS [^']+)'", text)
-    assert len(create_sqls) == 20, f"Expected 20 CREATE TABLE blocks, got {len(create_sqls)}"
-    assert len(idx_sqls) == 12, f"Expected 12 CREATE INDEX blocks, got {len(idx_sqls)}"
+    assert len(create_sqls) == 21, f"Expected 21 CREATE TABLE blocks, got {len(create_sqls)}"
+    assert len(idx_sqls) == 13, f"Expected 13 CREATE INDEX blocks, got {len(idx_sqls)}"
     return create_sqls, idx_sqls
 
 
@@ -90,21 +90,20 @@ def test_sqlite_schema_and_room_migration():
         for row in src.execute("SELECT id, name, phone, address, notes FROM customers"):
             dst.execute("INSERT INTO customers VALUES (?, ?, ?, ?, ?, ?, 0)", (*row, now_ms))
         for row in src.execute("SELECT id, name, phone, address, notes FROM suppliers"):
-            dst.execute("INSERT INTO suppliers VALUES (?, ?, ?, ?, ?, ?, 0)", (*row, now_ms))
+            dst.execute(
+                "INSERT INTO suppliers (id, name, phone, address, notes, created_at_ms, is_archived) VALUES (?, ?, ?, ?, ?, ?, 0)",
+                (*row, now_ms),
+            )
 
         for row in src.execute("SELECT id, qatType, supplierName, remainingQty, unit, buyPrice, sellPrice, purchaseDate, currency FROM inventory"):
             dst.execute(
-                "INSERT INTO inventory_batches VALUES (?, 1, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                "INSERT INTO inventory_batches (id, qat_type_id, qat_type_name, supplier_id, supplier_name, remaining_qty_milli, initial_qty_milli, unit, buy_price_minor, sell_price_minor, currency_code, purchase_date_ms, purchase_date_iso, is_archived) VALUES (?, 1, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
                 (row[0], row[1], row[2], round(row[3] * 1000), round(row[3] * 1000), row[4], round(row[5] * 100), round(row[6] * 100), row[8], now_ms, row[7]),
             )
 
         for row in src.execute("SELECT id, customerId, customerName, date, totalAmount, paidAmount, remainingAmount, paymentType, status, notes, currency, discount, taxPercent, isArchived FROM sales"):
             ptype = "PARTIAL" if "جزئ" in row[7] else ("CREDIT" if "آجل" in row[7] else "PAID")
             dst.execute(
-                "INSERT INTO sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (row[0], f"INV-{row[0]}", row[1], row[2], now_ms, row[3], row[10], round(row[4] * 100), round(row[11] * 100), round(row[12] * 100), 0, round(row[4] * 100), round(row[5] * 100), round(row[6] * 100), ptype, row[8], row[9], row[13]) if False else
-                (row[0], f"INV-{row[0]}", row[1], row[2], now_ms, row[3], row[10], round(row[4] * 100), round(row[11] * 100), round(row[12] * 100), 0, round(row[4] * 100), round(row[5] * 100), round(row[6] * 100), ptype, row[8], row[9])
-            ) if False else dst.execute(
                 "INSERT INTO sales (id, invoice_number, customer_id, customer_name, date_ms, date_iso, currency_code, subtotal_minor, discount_minor, tax_bps, tax_amount_minor, total_amount_minor, paid_amount_minor, remaining_amount_minor, payment_type, status, notes, is_archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (row[0], f"INV-{row[0]}", row[1], row[2], now_ms, row[3], row[10], round(row[4] * 100), round(row[11] * 100), round(row[12] * 100), 0, round(row[4] * 100), round(row[5] * 100), round(row[6] * 100), ptype, row[8], row[9], row[13]),
             )
@@ -114,13 +113,16 @@ def test_sqlite_schema_and_room_migration():
             dst.execute("INSERT INTO customer_balances VALUES (?, ?, ?, ?)", (cid, cur, rem, now_ms))
 
         for row in src.execute("SELECT id, name, phone, company, notes, createdAt FROM transfer_recipients"):
-            dst.execute("INSERT INTO transfer_recipients VALUES (?, ?, ?, ?, ?, ?)", row)
+            dst.execute(
+                "INSERT INTO transfer_recipients (id, name, phone, company, notes, created_at_ms) VALUES (?, ?, ?, ?, ?, ?)",
+                row,
+            )
 
         for row in src.execute("SELECT id, senderName, receiverName, recipientId, amount, currency, fee, transferCompany, transferNumber, date, status, notes, isArchived FROM money_transfers"):
             rec_id = row[3] if row[3] and row[3] > 0 else None
             st_code = "DELIVERED" if "تم التسليم" in row[10] else "PENDING"
             dst.execute(
-                "INSERT INTO money_transfers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO money_transfers (id, sender_name, receiver_name, recipient_id, amount_minor, fee_minor, currency_code, transfer_company, transfer_number, date_ms, date_iso, status_code, status_label, notes, is_archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (row[0], row[1], row[2], rec_id, round(row[4] * 100), round(row[6] * 100), row[5], row[7], row[8], now_ms, row[9], st_code, row[10], row[11], row[12]),
             )
 
@@ -138,7 +140,7 @@ def test_sqlite_schema_and_room_migration():
 
         src.close()
         dst.close()
-    print("[PASS] SQLite v2 DDL (20 tables, 12 indices) + Room v18 migration + FK & currency separation verified")
+    print("[PASS] SQLite v3 DDL (21 tables, 13 indices) + Room v18 migration + FK & currency separation verified")
 
 
 def test_ed25519_canonical_compatibility():
@@ -174,7 +176,29 @@ def test_ed25519_canonical_compatibility():
     b64u_sig = base64.urlsafe_b64encode(sig).decode().rstrip("=")
     compact = f"QL1.{b64u_payload}.{b64u_sig}"
     assert compact.startswith("QL1.")
-    print(f"[PASS] Ed25519 SPKI DER + QLK KeyID ({key_id}) + QL1 canonical signature verified")
+
+    # Verify Kotlin Line-Canonical format (QAT_LEDGER_CANONICAL_PAYLOAD_V1) + QLK- raw32 key format
+    raw_pub = pub.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    raw_key_id = "QLK-" + hashlib.sha256(raw_pub).hexdigest()[:8].upper()
+    kotlin_canonical = "\n".join([
+        "QAT_LEDGER_CANONICAL_PAYLOAD_V1",
+        "1",
+        "QAT-2026-KOTLIN",
+        "QAT-1111-2222-3333",
+        "أحمد",
+        "PRO",
+        "PERPETUAL",
+        "1700000000000",
+        "9999999999999",
+        "999999",
+        raw_key_id,
+    ])
+    kotlin_sig = priv.sign(kotlin_canonical.encode("utf-8"))
+    pub.verify(kotlin_sig, kotlin_canonical.encode("utf-8"))
+    print(f"[PASS] Ed25519 SPKI + Kotlin Raw32 QLK KeyIDs ({key_id} / {raw_key_id}) + QL1 dual-canonical verified")
 
 
 def check_font_cmap(ttf_path):

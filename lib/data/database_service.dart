@@ -46,6 +46,10 @@ class DatabaseService {
         },
         onUpgrade: (db, oldVersion, newVersion) async {
           await _createSchema(db);
+          await _ensureV3Columns(db);
+        },
+        onOpen: (db) async {
+          await _ensureV3Columns(db);
         },
       ),
     );
@@ -68,6 +72,23 @@ class DatabaseService {
       );
     }
     await batch.commit(noResult: true);
+  }
+
+  Future<void> _ensureV3Columns(Database db) async {
+    for (final entry in QatLedgerSchema.v3ColumnMigrations.entries) {
+      final table = entry.key;
+      final info = await db.rawQuery('PRAGMA table_info($table)');
+      final existingCols = info
+          .map((r) => (r['name'] ?? '').toString().toLowerCase())
+          .toSet();
+      if (existingCols.isEmpty) continue;
+      for (final colDef in entry.value) {
+        final colName = colDef.split(RegExp(r'\s+')).first.toLowerCase();
+        if (!existingCols.contains(colName)) {
+          await db.execute('ALTER TABLE $table ADD COLUMN $colDef');
+        }
+      }
+    }
   }
 
   Future<void> close() async {

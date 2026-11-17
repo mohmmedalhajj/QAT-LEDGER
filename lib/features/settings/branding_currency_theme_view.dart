@@ -21,11 +21,23 @@ class BrandingCurrencyThemeView extends StatefulWidget {
 
 class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
   late TextEditingController _nameCtrl;
+  late TextEditingController _displayAppCtrl;
+  late TextEditingController _ownerCtrl;
   late TextEditingController _phoneCtrl;
   late TextEditingController _addrCtrl;
+  late TextEditingController _taglineCtrl;
+  late TextEditingController _commercialCtrl;
+  late TextEditingController _headerTextCtrl;
   late TextEditingController _footerCtrl;
   late TextEditingController _rateCtrl;
+  late TextEditingController _customPrimaryCtrl;
+  late TextEditingController _customAccentCtrl;
+
   late CurrencyMode _mode;
+  late String _paletteId;
+  late bool _headerEnabled;
+  late bool _footerEnabled;
+  late bool _syncPdfColors;
   String _logoPath = '';
 
   @override
@@ -33,25 +45,43 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
     super.initState();
     final s = context.read<AppController>().settings;
     _nameCtrl = TextEditingController(text: s.agencyName);
+    _displayAppCtrl = TextEditingController(text: s.appDisplayName);
+    _ownerCtrl = TextEditingController(text: s.ownerName);
     _phoneCtrl = TextEditingController(text: s.agencyPhone);
     _addrCtrl = TextEditingController(text: s.agencyAddress);
+    _taglineCtrl = TextEditingController(text: s.tagline);
+    _commercialCtrl = TextEditingController(text: s.commercialDetails);
+    _headerTextCtrl = TextEditingController(text: s.headerText);
     _footerCtrl = TextEditingController(text: s.footerNote);
     _rateCtrl = TextEditingController(
       text: s.displaySarToYerMilli > 0
           ? QuantityMath.formatMilli(s.displaySarToYerMilli)
           : '',
     );
+    _customPrimaryCtrl = TextEditingController(text: s.customPrimaryHex);
+    _customAccentCtrl = TextEditingController(text: s.customAccentHex);
     _mode = s.currencyMode;
+    _paletteId = s.paletteId;
+    _headerEnabled = s.headerEnabled;
+    _footerEnabled = s.footerEnabled;
+    _syncPdfColors = s.syncColorsWithPdf;
     _logoPath = s.logoPath;
   }
 
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _displayAppCtrl.dispose();
+    _ownerCtrl.dispose();
     _phoneCtrl.dispose();
     _addrCtrl.dispose();
+    _taglineCtrl.dispose();
+    _commercialCtrl.dispose();
+    _headerTextCtrl.dispose();
     _footerCtrl.dispose();
     _rateCtrl.dispose();
+    _customPrimaryCtrl.dispose();
+    _customAccentCtrl.dispose();
     super.dispose();
   }
 
@@ -61,32 +91,40 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
         ? QuantityMath.parseMilli(_rateCtrl.text)
         : 0;
     await ctrl.updateSettings(
-      AgencySettings(
+      prev.copyWith(
         agencyName: _nameCtrl.text.trim().isEmpty
             ? prev.agencyName
             : _nameCtrl.text.trim(),
+        appDisplayName: _displayAppCtrl.text.trim(),
+        ownerName: _ownerCtrl.text.trim(),
         agencyPhone: _phoneCtrl.text.trim(),
         agencyAddress: _addrCtrl.text.trim(),
+        tagline: _taglineCtrl.text.trim(),
+        commercialDetails: _commercialCtrl.text.trim(),
+        headerText: _headerTextCtrl.text.trim(),
         footerNote: _footerCtrl.text.trim(),
         logoPath: _logoPath,
         currencyMode: _mode,
         displaySarToYerMilli: rateMilli,
-        themeChoice: prev.themeChoice,
         onboardingComplete: true,
-        savedPrinterName: prev.savedPrinterName,
-        savedPrinterAddress: prev.savedPrinterAddress,
-        printerPaperMm: prev.printerPaperMm,
+        headerEnabled: _headerEnabled,
+        footerEnabled: _footerEnabled,
+        paletteId: _paletteId,
+        customPrimaryHex: _customPrimaryCtrl.text.trim(),
+        customAccentHex: _customAccentCtrl.text.trim(),
+        syncColorsWithPdf: _syncPdfColors,
       ),
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تم حفظ الإعدادات بنجاح')),
+      const SnackBar(content: Text('تم حفظ الإعدادات وتحديث الهوية بنجاح')),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
+    final pal = context.pal;
     final canEdit = ctrl.canManageSettingsCurrent;
     final ImageProvider<Object> logoProvider =
         (_logoPath.isNotEmpty && File(_logoPath).existsSync())
@@ -112,7 +150,7 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'مظهر التطبيق',
+                  'مظهر التطبيق والألوان المؤسسية',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 10),
@@ -131,6 +169,98 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
                   ],
                   selected: {ctrl.settings.themeChoice},
                   onSelectionChanged: (s) => ctrl.setThemeChoice(s.first),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'السمات اللونية الرسمية (8 سمات + لون مخصص):',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final preset in AppColorPreset.allPresets)
+                      ChoiceChip(
+                        avatar: CircleAvatar(
+                          backgroundColor: preset.primaryNormal,
+                          radius: 9,
+                        ),
+                        label: Text(preset.nameAr.split('(').first.trim()),
+                        selected: _paletteId == preset.id,
+                        onSelected: !canEdit
+                            ? null
+                            : (_) async {
+                                setState(() => _paletteId = preset.id);
+                                await ctrl.setColorPalette(paletteId: preset.id);
+                              },
+                      ),
+                    ChoiceChip(
+                      avatar: CircleAvatar(
+                        backgroundColor: AppColorPreset.tryParseHex(
+                              _customPrimaryCtrl.text,
+                            ) ??
+                            pal.brand,
+                        radius: 9,
+                      ),
+                      label: const Text('لون مخصص (Hex)'),
+                      selected: _paletteId == 'custom',
+                      onSelected: !canEdit
+                          ? null
+                          : (_) async {
+                              setState(() => _paletteId = 'custom');
+                              await ctrl.setColorPalette(
+                                paletteId: 'custom',
+                                customPrimaryHex: _customPrimaryCtrl.text,
+                                customAccentHex: _customAccentCtrl.text,
+                              );
+                            },
+                    ),
+                  ],
+                ),
+                if (_paletteId == 'custom') ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _customPrimaryCtrl,
+                          enabled: canEdit,
+                          textDirection: TextDirection.ltr,
+                          decoration: const InputDecoration(
+                            labelText: 'اللون الأساسي (#RRGGBB)',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _customAccentCtrl,
+                          enabled: canEdit,
+                          textDirection: TextDirection.ltr,
+                          decoration: const InputDecoration(
+                            labelText: 'اللون المساعد (#RRGGBB)',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 6),
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('مزامنة ألوان المظهر مع فواتير وتقارير PDF'),
+                  value: _syncPdfColors,
+                  onChanged: !canEdit
+                      ? null
+                      : (v) async {
+                          setState(() => _syncPdfColors = v);
+                          await ctrl.setColorPalette(
+                            paletteId: _paletteId,
+                            syncColorsWithPdf: v,
+                          );
+                        },
                 ),
               ],
             ),
@@ -183,7 +313,7 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'بيانات وهوية الوكالة',
+                  'بيانات وهوية الوكالة والتطبيق',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 10),
@@ -215,7 +345,21 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
                 TextField(
                   controller: _nameCtrl,
                   enabled: canEdit,
-                  decoration: const InputDecoration(labelText: 'اسم الوكالة'),
+                  decoration: const InputDecoration(labelText: 'اسم الوكالة الرسمي'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _displayAppCtrl,
+                  enabled: canEdit,
+                  decoration: const InputDecoration(
+                    labelText: 'الاسم الظاهر في الشريط واللانشر',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _ownerCtrl,
+                  enabled: canEdit,
+                  decoration: const InputDecoration(labelText: 'اسم المالك / المدير'),
                 ),
                 const SizedBox(height: 8),
                 TextField(
@@ -232,11 +376,52 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
                 ),
                 const SizedBox(height: 8),
                 TextField(
-                  controller: _footerCtrl,
+                  controller: _taglineCtrl,
                   enabled: canEdit,
-                  decoration:
-                      const InputDecoration(labelText: 'تذييل الفواتير'),
+                  decoration: const InputDecoration(labelText: 'الوصف / الشعار النصي'),
                 ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _commercialCtrl,
+                  enabled: canEdit,
+                  decoration: const InputDecoration(
+                    labelText: 'السجل التجاري / بيانات مرجعية',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('تفعيل ترويسة الوكالة في الفواتير'),
+                  value: _headerEnabled,
+                  onChanged:
+                      canEdit ? (v) => setState(() => _headerEnabled = v) : null,
+                ),
+                if (_headerEnabled) ...[
+                  TextField(
+                    controller: _headerTextCtrl,
+                    enabled: canEdit,
+                    decoration: const InputDecoration(
+                      labelText: 'نص الترويسة المخصص (اختياري)',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('تفعيل تذييل الفواتير'),
+                  value: _footerEnabled,
+                  onChanged:
+                      canEdit ? (v) => setState(() => _footerEnabled = v) : null,
+                ),
+                if (_footerEnabled)
+                  TextField(
+                    controller: _footerCtrl,
+                    enabled: canEdit,
+                    decoration:
+                        const InputDecoration(labelText: 'تذييل الفواتير'),
+                  ),
                 const SizedBox(height: 14),
                 FilledButton.icon(
                   onPressed: canEdit ? () => _save(ctrl) : null,

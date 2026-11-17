@@ -13,11 +13,15 @@ enum PaymentType {
 
   static PaymentType fromRaw(String? raw) {
     final s = (raw ?? '').trim().toUpperCase();
-    if (s == 'PAID' || s.contains('نقد') || s.contains('تم الدفع') || s == 'كاش') {
+    if (s == 'PAID' ||
+        s.contains('نقد') ||
+        s.contains('تم الدفع') ||
+        s == 'كاش' ||
+        s.contains('تحويل') ||
+        s.contains('إيداع')) {
       return PaymentType.paid;
     }
     if (s == 'PARTIAL' || s.contains('جزئ')) {
-      // Handles both legacy variants "دفع جزئي" and "دفعة جزئية"
       return PaymentType.partial;
     }
     if (s == 'CREDIT' || s.contains('آجل') || s.contains('اجل') || s.contains('دين')) {
@@ -38,7 +42,10 @@ enum TransferStatus {
 
   static TransferStatus fromRaw(String? raw) {
     final s = (raw ?? '').trim().toUpperCase();
-    if (s == 'DELIVERED' || s.contains('تم التسليم') || s.contains('مستلم')) {
+    if (s == 'DELIVERED' ||
+        s.contains('تم التسليم') ||
+        s.contains('مكتمل') ||
+        s.contains('مستلم')) {
       return TransferStatus.delivered;
     }
     if (s == 'CANCELLED' || s.contains('ملغ')) {
@@ -72,6 +79,27 @@ class QatType {
 }
 
 @immutable
+class QatImportWeight {
+  const QatImportWeight({
+    required this.id,
+    required this.dateMs,
+    required this.dateIso,
+    required this.weightMilli,
+    required this.receiverName,
+    this.notes = '',
+    this.isArchived = false,
+  });
+
+  final int id;
+  final int dateMs;
+  final String dateIso;
+  final int weightMilli;
+  final String receiverName;
+  final String notes;
+  final bool isArchived;
+}
+
+@immutable
 class InventoryBatch {
   const InventoryBatch({
     required this.id,
@@ -88,6 +116,11 @@ class InventoryBatch {
     required this.purchaseDateMs,
     required this.purchaseDateIso,
     required this.isArchived,
+    this.itemNumber = '',
+    this.lowStockThresholdMilli = 0,
+    this.receiverId,
+    this.receiverName = '',
+    this.notes = '',
   });
 
   final int id;
@@ -104,6 +137,17 @@ class InventoryBatch {
   final int purchaseDateMs;
   final String purchaseDateIso;
   final bool isArchived;
+  final String itemNumber;
+  final int lowStockThresholdMilli;
+  final int? receiverId;
+  final String receiverName;
+  final String notes;
+
+  int get soldQtyMilli =>
+      (initialQtyMilli - remainingQtyMilli).clamp(0, initialQtyMilli).toInt();
+
+  bool get isLowStock =>
+      lowStockThresholdMilli > 0 && remainingQtyMilli <= lowStockThresholdMilli;
 }
 
 @immutable
@@ -186,6 +230,7 @@ class Sale {
     required this.status,
     required this.notes,
     required this.isArchived,
+    this.paymentMethod = '',
     this.items = const [],
   });
 
@@ -207,7 +252,13 @@ class Sale {
   final String status;
   final String notes;
   final bool isArchived;
+  final String paymentMethod;
   final List<SaleItem> items;
+
+  String get effectivePaymentMethodLabel {
+    if (paymentMethod.trim().isNotEmpty) return paymentMethod;
+    return paymentType.arabicLabel;
+  }
 }
 
 @immutable
@@ -247,6 +298,7 @@ class Supplier {
     required this.notes,
     required this.createdAtMs,
     required this.isArchived,
+    this.region = '',
     this.balancesByCurrency = const {},
   });
 
@@ -257,6 +309,7 @@ class Supplier {
   final String notes;
   final int createdAtMs;
   final bool isArchived;
+  final String region;
   final Map<CurrencyCode, int> balancesByCurrency;
 
   int balanceFor(CurrencyCode c) => balancesByCurrency[c] ?? 0;
@@ -307,6 +360,12 @@ class SupplierPurchase {
     required this.paymentType,
     required this.notes,
     required this.isArchived,
+    this.paymentMethod = '',
+    this.bankName = '',
+    this.transferNumber = '',
+    this.demarMinor = 0,
+    this.demarType = '',
+    this.demarNumber = '',
     this.items = const [],
   });
 
@@ -327,7 +386,19 @@ class SupplierPurchase {
   final PaymentType paymentType;
   final String notes;
   final bool isArchived;
+  final String paymentMethod;
+  final String bankName;
+  final String transferNumber;
+  final int demarMinor;
+  final String demarType;
+  final String demarNumber;
   final List<SupplierPurchaseItem> items;
+
+  int get effectivePaidCappedMinor =>
+      paidAmountMinor > totalAmountMinor ? totalAmountMinor : paidAmountMinor;
+
+  int get overpaymentSurplusMinor =>
+      paidAmountMinor > totalAmountMinor ? (paidAmountMinor - totalAmountMinor) : 0;
 }
 
 @immutable
@@ -416,6 +487,8 @@ class QatTaxEntry {
     required this.source,
     required this.notes,
     required this.isArchived,
+    this.stallOutflowMinor = 0,
+    this.laborOutflowMinor = 0,
   });
 
   final int id;
@@ -428,6 +501,11 @@ class QatTaxEntry {
   final String source;
   final String notes;
   final bool isArchived;
+  final int stallOutflowMinor;
+  final int laborOutflowMinor;
+
+  int get totalOutflowMinor =>
+      taxAmountMinor + stallOutflowMinor + laborOutflowMinor;
 }
 
 @immutable
@@ -439,6 +517,7 @@ class TransferRecipient {
     required this.company,
     required this.notes,
     required this.createdAtMs,
+    this.isActive = true,
   });
 
   final int id;
@@ -447,6 +526,7 @@ class TransferRecipient {
   final String company;
   final String notes;
   final int createdAtMs;
+  final bool isActive;
 }
 
 @immutable
@@ -532,6 +612,13 @@ class CurrencyDashboardMetrics {
     required this.transfersDeliveredMinor,
     required this.transfersPendingMinor,
     required this.transfersFeesMinor,
+    this.stallOutflowMinor = 0,
+    this.laborOutflowMinor = 0,
+    this.salesCashOnlyMinor = 0,
+    this.salesTransferMinor = 0,
+    this.salesDepositMinor = 0,
+    this.totalSoldQtyMilli = 0,
+    this.supplierOverpaymentSurplusMinor = 0,
   });
 
   final CurrencyCode currency;
@@ -550,12 +637,49 @@ class CurrencyDashboardMetrics {
   final int transfersDeliveredMinor;
   final int transfersPendingMinor;
   final int transfersFeesMinor;
+  final int stallOutflowMinor;
+  final int laborOutflowMinor;
+  final int salesCashOnlyMinor;
+  final int salesTransferMinor;
+  final int salesDepositMinor;
+  final int totalSoldQtyMilli;
+  final int supplierOverpaymentSurplusMinor;
+
+  int get totalTaxAndOutflowsMinor =>
+      taxMinor + stallOutflowMinor + laborOutflowMinor;
 
   int get grossProfitMinor => salesTotalMinor - estimatedCogsMinor;
-  int get netProfitMinor => grossProfitMinor - expensesMinor - taxMinor;
+
+  int get netProfitMinor =>
+      grossProfitMinor - expensesMinor - totalTaxAndOutflowsMinor;
+
+  /// Actual cash flow net of operational outflows (sales paid + collections - supplier paid - expenses - tax/stall/labor).
   int get cashNetFlowMinor =>
       (salesPaidMinor + customerReceiptsMinor) -
-      (purchasesPaidMinor + supplierPaymentsMinor + expensesMinor + taxMinor);
+      (purchasesPaidMinor +
+          supplierPaymentsMinor +
+          expensesMinor +
+          totalTaxAndOutflowsMinor);
+
+  /// Live Cash Drawer Balance matching Android DashboardScreen/ReportsScreen (also deducts outgoing transfers + fees).
+  int get cashBoxBalanceMinor =>
+      cashNetFlowMinor -
+      (transfersDeliveredMinor + transfersPendingMinor + transfersFeesMinor);
+}
+
+@immutable
+class DailyChartPoint {
+  const DailyChartPoint({
+    required this.dateIso,
+    required this.shortLabel,
+    required this.salesMinor,
+    required this.expensesMinor,
+  });
+
+  final String dateIso;
+  final String shortLabel;
+  final int salesMinor;
+  final int expensesMinor;
 }
 
 @immutable
@@ -596,6 +720,24 @@ class AgencySettings {
     required this.savedPrinterName,
     required this.savedPrinterAddress,
     required this.printerPaperMm,
+    this.ownerName = '',
+    this.additionalContact = '',
+    this.tagline = 'تجارة وتسويق أجود أنواع القات اليمني',
+    this.qatTypesRaw = 'أرحبي, همداني, خولاني, رداعي, يافعي, ضالعي',
+    this.commercialDetails = '',
+    this.appDisplayName = '',
+    this.headerEnabled = true,
+    this.footerEnabled = true,
+    this.headerText = '',
+    this.paletteId = 'emerald_green',
+    this.customPrimaryHex = '#267451',
+    this.customAccentHex = '#C83E3B',
+    this.customCanvasHex = '',
+    this.customCardHex = '',
+    this.customTextHex = '',
+    this.syncColorsWithPdf = true,
+    this.rememberMe = true,
+    this.appLockEnabled = false,
   });
 
   final String agencyName;
@@ -610,11 +752,45 @@ class AgencySettings {
   final String savedPrinterName;
   final String savedPrinterAddress;
   final int printerPaperMm;
+  final String ownerName;
+  final String additionalContact;
+  final String tagline;
+  final String qatTypesRaw;
+  final String commercialDetails;
+  final String appDisplayName;
+  final bool headerEnabled;
+  final bool footerEnabled;
+  final String headerText;
+  final String paletteId;
+  final String customPrimaryHex;
+  final String customAccentHex;
+  final String customCanvasHex;
+  final String customCardHex;
+  final String customTextHex;
+  final bool syncColorsWithPdf;
+  final bool rememberMe;
+  final bool appLockEnabled;
 
   CurrencyPolicy get currencyPolicy => CurrencyPolicy(
         mode: currencyMode,
         userDisplaySarToYerMilli: displaySarToYerMilli,
       );
+
+  AppColorPreset get activeColorPreset => AppColorPreset.resolve(
+        paletteId: paletteId,
+        customPrimaryHex: customPrimaryHex,
+        customAccentHex: customAccentHex,
+      );
+
+  List<String> get qatTypeSuggestions => qatTypesRaw
+      .split(RegExp(r'[,،\n]+'))
+      .map((s) => s.trim())
+      .where((s) => s.isNotEmpty)
+      .toSet()
+      .toList();
+
+  String get effectiveAppTitle =>
+      appDisplayName.trim().isNotEmpty ? appDisplayName.trim() : agencyName;
 
   AgencySettings copyWith({
     String? agencyName,
@@ -629,6 +805,24 @@ class AgencySettings {
     String? savedPrinterName,
     String? savedPrinterAddress,
     int? printerPaperMm,
+    String? ownerName,
+    String? additionalContact,
+    String? tagline,
+    String? qatTypesRaw,
+    String? commercialDetails,
+    String? appDisplayName,
+    bool? headerEnabled,
+    bool? footerEnabled,
+    String? headerText,
+    String? paletteId,
+    String? customPrimaryHex,
+    String? customAccentHex,
+    String? customCanvasHex,
+    String? customCardHex,
+    String? customTextHex,
+    bool? syncColorsWithPdf,
+    bool? rememberMe,
+    bool? appLockEnabled,
   }) {
     return AgencySettings(
       agencyName: agencyName ?? this.agencyName,
@@ -643,6 +837,24 @@ class AgencySettings {
       savedPrinterName: savedPrinterName ?? this.savedPrinterName,
       savedPrinterAddress: savedPrinterAddress ?? this.savedPrinterAddress,
       printerPaperMm: printerPaperMm ?? this.printerPaperMm,
+      ownerName: ownerName ?? this.ownerName,
+      additionalContact: additionalContact ?? this.additionalContact,
+      tagline: tagline ?? this.tagline,
+      qatTypesRaw: qatTypesRaw ?? this.qatTypesRaw,
+      commercialDetails: commercialDetails ?? this.commercialDetails,
+      appDisplayName: appDisplayName ?? this.appDisplayName,
+      headerEnabled: headerEnabled ?? this.headerEnabled,
+      footerEnabled: footerEnabled ?? this.footerEnabled,
+      headerText: headerText ?? this.headerText,
+      paletteId: paletteId ?? this.paletteId,
+      customPrimaryHex: customPrimaryHex ?? this.customPrimaryHex,
+      customAccentHex: customAccentHex ?? this.customAccentHex,
+      customCanvasHex: customCanvasHex ?? this.customCanvasHex,
+      customCardHex: customCardHex ?? this.customCardHex,
+      customTextHex: customTextHex ?? this.customTextHex,
+      syncColorsWithPdf: syncColorsWithPdf ?? this.syncColorsWithPdf,
+      rememberMe: rememberMe ?? this.rememberMe,
+      appLockEnabled: appLockEnabled ?? this.appLockEnabled,
     );
   }
 
@@ -747,6 +959,8 @@ class SectionPermissions {
     this.reports = true,
     this.archive = true,
     this.expenses = true,
+    this.accounts = true,
+    this.customers = true,
   });
 
   final bool sales;
@@ -755,6 +969,8 @@ class SectionPermissions {
   final bool reports;
   final bool archive;
   final bool expenses;
+  final bool accounts;
+  final bool customers;
 
   Map<String, bool> toJson() => {
         'sales': sales,
@@ -763,6 +979,8 @@ class SectionPermissions {
         'reports': reports,
         'archive': archive,
         'expenses': expenses,
+        'accounts': accounts,
+        'customers': customers,
       };
 
   static SectionPermissions fromJson(Map<String, dynamic> map) => SectionPermissions(
@@ -772,6 +990,8 @@ class SectionPermissions {
         reports: (map['reports'] as bool?) ?? true,
         archive: (map['archive'] as bool?) ?? true,
         expenses: (map['expenses'] as bool?) ?? true,
+        accounts: (map['accounts'] as bool?) ?? true,
+        customers: (map['customers'] as bool?) ?? true,
       );
 
   SectionPermissions copyWith({
@@ -781,6 +1001,8 @@ class SectionPermissions {
     bool? reports,
     bool? archive,
     bool? expenses,
+    bool? accounts,
+    bool? customers,
   }) =>
       SectionPermissions(
         sales: sales ?? this.sales,
@@ -789,6 +1011,8 @@ class SectionPermissions {
         reports: reports ?? this.reports,
         archive: archive ?? this.archive,
         expenses: expenses ?? this.expenses,
+        accounts: accounts ?? this.accounts,
+        customers: customers ?? this.customers,
       );
 }
 
@@ -962,4 +1186,3 @@ class InventoryReconciliationEntry {
         createdBy: (map['createdBy'] ?? '').toString(),
       );
 }
-

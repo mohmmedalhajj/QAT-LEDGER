@@ -1,9 +1,14 @@
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
 
+import '../../core/date_utils.dart';
 import '../../core/money.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../services/esc_pos_service.dart';
+import '../../services/pdf_export_service.dart';
 
 class CurrencyBadge extends StatelessWidget {
   const CurrencyBadge({super.key, required this.currency, this.compact = false});
@@ -453,4 +458,342 @@ class EmptyLedgerState extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Official period filter strip matching Android Dashboard & Reports (Today, Yesterday, Weeks 1-5, Month, Year, Custom, All).
+class PeriodFilterStrip extends StatelessWidget {
+  const PeriodFilterStrip({
+    super.key,
+    required this.filter,
+    required this.onChanged,
+  });
+
+  final LedgerPeriodFilter filter;
+  final ValueChanged<LedgerPeriodFilter> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final pal = context.pal;
+    final yesterdayIso =
+        QatDateUtils.toIsoDate(DateTime.now().subtract(const Duration(days: 1)));
+    final isYesterday = filter.kind == LedgerPeriodKind.custom &&
+        filter.customFromIso == yesterdayIso &&
+        filter.customToIso == yesterdayIso;
+
+    final options = <(String, bool, Future<void> Function())>[
+      (
+        'اليوم',
+        filter.kind == LedgerPeriodKind.daily,
+        () async => onChanged(LedgerPeriodFilter.defaultToday()),
+      ),
+      (
+        'أمس',
+        isYesterday,
+        () async => onChanged(
+          LedgerPeriodFilter(
+            kind: LedgerPeriodKind.custom,
+            customUnit: CustomCalendarUnit.day,
+            customIsoValue: yesterdayIso,
+            customFromIso: yesterdayIso,
+            customToIso: yesterdayIso,
+          ),
+        ),
+      ),
+      (
+        'أسبوع ${filter.weekOfMonth}',
+        filter.kind == LedgerPeriodKind.weekly,
+        () async => onChanged(
+          filter.copyWith(
+            kind: LedgerPeriodKind.weekly,
+            weekOfMonth: filter.weekOfMonth.clamp(1, 5),
+          ),
+        ),
+      ),
+      (
+        'هذا الشهر',
+        filter.kind == LedgerPeriodKind.monthly,
+        () async => onChanged(const LedgerPeriodFilter(kind: LedgerPeriodKind.monthly)),
+      ),
+      (
+        'هذه السنة',
+        filter.kind == LedgerPeriodKind.yearly,
+        () async => onChanged(const LedgerPeriodFilter(kind: LedgerPeriodKind.yearly)),
+      ),
+      (
+        'فترة مخصصة',
+        filter.kind == LedgerPeriodKind.custom && !isYesterday,
+        () async {
+          final range = await showDateRangePicker(
+            context: context,
+            firstDate: DateTime(2020),
+            lastDate: DateTime(DateTime.now().year + 1),
+          );
+          if (range == null) return;
+          final from = QatDateUtils.toIsoDate(range.start);
+          final to = QatDateUtils.toIsoDate(range.end);
+          onChanged(
+            LedgerPeriodFilter(
+              kind: LedgerPeriodKind.custom,
+              customUnit: CustomCalendarUnit.day,
+              customIsoValue: from,
+              customFromIso: from,
+              customToIso: to,
+            ),
+          );
+        },
+      ),
+      (
+        'الكل',
+        filter.kind == LedgerPeriodKind.allTime,
+        () async => onChanged(const LedgerPeriodFilter(kind: LedgerPeriodKind.allTime)),
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (final opt in options) ...[
+                ChoiceChip(
+                  label: Text(opt.$1),
+                  selected: opt.$2,
+                  onSelected: (_) => opt.$3(),
+                ),
+                const SizedBox(width: 6),
+              ],
+            ],
+          ),
+        ),
+        if (filter.kind == LedgerPeriodKind.weekly) ...[
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Text(
+                'أسبوع الشهر:',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: pal.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 8),
+              for (int w = 1; w <= 5; w++) ...[
+                ChoiceChip(
+                  label: Text('$w'),
+                  visualDensity: VisualDensity.compact,
+                  selected: filter.weekOfMonth == w,
+                  onSelected: (_) => onChanged(
+                    filter.copyWith(
+                      kind: LedgerPeriodKind.weekly,
+                      weekOfMonth: w,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Customer PRO-tier feature gate shown ONLY for PRO-exclusive modules (Reports & Archive).
+class ProFeatureLockedCard extends StatelessWidget {
+  const ProFeatureLockedCard({
+    super.key,
+    required this.featureTitle,
+    required this.featureDescription,
+    required this.onActivatePressed,
+  });
+
+  final String featureTitle;
+  final String featureDescription;
+  final VoidCallback onActivatePressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final pal = context.pal;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: pal.warningSoft,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: pal.warning.withValues(alpha: 0.35),
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.workspace_premium_outlined,
+                    size: 34,
+                    color: pal.warning,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                StatusPill(
+                  label: 'ميزة احترافية PRO',
+                  bg: pal.warningSoft,
+                  fg: pal.warning,
+                  icon: Icons.verified_outlined,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  featureTitle,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  featureDescription,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'ملاحظة: جميع سجلاتك ودفاترك محفوظة بأمان كامل. الترقية للباقة الاحترافية (PRO) تفتح التقارير المتقدمة والأرشيف الشامل فوراً دون اتصال بالإنترنت.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11.5, color: pal.textSecondary),
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: onActivatePressed,
+                  icon: const Icon(Icons.vpn_key_outlined, size: 18),
+                  label: const Text('تفعيل / ترقية للباقة الاحترافية (PRO)'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Unified Thermal 58mm/80mm Preview, Bluetooth ESC/POS Print, PDF & Share sheet.
+Future<void> showReceiptPreviewPrintSheet(
+  BuildContext context, {
+  required AgencySettings agency,
+  required String title,
+  required String receiptText,
+  Uint8List? a4PdfBytes,
+}) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (ctx) {
+      final pal = ctx.pal;
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.print_outlined, color: pal.brand),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '$title (${agency.printerPaperMm}mm)',
+                      style: Theme.of(ctx).textTheme.titleMedium,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: pal.cardElevated,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: pal.border),
+                ),
+                child: SelectableText(
+                  receiptText,
+                  style: const TextStyle(fontSize: 12.5, height: 1.5),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (agency.savedPrinterAddress.isNotEmpty)
+                    FilledButton.icon(
+                      onPressed: () async {
+                        try {
+                          await EscPosService.instance.printTextReceipt(
+                            agency: agency,
+                            title: title,
+                            receiptText: receiptText,
+                            printerAddress: agency.savedPrinterAddress,
+                            paperMm: agency.printerPaperMm,
+                          );
+                          if (ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              const SnackBar(
+                                content: Text('تم إرسال الإيصال للطابعة الحرارية'),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(content: Text('تعذر الطباعة الحرارية: $e')),
+                            );
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.bluetooth_connected, size: 18),
+                      label: Text('طباعة حرارية (${agency.savedPrinterName})'),
+                    ),
+                  FilledButton.tonalIcon(
+                    onPressed: () async {
+                      final pdf = a4PdfBytes ??
+                          await PdfExportService.instance.buildTextReceiptPdf(
+                            agency: agency,
+                            title: title,
+                            lines: receiptText.split('\n'),
+                            format: agency.printerPaperMm <= 58
+                                ? PdfPageFormat.roll57
+                                : PdfPageFormat.roll80,
+                          );
+                      await Printing.layoutPdf(onLayout: (_) async => pdf);
+                    },
+                    icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                    label: const Text('طباعة / PDF'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => Share.share(receiptText),
+                    icon: const Icon(Icons.share_outlined, size: 18),
+                    label: const Text('مشاركة نص'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
 }

@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../core/money.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../services/esc_pos_service.dart';
 import '../../services/spreadsheet_export_service.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common_widgets.dart';
@@ -602,6 +603,36 @@ class _TransfersLedgerViewState extends State<TransfersLedgerView> {
                                           await ctrl.reloadAll();
                                         },
                                       ),
+                                  IconButton(
+                                    tooltip: 'طباعة / مشاركة سند الحوالة',
+                                    onPressed: () {
+                                      TransferRecipient? rec;
+                                      if (t.recipientId != null) {
+                                        for (final r in ctrl.recipients) {
+                                          if (r.id == t.recipientId) {
+                                            rec = r;
+                                            break;
+                                          }
+                                        }
+                                      }
+                                      final text = ThermalReceiptFormatter
+                                          .buildTransferVoucherText(
+                                        ctrl.settings,
+                                        t,
+                                        recipient: rec,
+                                      );
+                                      showReceiptPreviewPrintSheet(
+                                        context,
+                                        agency: ctrl.settings,
+                                        title: 'سند حوالة مالية',
+                                        receiptText: text,
+                                      );
+                                    },
+                                    icon: const Icon(
+                                      Icons.print_outlined,
+                                      size: 18,
+                                    ),
+                                  ),
                                   IconButton(
                                     tooltip: 'أرشفة',
                                     onPressed: () async {

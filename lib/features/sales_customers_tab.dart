@@ -71,7 +71,11 @@ class _SalesCustomersTabState extends State<SalesCustomersTab> {
               ),
               TickerMode(
                 enabled: isTabActive && subTab == 3,
-                child: AccountStatementView(preselectedCustomerId: _statementCustomerId),
+                child: AccountStatementView(
+                  preselectedCustomerId:
+                      _statementCustomerId ?? ctrl.statementCustomerId,
+                  preselectedSupplierId: ctrl.statementSupplierId,
+                ),
               ),
             ],
           ),

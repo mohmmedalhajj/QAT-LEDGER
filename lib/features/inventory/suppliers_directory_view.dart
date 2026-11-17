@@ -28,12 +28,13 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
     final nameCtrl = TextEditingController(text: existing?.name ?? '');
     final phoneCtrl = TextEditingController(text: existing?.phone ?? '');
     final addrCtrl = TextEditingController(text: existing?.address ?? '');
+    final regionCtrl = TextEditingController(text: existing?.region ?? '');
     final notesCtrl = TextEditingController(text: existing?.notes ?? '');
 
     await showDialog<void>(
       context: context,
       builder: (ctx) => ErpDialogControllerScope(
-        controllers: [nameCtrl, phoneCtrl, addrCtrl, notesCtrl],
+        controllers: [nameCtrl, phoneCtrl, addrCtrl, regionCtrl, notesCtrl],
         child: AlertDialog(
           title: Text(existing == null ? 'مورد جديد' : 'تعديل بيانات المورد'),
         content: SingleChildScrollView(
@@ -66,8 +67,13 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
               ),
               const SizedBox(height: 8),
               TextField(
+                controller: regionCtrl,
+                decoration: const InputDecoration(labelText: 'المنطقة / المديرية'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
                 controller: addrCtrl,
-                decoration: const InputDecoration(labelText: 'المنطقة'),
+                decoration: const InputDecoration(labelText: 'العنوان التفصيلي'),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -104,6 +110,7 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
                 name: clean,
                 phone: phoneCtrl.text,
                 address: addrCtrl.text,
+                region: regionCtrl.text,
                 notes: notesCtrl.text,
               );
               await ctrl.reloadAll();
@@ -112,6 +119,87 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
             child: const Text('حفظ'),
           ),
         ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSupplierReturnDialog(
+    AppController ctrl,
+    Supplier supplier,
+  ) async {
+    final amountCtrl = TextEditingController();
+    final qtyCtrl = TextEditingController(text: '0');
+    final itemCtrl = TextEditingController();
+    final notesCtrl = TextEditingController();
+    CurrencyCode cur = ctrl.currencyPolicy.defaultCurrency;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [amountCtrl, qtyCtrl, itemCtrl, notesCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text('سند مرتجع لمورد — ${supplier.name}'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CurrencySelectorRow(
+                    policy: ctrl.currencyPolicy,
+                    selected: cur,
+                    onChanged: (c) => setModalState(() => cur = c),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: itemCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'الصنف المرتجع (اختياري)',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  AccountingNumberField(
+                    controller: qtyCtrl,
+                    label: 'الكمية المرتجعة',
+                  ),
+                  const SizedBox(height: 8),
+                  AccountingNumberField(
+                    controller: amountCtrl,
+                    label: 'قيمة المرتجع (${cur.shortSymbol}) *',
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: notesCtrl,
+                    decoration: const InputDecoration(labelText: 'سبب المرتجع'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final amt = Money.parseMinorUnits(amountCtrl.text);
+                  if (amt <= 0) return;
+                  await ctrl.repo.addSupplierReturn(
+                    supplierId: supplier.id,
+                    supplierName: supplier.name,
+                    amountMinor: amt,
+                    currency: cur,
+                    returnedQtyMilli: QuantityMath.parseMilli(qtyCtrl.text),
+                    itemName: itemCtrl.text,
+                    notes: notesCtrl.text,
+                  );
+                  await ctrl.reloadAll();
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                child: const Text('اعتماد المرتجع'),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -648,6 +736,24 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
                                       size: 16,
                                     ),
                                     label: const Text('السندات'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _openSupplierReturnDialog(ctrl, s),
+                                    icon: const Icon(
+                                      Icons.assignment_return_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('مرتجع'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: () =>
+                                        ctrl.openStatementForSupplier(s.id),
+                                    icon: const Icon(
+                                      Icons.table_chart_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('كشف الحساب'),
                                   ),
                                 ],
                               ),

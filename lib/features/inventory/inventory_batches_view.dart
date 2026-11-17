@@ -18,9 +18,69 @@ class InventoryBatchesView extends StatefulWidget {
 }
 
 class _InventoryBatchesViewState extends State<InventoryBatchesView> {
+  int _section = 0; // 0 = batches, 1 = import weights
   String _search = '';
   _StockFilter _stockFilter = _StockFilter.all;
   CurrencyCode? _currencyFilter;
+
+  Future<void> _openImportWeightDialog(AppController ctrl) async {
+    final receiverCtrl = TextEditingController();
+    final weightCtrl = TextEditingController();
+    final notesCtrl = TextEditingController();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [receiverCtrl, weightCtrl, notesCtrl],
+        child: AlertDialog(
+          title: const Text('تسجيل وزن الوارد اليومي'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: receiverCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'اسم المستلم / المورد *',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                AccountingNumberField(
+                  controller: weightCtrl,
+                  label: 'الوزن الإجمالي (كجم) *',
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: notesCtrl,
+                  decoration: const InputDecoration(labelText: 'ملاحظات'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final weightMilli = QuantityMath.parseMilli(weightCtrl.text);
+                if (receiverCtrl.text.trim().isEmpty || weightMilli <= 0) return;
+                await ctrl.repo.addImportWeight(
+                  weightMilli: weightMilli,
+                  receiverName: receiverCtrl.text.trim(),
+                  notes: notesCtrl.text,
+                );
+                await ctrl.reloadAll();
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('حفظ الوزن'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Future<void> _openBatchDialog(
     AppController ctrl, {
@@ -211,13 +271,115 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
 
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openBatchDialog(ctrl),
+        onPressed: () => _section == 0
+            ? _openBatchDialog(ctrl)
+            : _openImportWeightDialog(ctrl),
         icon: const Icon(Icons.add_box_outlined),
-        label: const Text('إضافة دفعة'),
+        label: Text(_section == 0 ? 'إضافة دفعة' : 'تسجيل وزن وارد'),
       ),
       body: Column(
         children: [
-          ErpSearchFilterBar(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+            child: SegmentedButton<int>(
+              segments: [
+                const ButtonSegment<int>(
+                  value: 0,
+                  icon: Icon(Icons.inventory_2_outlined, size: 17),
+                  label: Text('دفعات المخزون'),
+                ),
+                ButtonSegment<int>(
+                  value: 1,
+                  icon: const Icon(Icons.scale_outlined, size: 17),
+                  label: Text('أوزان الوارد (${ctrl.importWeights.length})'),
+                ),
+              ],
+              selected: {_section},
+              onSelectionChanged: (s) => setState(() => _section = s.first),
+            ),
+          ),
+          if (_section == 1) ...[
+            Expanded(
+              child: ctrl.importWeights.isEmpty
+                  ? EmptyLedgerState(
+                      icon: Icons.scale_outlined,
+                      title: 'لا توجد أوزان وارد مسجلة',
+                      subtitle:
+                          'سجل أوزان الشحنات الواردة اليومية ومستلميها بدقة',
+                      actionLabel: 'تسجيل وزن وارد',
+                      onAction: () => _openImportWeightDialog(ctrl),
+                    )
+                  : ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 84),
+                      children: [
+                        ErpSummaryBar(
+                          metrics: [
+                            ErpSummaryMetric(
+                              label: 'إجمالي الشحنات',
+                              value: '${ctrl.importWeights.length}',
+                            ),
+                            ErpSummaryMetric(
+                              label: 'إجمالي الوزن المسجل',
+                              value:
+                                  '${QuantityMath.formatMilli(ctrl.importWeights.fold<int>(0, (s, w) => s + w.weightMilli))} كجم',
+                              toneColor: pal.brand,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        for (final w in ctrl.importWeights)
+                          Card(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: pal.brandSoft,
+                                child: Icon(
+                                  Icons.scale_outlined,
+                                  color: pal.brand,
+                                  size: 19,
+                                ),
+                              ),
+                              title: Text(
+                                '${QuantityMath.formatMilli(w.weightMilli)} كجم — ${w.receiverName}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13.5,
+                                ),
+                              ),
+                              subtitle: Text(
+                                '${w.dateIso}${w.notes.isNotEmpty ? ' • ${w.notes}' : ''}',
+                              ),
+                              trailing: ctrl.canDeleteCurrent
+                                  ? IconButton(
+                                      tooltip: 'حذف',
+                                      icon: Icon(
+                                        Icons.delete_outline,
+                                        color: pal.danger,
+                                        size: 18,
+                                      ),
+                                      onPressed: () async {
+                                        final ok = await showErpConfirmDialog(
+                                          context,
+                                          title: 'حذف سجل الوزن',
+                                          message:
+                                              'هل تريد حذف سجل وزن الوارد (${w.receiverName})؟',
+                                          confirmLabel: 'حذف',
+                                          destructive: true,
+                                        );
+                                        if (!ok) return;
+                                        await ctrl.repo
+                                            .deleteImportWeight(w.id);
+                                        await ctrl.reloadAll();
+                                      },
+                                    )
+                                  : null,
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
+          ] else ...[
+            ErpSearchFilterBar(
             searchHint: 'بحث باسم الصنف أو المورد...',
             onSearchChanged: (v) => setState(() => _search = v.trim()),
             filters: [
@@ -459,6 +621,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                     ],
                   ),
           ),
+          ],
         ],
       ),
     );

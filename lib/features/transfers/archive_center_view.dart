@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/money.dart';
+import '../../licensing/license_models.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/erp_components.dart';
@@ -161,6 +162,14 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
     if (!isArchiveActive) {
       _wasArchiveActive = false;
       return const SizedBox.shrink();
+    }
+    if (!ctrl.hasLicenseFeature(LicenseFeature.archive)) {
+      return ProFeatureLockedCard(
+        featureTitle: 'مركز الأرشيف الشامل واستعادة القيود',
+        featureDescription:
+            'يتيح لك الأرشيف الشامل في الباقة الاحترافية (PRO) استعراض واستعادة الفواتير، الدفعات، والحوالات المؤرشفة بضغطة واحدة.',
+        onActivatePressed: () => ctrl.setSection(4, subTab: 3),
+      );
     }
     if (!ctrl.sectionPermissions.archive &&
         ctrl.currentUser?.role.code != 'ADMIN') {

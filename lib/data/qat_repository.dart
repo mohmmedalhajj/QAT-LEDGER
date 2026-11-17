@@ -77,6 +77,34 @@ class QatRepository {
       savedPrinterName: map['saved_printer_name'] ?? '',
       savedPrinterAddress: map['saved_printer_address'] ?? '',
       printerPaperMm: int.tryParse(map['printer_paper_mm'] ?? '') ?? 80,
+      ownerName: map['owner_name'] ?? '',
+      additionalContact: map['additional_contact'] ?? '',
+      tagline: map['tagline']?.isNotEmpty == true
+          ? map['tagline']!
+          : AgencySettings.defaults.tagline,
+      qatTypesRaw: map['qat_types_raw']?.isNotEmpty == true
+          ? map['qat_types_raw']!
+          : AgencySettings.defaults.qatTypesRaw,
+      commercialDetails: map['commercial_details'] ?? '',
+      appDisplayName: map['app_display_name'] ?? '',
+      headerEnabled: map['header_enabled'] != '0',
+      footerEnabled: map['footer_enabled'] != '0',
+      headerText: map['header_text'] ?? '',
+      paletteId: map['palette_id']?.isNotEmpty == true
+          ? map['palette_id']!
+          : AgencySettings.defaults.paletteId,
+      customPrimaryHex: map['custom_primary_hex']?.isNotEmpty == true
+          ? map['custom_primary_hex']!
+          : AgencySettings.defaults.customPrimaryHex,
+      customAccentHex: map['custom_accent_hex']?.isNotEmpty == true
+          ? map['custom_accent_hex']!
+          : AgencySettings.defaults.customAccentHex,
+      customCanvasHex: map['custom_canvas_hex'] ?? '',
+      customCardHex: map['custom_card_hex'] ?? '',
+      customTextHex: map['custom_text_hex'] ?? '',
+      syncColorsWithPdf: map['sync_colors_with_pdf'] != '0',
+      rememberMe: map['remember_me'] != '0',
+      appLockEnabled: map['app_lock_enabled'] == '1',
     );
   }
 
@@ -121,6 +149,24 @@ class QatRepository {
       'saved_printer_name': s.savedPrinterName,
       'saved_printer_address': s.savedPrinterAddress,
       'printer_paper_mm': s.printerPaperMm.toString(),
+      'owner_name': s.ownerName,
+      'additional_contact': s.additionalContact,
+      'tagline': s.tagline,
+      'qat_types_raw': s.qatTypesRaw,
+      'commercial_details': s.commercialDetails,
+      'app_display_name': s.appDisplayName,
+      'header_enabled': s.headerEnabled ? '1' : '0',
+      'footer_enabled': s.footerEnabled ? '1' : '0',
+      'header_text': s.headerText,
+      'palette_id': s.paletteId,
+      'custom_primary_hex': s.customPrimaryHex,
+      'custom_accent_hex': s.customAccentHex,
+      'custom_canvas_hex': s.customCanvasHex,
+      'custom_card_hex': s.customCardHex,
+      'custom_text_hex': s.customTextHex,
+      'sync_colors_with_pdf': s.syncColorsWithPdf ? '1' : '0',
+      'remember_me': s.rememberMe ? '1' : '0',
+      'app_lock_enabled': s.appLockEnabled ? '1' : '0',
     };
     await db.transaction<void>((txn) async {
       for (final e in pairs.entries) {
@@ -205,6 +251,11 @@ class QatRepository {
     required int sellPriceMinor,
     required CurrencyCode currency,
     int? dateMs,
+    String itemNumber = '',
+    int lowStockThresholdMilli = 0,
+    int? receiverId,
+    String receiverName = '',
+    String notes = '',
   }) async {
     final db = await _db;
     final ts = dateMs ?? DateTime.now().millisecondsSinceEpoch;
@@ -223,6 +274,11 @@ class QatRepository {
       'purchase_date_ms': ts,
       'purchase_date_iso': iso,
       'is_archived': 0,
+      'item_number': itemNumber.trim(),
+      'low_stock_threshold_milli': lowStockThresholdMilli.clamp(0, 1 << 60).toInt(),
+      'receiver_id': receiverId,
+      'receiver_name': receiverName.trim(),
+      'notes': notes.trim(),
     });
   }
 
@@ -234,6 +290,11 @@ class QatRepository {
     required int buyPriceMinor,
     required int sellPriceMinor,
     required CurrencyCode currency,
+    String? itemNumber,
+    int? lowStockThresholdMilli,
+    int? receiverId,
+    String? receiverName,
+    String? notes,
   }) async {
     final db = await _db;
     await db.update(
@@ -245,10 +306,77 @@ class QatRepository {
         'buy_price_minor': buyPriceMinor.clamp(0, 1 << 60).toInt(),
         'sell_price_minor': sellPriceMinor.clamp(0, 1 << 60).toInt(),
         'currency_code': currency.code,
+        if (itemNumber != null) 'item_number': itemNumber.trim(),
+        if (lowStockThresholdMilli != null)
+          'low_stock_threshold_milli': lowStockThresholdMilli.clamp(0, 1 << 60).toInt(),
+        if (receiverId != null || receiverName != null) 'receiver_id': receiverId,
+        if (receiverName != null) 'receiver_name': receiverName.trim(),
+        if (notes != null) 'notes': notes.trim(),
       },
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Imported Qat Weights & Daily Receivers (وزن القات المستورد ومستلم المخزون)
+  // ---------------------------------------------------------------------------
+
+  Future<List<QatImportWeight>> getImportWeights({bool includeArchived = false}) async {
+    final db = await _db;
+    final rows = await db.query(
+      'qat_import_weights',
+      where: includeArchived ? null : 'is_archived = 0',
+      orderBy: 'date_ms DESC, id DESC',
+    );
+    return rows.map(_mapImportWeight).toList();
+  }
+
+  Future<int> addImportWeight({
+    required int weightMilli,
+    required String receiverName,
+    String notes = '',
+    int? dateMs,
+  }) async {
+    final db = await _db;
+    final ts = dateMs ?? DateTime.now().millisecondsSinceEpoch;
+    final iso = QatDateUtils.toIsoDate(DateTime.fromMillisecondsSinceEpoch(ts));
+    return db.insert('qat_import_weights', {
+      'date_ms': ts,
+      'date_iso': iso,
+      'weight_milli': weightMilli.clamp(0, 1 << 60).toInt(),
+      'receiver_name': receiverName.trim(),
+      'notes': notes.trim(),
+      'is_archived': 0,
+    });
+  }
+
+  Future<void> updateImportWeight({
+    required int id,
+    required int weightMilli,
+    required String receiverName,
+    String notes = '',
+    String? dateIso,
+  }) async {
+    final db = await _db;
+    final parsed = dateIso != null ? QatDateUtils.parseLegacyDate(dateIso) : null;
+    await db.update(
+      'qat_import_weights',
+      {
+        'weight_milli': weightMilli.clamp(0, 1 << 60).toInt(),
+        'receiver_name': receiverName.trim(),
+        'notes': notes.trim(),
+        if (parsed != null) 'date_ms': parsed.epochMs,
+        if (parsed != null) 'date_iso': parsed.isoDate,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> deleteImportWeight(int id) async {
+    final db = await _db;
+    await db.delete('qat_import_weights', where: 'id = ?', whereArgs: [id]);
   }
 
   Future<void> deleteInventoryBatch(int id) async {
@@ -419,6 +547,7 @@ class QatRepository {
     int taxBps = 0,
     required PaymentType paymentType,
     int paidAmountMinor = 0,
+    String paymentMethod = '',
     String notes = '',
     int? dateMs,
   }) async {
@@ -463,6 +592,9 @@ class QatRepository {
     final effectivePaymentType = finalTotals.remainingAmountMinor == 0
         ? PaymentType.paid
         : (finalTotals.paidAmountMinor == 0 ? PaymentType.credit : PaymentType.partial);
+    final effectiveMethod = paymentMethod.trim().isNotEmpty
+        ? paymentMethod.trim()
+        : effectivePaymentType.arabicLabel;
 
     return db.transaction<int>((txn) async {
       // 1. Validate and deduct inventory batches atomically
@@ -512,7 +644,8 @@ class QatRepository {
         'paid_amount_minor': finalTotals.paidAmountMinor,
         'remaining_amount_minor': finalTotals.remainingAmountMinor,
         'payment_type': effectivePaymentType.code,
-        'status': effectivePaymentType.arabicLabel,
+        'status': effectiveMethod,
+        'payment_method': effectiveMethod,
         'notes': notes.trim(),
         'is_archived': 0,
       });
@@ -550,6 +683,60 @@ class QatRepository {
     });
   }
 
+  /// Direct customer debt entry without deducting inventory (`تسجيل دين مباشر جديد`).
+  Future<int> addDirectCustomerDebt({
+    required int customerId,
+    required String customerName,
+    required int amountMinor,
+    required CurrencyCode currency,
+    String statement = 'دين مباشر',
+    String referenceNumber = '',
+    String notes = '',
+    int? dateMs,
+  }) async {
+    if (amountMinor <= 0) throw ArgumentError('مبلغ الدين يجب أن يكون أكبر من صفر.');
+    final db = await _db;
+    final ts = dateMs ?? DateTime.now().millisecondsSinceEpoch;
+    final iso = QatDateUtils.toIsoDate(DateTime.fromMillisecondsSinceEpoch(ts));
+    final cleanNote = [
+      if (statement.trim().isNotEmpty) statement.trim(),
+      if (referenceNumber.trim().isNotEmpty) 'مرجع: ${referenceNumber.trim()}',
+      if (notes.trim().isNotEmpty) notes.trim(),
+    ].join(' — ');
+
+    return db.transaction<int>((txn) async {
+      final saleId = await txn.insert('sales', {
+        'invoice_number': 'TMP-DEBT-$ts',
+        'customer_id': customerId,
+        'customer_name': customerName.trim(),
+        'date_ms': ts,
+        'date_iso': iso,
+        'currency_code': currency.code,
+        'subtotal_minor': amountMinor,
+        'discount_minor': 0,
+        'tax_bps': 0,
+        'tax_amount_minor': 0,
+        'total_amount_minor': amountMinor,
+        'paid_amount_minor': 0,
+        'remaining_amount_minor': amountMinor,
+        'payment_type': PaymentType.credit.code,
+        'status': 'دين مباشر',
+        'payment_method': 'آجل',
+        'notes': cleanNote,
+        'is_archived': 0,
+      });
+      final invNo = 'DEBT-${iso.replaceAll('-', '')}-${saleId.toString().padLeft(4, '0')}';
+      await txn.update('sales', {'invoice_number': invNo}, where: 'id = ?', whereArgs: [saleId]);
+      await _adjustCustomerBalance(
+        txn,
+        customerId: customerId,
+        currency: currency,
+        deltaMinor: amountMinor,
+      );
+      return saleId;
+    });
+  }
+
   Future<void> editSale({
     required int saleId,
     int? customerId,
@@ -560,6 +747,7 @@ class QatRepository {
     int taxBps = 0,
     required PaymentType paymentType,
     int paidAmountMinor = 0,
+    String paymentMethod = '',
     String notes = '',
   }) async {
     if (newItems.isEmpty) {
@@ -597,6 +785,9 @@ class QatRepository {
     final normType = totals.remainingAmountMinor == 0
         ? PaymentType.paid
         : (totals.paidAmountMinor == 0 ? PaymentType.credit : PaymentType.partial);
+    final effectiveMethod = paymentMethod.trim().isNotEmpty
+        ? paymentMethod.trim()
+        : normType.arabicLabel;
 
     await db.transaction<void>((txn) async {
       final rows = await txn.query('sales', where: 'id = ?', whereArgs: [saleId], limit: 1);
@@ -679,7 +870,8 @@ class QatRepository {
           'paid_amount_minor': totals.paidAmountMinor,
           'remaining_amount_minor': totals.remainingAmountMinor,
           'payment_type': normType.code,
-          'status': normType.arabicLabel,
+          'status': effectiveMethod,
+          'payment_method': effectiveMethod,
           'notes': notes.trim(),
         },
         where: 'id = ?',
@@ -811,6 +1003,58 @@ class QatRepository {
     });
   }
 
+  Future<void> updateCustomerPayment({
+    required int paymentId,
+    required int amountMinor,
+    required CurrencyCode currency,
+    String paymentMethod = 'نقدي',
+    String notes = '',
+  }) async {
+    if (amountMinor <= 0) throw ArgumentError('المبلغ يجب أن يكون أكبر من صفر.');
+    final db = await _db;
+    await db.transaction<void>((txn) async {
+      final rows = await txn.query(
+        'customer_payments',
+        where: 'id = ?',
+        whereArgs: [paymentId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw StateError('سند القبض غير موجود.');
+      final old = rows.first;
+      final customerId = (old['customer_id'] as num).toInt();
+      final isArchived = (old['is_archived'] as num).toInt() == 1;
+      final oldCur = CurrencyCode.fromRaw(old['currency_code']?.toString());
+      final oldAmt = (old['amount_minor'] as num).toInt();
+
+      if (!isArchived) {
+        await _adjustCustomerBalance(
+          txn,
+          customerId: customerId,
+          currency: oldCur,
+          deltaMinor: oldAmt,
+        );
+        await _adjustCustomerBalance(
+          txn,
+          customerId: customerId,
+          currency: currency,
+          deltaMinor: -amountMinor,
+        );
+      }
+
+      await txn.update(
+        'customer_payments',
+        {
+          'amount_minor': amountMinor,
+          'currency_code': currency.code,
+          'payment_method': paymentMethod.trim().isEmpty ? 'نقدي' : paymentMethod.trim(),
+          'notes': notes.trim(),
+        },
+        where: 'id = ?',
+        whereArgs: [paymentId],
+      );
+    });
+  }
+
   Future<void> deleteCustomerPayment(int paymentId) async {
     final db = await _db;
     await db.transaction<void>((txn) async {
@@ -864,6 +1108,7 @@ class QatRepository {
     required String name,
     String phone = '',
     String address = '',
+    String region = '',
     String notes = '',
   }) async {
     final db = await _db;
@@ -873,6 +1118,7 @@ class QatRepository {
       'name': cleanName,
       'phone': phone.trim(),
       'address': address.trim(),
+      'region': region.trim(),
       'notes': notes.trim(),
     };
     if (id != null && id > 0) {
@@ -954,6 +1200,12 @@ class QatRepository {
     int taxBps = 0,
     required PaymentType paymentType,
     int paidAmountMinor = 0,
+    String paymentMethod = '',
+    String bankName = '',
+    String transferNumber = '',
+    int demarMinor = 0,
+    String demarType = '',
+    String demarNumber = '',
     String notes = '',
     bool addToInventory = true,
     int? dateMs,
@@ -976,19 +1228,23 @@ class QatRepository {
       paidMinor: 0,
     );
     final effectivePaid = switch (paymentType) {
-      PaymentType.paid => prelim.totalAmountMinor,
+      PaymentType.paid => paidAmountMinor > prelim.totalAmountMinor ? paidAmountMinor : prelim.totalAmountMinor,
       PaymentType.credit => 0,
-      PaymentType.partial => paidAmountMinor.clamp(0, prelim.totalAmountMinor).toInt(),
+      PaymentType.partial => paidAmountMinor.clamp(0, 1 << 60).toInt(),
     };
     final totals = InvoiceMath.computeTotals(
       lineTotalsMinor: lineTotals,
       discountMinor: discountMinor,
       taxBps: taxBps,
-      paidMinor: effectivePaid,
+      paidMinor: effectivePaid.clamp(0, prelim.totalAmountMinor).toInt(),
     );
-    final normType = totals.remainingAmountMinor == 0
+    final remainingWithSurplus = totals.totalAmountMinor - effectivePaid;
+    final normType = remainingWithSurplus <= 0
         ? PaymentType.paid
-        : (totals.paidAmountMinor == 0 ? PaymentType.credit : PaymentType.partial);
+        : (effectivePaid == 0 ? PaymentType.credit : PaymentType.partial);
+    final effectiveMethod = paymentMethod.trim().isNotEmpty
+        ? paymentMethod.trim()
+        : normType.arabicLabel;
 
     return db.transaction<int>((txn) async {
       final purchaseId = await txn.insert('supplier_purchases', {
@@ -1003,11 +1259,17 @@ class QatRepository {
         'tax_bps': totals.taxBps,
         'tax_amount_minor': totals.taxAmountMinor,
         'total_amount_minor': totals.totalAmountMinor,
-        'paid_amount_minor': totals.paidAmountMinor,
-        'remaining_amount_minor': totals.remainingAmountMinor,
+        'paid_amount_minor': effectivePaid,
+        'remaining_amount_minor': remainingWithSurplus,
         'payment_type': normType.code,
         'notes': notes.trim(),
         'is_archived': 0,
+        'payment_method': effectiveMethod,
+        'bank_name': bankName.trim(),
+        'transfer_number': transferNumber.trim(),
+        'demar_minor': demarMinor.clamp(0, 1 << 60).toInt(),
+        'demar_type': demarType.trim(),
+        'demar_number': demarNumber.trim(),
       });
 
       final purNo = 'PUR-${iso.replaceAll('-', '')}-${purchaseId.toString().padLeft(4, '0')}';
@@ -1049,16 +1311,79 @@ class QatRepository {
         }
       }
 
-      if (totals.remainingAmountMinor != 0) {
+      if (remainingWithSurplus != 0) {
         await _adjustSupplierBalance(
           txn,
           supplierId: supplierId,
           currency: currency,
-          deltaMinor: totals.remainingAmountMinor,
+          deltaMinor: remainingWithSurplus,
         );
       }
 
       return purchaseId;
+    });
+  }
+
+  /// Supplier return voucher (`سند مرتجع لمورد`): deducts returned quantity (if batch linked) and reduces supplier payable.
+  Future<int> addSupplierReturn({
+    required int supplierId,
+    required String supplierName,
+    required int amountMinor,
+    required CurrencyCode currency,
+    int? inventoryBatchId,
+    int returnedQtyMilli = 0,
+    String itemName = '',
+    String notes = '',
+    int? dateMs,
+  }) async {
+    if (amountMinor <= 0) throw ArgumentError('مبلغ المرتجع يجب أن يكون أكبر من صفر.');
+    final db = await _db;
+    final ts = dateMs ?? DateTime.now().millisecondsSinceEpoch;
+    final iso = QatDateUtils.toIsoDate(DateTime.fromMillisecondsSinceEpoch(ts));
+
+    return db.transaction<int>((txn) async {
+      if (inventoryBatchId != null && returnedQtyMilli > 0) {
+        final rows = await txn.query(
+          'inventory_batches',
+          where: 'id = ?',
+          whereArgs: [inventoryBatchId],
+          limit: 1,
+        );
+        if (rows.isNotEmpty) {
+          final curQty = (rows.first['remaining_qty_milli'] as num).toInt();
+          final nextQty = (curQty - returnedQtyMilli).clamp(0, 1 << 60).toInt();
+          await txn.update(
+            'inventory_batches',
+            {'remaining_qty_milli': nextQty},
+            where: 'id = ?',
+            whereArgs: [inventoryBatchId],
+          );
+        }
+      }
+      final detail = [
+        'سند مرتجع بضاعة للمورد',
+        if (itemName.trim().isNotEmpty) 'الصنف: ${itemName.trim()}',
+        if (returnedQtyMilli > 0) 'الكمية المرتجعة: ${QuantityMath.formatMilli(returnedQtyMilli)}',
+        if (notes.trim().isNotEmpty) notes.trim(),
+      ].join(' — ');
+      final id = await txn.insert('supplier_payments', {
+        'supplier_id': supplierId,
+        'supplier_name': supplierName.trim(),
+        'amount_minor': amountMinor,
+        'currency_code': currency.code,
+        'date_ms': ts,
+        'date_iso': iso,
+        'payment_method': 'مرتجع',
+        'notes': detail,
+        'is_archived': 0,
+      });
+      await _adjustSupplierBalance(
+        txn,
+        supplierId: supplierId,
+        currency: currency,
+        deltaMinor: -amountMinor,
+      );
+      return id;
     });
   }
 
@@ -1073,6 +1398,12 @@ class QatRepository {
     int taxBps = 0,
     required PaymentType paymentType,
     int paidAmountMinor = 0,
+    String paymentMethod = '',
+    String bankName = '',
+    String transferNumber = '',
+    int demarMinor = 0,
+    String demarType = '',
+    String demarNumber = '',
     String notes = '',
   }) async {
     if (newItems.isEmpty) throw ArgumentError('يجب وجود صنف واحد على الأقل.');
@@ -1117,19 +1448,23 @@ class QatRepository {
         paidMinor: 0,
       );
       final effectivePaid = switch (paymentType) {
-        PaymentType.paid => prelim.totalAmountMinor,
+        PaymentType.paid => paidAmountMinor > prelim.totalAmountMinor ? paidAmountMinor : prelim.totalAmountMinor,
         PaymentType.credit => 0,
-        PaymentType.partial => paidAmountMinor.clamp(0, prelim.totalAmountMinor).toInt(),
+        PaymentType.partial => paidAmountMinor.clamp(0, 1 << 60).toInt(),
       };
       final totals = InvoiceMath.computeTotals(
         lineTotalsMinor: lineTotals,
         discountMinor: discountMinor,
         taxBps: taxBps,
-        paidMinor: effectivePaid,
+        paidMinor: effectivePaid.clamp(0, prelim.totalAmountMinor).toInt(),
       );
-      final normType = totals.remainingAmountMinor == 0
+      final remainingWithSurplus = totals.totalAmountMinor - effectivePaid;
+      final normType = remainingWithSurplus <= 0
           ? PaymentType.paid
-          : (totals.paidAmountMinor == 0 ? PaymentType.credit : PaymentType.partial);
+          : (effectivePaid == 0 ? PaymentType.credit : PaymentType.partial);
+      final effectiveMethod = paymentMethod.trim().isNotEmpty
+          ? paymentMethod.trim()
+          : normType.arabicLabel;
 
       await txn.update(
         'supplier_purchases',
@@ -1140,10 +1475,16 @@ class QatRepository {
           'tax_bps': totals.taxBps,
           'tax_amount_minor': totals.taxAmountMinor,
           'total_amount_minor': totals.totalAmountMinor,
-          'paid_amount_minor': totals.paidAmountMinor,
-          'remaining_amount_minor': totals.remainingAmountMinor,
+          'paid_amount_minor': effectivePaid,
+          'remaining_amount_minor': remainingWithSurplus,
           'payment_type': normType.code,
           'notes': notes.trim(),
+          'payment_method': effectiveMethod,
+          'bank_name': bankName.trim(),
+          'transfer_number': transferNumber.trim(),
+          'demar_minor': demarMinor.clamp(0, 1 << 60).toInt(),
+          'demar_type': demarType.trim(),
+          'demar_number': demarNumber.trim(),
         },
         where: 'id = ?',
         whereArgs: [purchaseId],
@@ -1212,12 +1553,12 @@ class QatRepository {
         }
       }
 
-      if (totals.remainingAmountMinor != 0) {
+      if (remainingWithSurplus != 0) {
         await _adjustSupplierBalance(
           txn,
           supplierId: supplierId,
           currency: currency,
-          deltaMinor: totals.remainingAmountMinor,
+          deltaMinor: remainingWithSurplus,
         );
       }
     });
@@ -1274,6 +1615,8 @@ class QatRepository {
     required int amountMinor,
     required CurrencyCode currency,
     String paymentMethod = 'نقدي',
+    String bankName = '',
+    String transferNumber = '',
     String notes = '',
     int? dateMs,
   }) async {
@@ -1281,6 +1624,11 @@ class QatRepository {
     final db = await _db;
     final ts = dateMs ?? DateTime.now().millisecondsSinceEpoch;
     final iso = QatDateUtils.toIsoDate(DateTime.fromMillisecondsSinceEpoch(ts));
+    final mergedNotes = [
+      if (bankName.trim().isNotEmpty) 'البنك/الصرافة: ${bankName.trim()}',
+      if (transferNumber.trim().isNotEmpty) 'رقم الحوالة: ${transferNumber.trim()}',
+      if (notes.trim().isNotEmpty) notes.trim(),
+    ].join(' — ');
 
     return db.transaction<int>((txn) async {
       final id = await txn.insert('supplier_payments', {
@@ -1291,7 +1639,7 @@ class QatRepository {
         'date_ms': ts,
         'date_iso': iso,
         'payment_method': paymentMethod.trim().isEmpty ? 'نقدي' : paymentMethod.trim(),
-        'notes': notes.trim(),
+        'notes': mergedNotes,
         'is_archived': 0,
       });
       await _adjustSupplierBalance(
@@ -1473,6 +1821,8 @@ class QatRepository {
     required int taxRateMinor,
     required int taxAmountMinor,
     required CurrencyCode currency,
+    int stallOutflowMinor = 0,
+    int laborOutflowMinor = 0,
     String source = 'يدوي',
     String notes = '',
     int? dateMs,
@@ -1486,11 +1836,34 @@ class QatRepository {
       'total_qty_milli': totalQtyMilli.clamp(0, 1 << 60).toInt(),
       'tax_rate_minor': taxRateMinor.clamp(0, 1 << 60).toInt(),
       'tax_amount_minor': taxAmountMinor.clamp(0, 1 << 60).toInt(),
+      'stall_outflow_minor': stallOutflowMinor.clamp(0, 1 << 60).toInt(),
+      'labor_outflow_minor': laborOutflowMinor.clamp(0, 1 << 60).toInt(),
       'currency_code': currency.code,
       'source': source,
       'notes': notes.trim(),
       'is_archived': 0,
     });
+  }
+
+  Future<void> updateTaxEntry({
+    required int id,
+    required int taxAmountMinor,
+    int stallOutflowMinor = 0,
+    int laborOutflowMinor = 0,
+    String notes = '',
+  }) async {
+    final db = await _db;
+    await db.update(
+      'qat_tax_entries',
+      {
+        'tax_amount_minor': taxAmountMinor.clamp(0, 1 << 60).toInt(),
+        'stall_outflow_minor': stallOutflowMinor.clamp(0, 1 << 60).toInt(),
+        'labor_outflow_minor': laborOutflowMinor.clamp(0, 1 << 60).toInt(),
+        'notes': notes.trim(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> deleteTaxEntry(int id) async {
@@ -1514,6 +1887,7 @@ class QatRepository {
     String phone = '',
     String company = '',
     String notes = '',
+    bool isActive = true,
   }) async {
     final db = await _db;
     final cleanName = name.trim();
@@ -1523,6 +1897,7 @@ class QatRepository {
       'phone': phone.trim(),
       'company': company.trim(),
       'notes': notes.trim(),
+      'is_active': isActive ? 1 : 0,
     };
     if (id != null && id > 0) {
       await db.transaction<void>((txn) async {
@@ -1536,6 +1911,16 @@ class QatRepository {
       ...data,
       'created_at_ms': DateTime.now().millisecondsSinceEpoch,
     });
+  }
+
+  Future<void> setTransferRecipientActive(int id, bool isActive) async {
+    final db = await _db;
+    await db.update(
+      'transfer_recipients',
+      {'is_active': isActive ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> deleteTransferRecipient(int id) async {
@@ -1648,6 +2033,41 @@ class QatRepository {
       },
       where: 'id = ?',
       whereArgs: [transferId],
+    );
+  }
+
+  Future<void> updateTransfer({
+    required int id,
+    required String senderName,
+    required String receiverName,
+    int? recipientId,
+    required int amountMinor,
+    int feeMinor = 0,
+    required CurrencyCode currency,
+    String transferCompany = '',
+    String transferNumber = '',
+    required TransferStatus status,
+    String notes = '',
+  }) async {
+    final db = await _db;
+    final int? safeRecId = (recipientId != null && recipientId > 0) ? recipientId : null;
+    await db.update(
+      'money_transfers',
+      {
+        'sender_name': senderName.trim().isEmpty ? 'الوكالة' : senderName.trim(),
+        'receiver_name': receiverName.trim(),
+        'recipient_id': safeRecId,
+        'amount_minor': amountMinor.clamp(0, 1 << 60).toInt(),
+        'fee_minor': feeMinor.clamp(0, 1 << 60).toInt(),
+        'currency_code': currency.code,
+        'transfer_company': transferCompany.trim(),
+        'transfer_number': transferNumber.trim(),
+        'status_code': status.code,
+        'status_label': status.arabicLabel,
+        'notes': notes.trim(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
     );
   }
 
@@ -1797,13 +2217,26 @@ class QatRepository {
       int salesTotal = 0;
       int salesPaid = 0;
       int salesCredit = 0;
+      int salesCashOnly = 0;
+      int salesTransfer = 0;
+      int salesDeposit = 0;
+      int totalSoldQtyMilli = 0;
       int cogs = 0;
       for (final s in sales.where((e) => e.currency == cur)) {
         salesTotal += s.totalAmountMinor;
         salesPaid += s.paidAmountMinor;
         salesCredit += s.remainingAmountMinor;
+        final pm = s.effectivePaymentMethodLabel;
+        if (pm.contains('تحويل')) {
+          salesTransfer += s.paidAmountMinor;
+        } else if (pm.contains('إيداع') || pm.contains('ايداع')) {
+          salesDeposit += s.paidAmountMinor;
+        } else {
+          salesCashOnly += s.paidAmountMinor;
+        }
         for (final it in s.items) {
           cogs += it.estimatedCostMinor;
+          totalSoldQtyMilli += it.qtyMilli;
         }
       }
 
@@ -1813,9 +2246,11 @@ class QatRepository {
 
       int purTotal = 0;
       int purPaid = 0;
+      int supplierSurplus = 0;
       for (final p in purchases.where((e) => e.currency == cur && inDateRange(e.dateIso))) {
         purTotal += p.totalAmountMinor;
         purPaid += p.paidAmountMinor;
+        supplierSurplus += p.overpaymentSurplusMinor;
       }
 
       final supPay = supPayments
@@ -1826,9 +2261,14 @@ class QatRepository {
           .where((e) => e.currency == cur)
           .fold<int>(0, (a, e) => a + e.amountMinor);
 
-      final taxTotal = taxes
-          .where((t) => t.currency == cur)
-          .fold<int>(0, (a, t) => a + t.taxAmountMinor);
+      int taxTotal = 0;
+      int stallTotal = 0;
+      int laborTotal = 0;
+      for (final t in taxes.where((t) => t.currency == cur)) {
+        taxTotal += t.taxAmountMinor;
+        stallTotal += t.stallOutflowMinor;
+        laborTotal += t.laborOutflowMinor;
+      }
 
       final totalCustDebt = customers.fold<int>(0, (a, c) => a + c.balanceFor(cur));
       final totalSupPayable = suppliers.fold<int>(0, (a, s) => a + s.balanceFor(cur));
@@ -1863,9 +2303,58 @@ class QatRepository {
         transfersDeliveredMinor: delivT,
         transfersPendingMinor: pendT,
         transfersFeesMinor: feesT,
+        stallOutflowMinor: stallTotal,
+        laborOutflowMinor: laborTotal,
+        salesCashOnlyMinor: salesCashOnly,
+        salesTransferMinor: salesTransfer,
+        salesDepositMinor: salesDeposit,
+        totalSoldQtyMilli: totalSoldQtyMilli,
+        supplierOverpaymentSurplusMinor: supplierSurplus,
       );
     }
     return result;
+  }
+
+  /// 7-day sales & expenses chart series per currency (matching original Android HomeScreen chart).
+  Future<List<DailyChartPoint>> getDailyChartSeries({
+    required CurrencyCode currency,
+    int days = 7,
+    DateTime? anchorDate,
+  }) async {
+    final anchor = anchorDate ?? DateTime.now();
+    final start = DateTime(anchor.year, anchor.month, anchor.day)
+        .subtract(Duration(days: days - 1));
+    final fromIso = QatDateUtils.toIsoDate(start);
+    final toIso = QatDateUtils.toIsoDate(anchor);
+    final sales = await getSales(fromIso: fromIso, toIso: toIso);
+    final expenses = await getExpenses(fromIso: fromIso, toIso: toIso);
+    final taxes = await getTaxEntries(fromIso: fromIso, toIso: toIso);
+
+    final salesByDay = <String, int>{};
+    for (final s in sales.where((e) => e.currency == currency)) {
+      salesByDay[s.dateIso] = (salesByDay[s.dateIso] ?? 0) + s.totalAmountMinor;
+    }
+    final expByDay = <String, int>{};
+    for (final e in expenses.where((e) => e.currency == currency)) {
+      expByDay[e.dateIso] = (expByDay[e.dateIso] ?? 0) + e.amountMinor;
+    }
+    for (final t in taxes.where((t) => t.currency == currency)) {
+      expByDay[t.dateIso] = (expByDay[t.dateIso] ?? 0) + t.totalOutflowMinor;
+    }
+
+    final points = <DailyChartPoint>[];
+    for (int i = 0; i < days; i++) {
+      final d = start.add(Duration(days: i));
+      final iso = QatDateUtils.toIsoDate(d);
+      final shortLabel = '${d.month}/${d.day}';
+      points.add(DailyChartPoint(
+        dateIso: iso,
+        shortLabel: shortLabel,
+        salesMinor: salesByDay[iso] ?? 0,
+        expensesMinor: expByDay[iso] ?? 0,
+      ));
+    }
+    return points;
   }
 
   Future<Map<CurrencyCode, List<StatementLine>>> getCustomerStatement(int customerId) async {
@@ -2231,6 +2720,21 @@ class QatRepository {
         purchaseDateMs: (r['purchase_date_ms'] as num).toInt(),
         purchaseDateIso: (r['purchase_date_iso'] ?? '').toString(),
         isArchived: (r['is_archived'] as num).toInt() == 1,
+        itemNumber: (r['item_number'] ?? '').toString(),
+        lowStockThresholdMilli: ((r['low_stock_threshold_milli'] as num?) ?? 0).toInt(),
+        receiverId: (r['receiver_id'] as num?)?.toInt(),
+        receiverName: (r['receiver_name'] ?? '').toString(),
+        notes: (r['notes'] ?? '').toString(),
+      );
+
+  QatImportWeight _mapImportWeight(Map<String, Object?> r) => QatImportWeight(
+        id: (r['id'] as num).toInt(),
+        dateMs: (r['date_ms'] as num).toInt(),
+        dateIso: (r['date_iso'] ?? '').toString(),
+        weightMilli: (r['weight_milli'] as num).toInt(),
+        receiverName: (r['receiver_name'] ?? '').toString(),
+        notes: (r['notes'] ?? '').toString(),
+        isArchived: (r['is_archived'] as num).toInt() == 1,
       );
 
   Customer _mapCustomer(Map<String, Object?> r, Map<CurrencyCode, int> bals) => Customer(
@@ -2276,6 +2780,7 @@ class QatRepository {
         status: (r['status'] ?? '').toString(),
         notes: (r['notes'] ?? '').toString(),
         isArchived: (r['is_archived'] as num).toInt() == 1,
+        paymentMethod: (r['payment_method'] ?? '').toString(),
         items: items,
       );
 
@@ -2300,6 +2805,7 @@ class QatRepository {
         notes: (r['notes'] ?? '').toString(),
         createdAtMs: (r['created_at_ms'] as num).toInt(),
         isArchived: (r['is_archived'] as num).toInt() == 1,
+        region: (r['region'] ?? '').toString(),
         balancesByCurrency: bals,
       );
 
@@ -2333,6 +2839,12 @@ class QatRepository {
         paymentType: PaymentType.fromRaw(r['payment_type']?.toString()),
         notes: (r['notes'] ?? '').toString(),
         isArchived: (r['is_archived'] as num).toInt() == 1,
+        paymentMethod: (r['payment_method'] ?? '').toString(),
+        bankName: (r['bank_name'] ?? '').toString(),
+        transferNumber: (r['transfer_number'] ?? '').toString(),
+        demarMinor: ((r['demar_minor'] as num?) ?? 0).toInt(),
+        demarType: (r['demar_type'] ?? '').toString(),
+        demarNumber: (r['demar_number'] ?? '').toString(),
         items: items,
       );
 
@@ -2382,6 +2894,8 @@ class QatRepository {
         source: (r['source'] ?? 'يدوي').toString(),
         notes: (r['notes'] ?? '').toString(),
         isArchived: (r['is_archived'] as num).toInt() == 1,
+        stallOutflowMinor: ((r['stall_outflow_minor'] as num?) ?? 0).toInt(),
+        laborOutflowMinor: ((r['labor_outflow_minor'] as num?) ?? 0).toInt(),
       );
 
   TransferRecipient _mapRecipient(Map<String, Object?> r) => TransferRecipient(
@@ -2391,6 +2905,7 @@ class QatRepository {
         company: (r['company'] ?? '').toString(),
         notes: (r['notes'] ?? '').toString(),
         createdAtMs: (r['created_at_ms'] as num).toInt(),
+        isActive: ((r['is_active'] as num?) ?? 1).toInt() == 1,
       );
 
   MoneyTransfer _mapTransfer(Map<String, Object?> r) => MoneyTransfer(

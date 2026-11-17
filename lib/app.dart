@@ -1,14 +1,19 @@
+import 'dart:io';
+
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
+import 'core/money.dart';
 import 'core/theme.dart';
+import 'developer/developer_console_sheet.dart';
 import 'features/dashboard_tab.dart';
 import 'features/expenses_settings_tab.dart';
 import 'features/inventory_suppliers_tab.dart';
 import 'features/sales_customers_tab.dart';
 import 'features/splash_login_onboarding.dart';
 import 'features/transfers_reports_tab.dart';
-import 'features/widgets/erp_components.dart';
+import 'licensing/license_models.dart';
 import 'state/app_controller.dart';
 
 class QatLedgerApp extends StatelessWidget {
@@ -17,108 +22,149 @@ class QatLedgerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
+    final s = ctrl.settings;
+    final preset = s.activeColorPreset;
 
     return MaterialApp(
-      title: 'ميزان القات',
       debugShowCheckedModeBanner: false,
+      title: s.effectiveAppTitle,
       locale: const Locale('ar'),
-      supportedLocales: const [Locale('ar'), Locale('en')],
-      localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      theme: AppTheme.buildLight(),
-      darkTheme: AppTheme.buildDark(),
-      themeMode: ctrl.themeMode,
-      builder: (context, child) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: child ?? const SizedBox.shrink(),
+      supportedLocales: const [Locale('ar')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      theme: AppTheme.buildLight(
+        preset: preset,
+        customCanvasHex: s.customCanvasHex,
+        customCardHex: s.customCardHex,
+        customTextHex: s.customTextHex,
       ),
-      home: _resolveRootScreen(ctrl),
+      darkTheme: AppTheme.buildDark(
+        preset: preset,
+        customCanvasHex: s.customCanvasHex,
+        customCardHex: s.customCardHex,
+        customTextHex: s.customTextHex,
+      ),
+      themeMode: ctrl.themeMode,
+      builder: (context, child) {
+        return Directionality(
+          textDirection: TextDirection.rtl,
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
+      home: const _RootGate(),
     );
   }
+}
 
-  Widget _resolveRootScreen(AppController ctrl) {
-    if (!ctrl.initialized) return const SplashLoadingView();
-    if (!ctrl.isLoggedIn) return const LoginScreen();
-    if (!ctrl.settings.onboardingComplete) return const AgencyOnboardingScreen();
+class _RootGate extends StatelessWidget {
+  const _RootGate();
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.watch<AppController>();
+    if (!ctrl.initialized) {
+      return const SplashLoadingScreen();
+    }
+    if (!ctrl.isLoggedIn) {
+      return const LoginScreen();
+    }
+    if (!ctrl.settings.onboardingComplete) {
+      return const OnboardingWizardScreen();
+    }
     return const MainShellScreen();
   }
 }
 
-class MainShellScreen extends StatelessWidget {
+class MainShellScreen extends StatefulWidget {
   const MainShellScreen({super.key});
 
-  static const _titles = [
-    'لوحة التحكم الرئيسية',
-    'المبيعات والعملاء',
-    'المخزون والمشتريات والجرد',
-    'الحوالات والتقارير والأرشيف',
-    'المالية وإعدادات النظام',
-  ];
+  @override
+  State<MainShellScreen> createState() => _MainShellScreenState();
+}
+
+class _MainShellScreenState extends State<MainShellScreen> {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
     final pal = context.pal;
-    final idx = ctrl.sectionIndex;
-    final wide = MediaQuery.sizeOf(context).width >= 820;
+    final width = MediaQuery.sizeOf(context).width;
+    final wide = width >= 820;
 
-    final bodyStack = IndexedStack(
-      index: idx,
+    final bodyContent = IndexedStack(
+      index: ctrl.sectionIndex,
       children: [
-        TickerMode(enabled: idx == 0, child: const DashboardTab()),
-        TickerMode(enabled: idx == 1, child: const SalesCustomersTab()),
-        TickerMode(enabled: idx == 2, child: const InventorySuppliersTab()),
-        TickerMode(enabled: idx == 3, child: const TransfersReportsTab()),
-        TickerMode(enabled: idx == 4, child: const ExpensesSettingsTab()),
+        TickerMode(enabled: ctrl.sectionIndex == 0, child: const DashboardTab()),
+        TickerMode(
+          enabled: ctrl.sectionIndex == 1,
+          child: const SalesCustomersTab(),
+        ),
+        TickerMode(
+          enabled: ctrl.sectionIndex == 2,
+          child: const InventorySuppliersTab(),
+        ),
+        TickerMode(
+          enabled: ctrl.sectionIndex == 3,
+          child: const TransfersReportsTab(),
+        ),
+        TickerMode(
+          enabled: ctrl.sectionIndex == 4,
+          child: const ExpensesSettingsTab(),
+        ),
       ],
     );
 
+    final isDark = ctrl.settings.themeChoice == AppThemeModeChoice.darkBlack;
+
     return Scaffold(
+      key: _scaffoldKey,
+      drawer: _ErpCategorizedDrawer(
+        onClose: () => _scaffoldKey.currentState?.closeDrawer(),
+      ),
       appBar: AppBar(
-        titleSpacing: 6,
-        title: Row(
+        leading: IconButton(
+          key: const Key('drawer_menu_button'),
+          tooltip: 'القائمة الرئيسية',
+          icon: const Icon(Icons.menu_rounded),
+          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+        ),
+        titleSpacing: 4,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ClipOval(
-              child: Image.asset(
-                'assets/images/app_logo.png',
-                width: 30,
-                height: 30,
-              ),
+            Text(
+              ctrl.activeRoute == AppScreenRoute.dashboard
+                  ? ctrl.settings.effectiveAppTitle
+                  : ctrl.activeRoute.arabicTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _titles[idx],
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700),
-                  ),
-                  Text(
-                    '${ctrl.settings.agencyName} • ${ctrl.currentUser?.displayName ?? 'النظام'}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11, color: pal.textSecondary),
-                  ),
-                ],
-              ),
+            Text(
+              ctrl.activeRoute == AppScreenRoute.dashboard
+                  ? '${ctrl.currencyPolicy.mode.arabicLabel} • ${ctrl.licenseStatus.isPro ? 'PRO' : 'BASIC'}'
+                  : ctrl.settings.effectiveAppTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11),
             ),
           ],
         ),
         actions: [
-          if (wide)
+          if (width >= 400)
             Padding(
-              padding: const EdgeInsetsDirectional.only(end: 6),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: pal.brandSoft,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  ctrl.currencyPolicy.mode.arabicLabel,
+              padding: const EdgeInsetsDirectional.only(end: 2),
+              child: Chip(
+                visualDensity: VisualDensity.compact,
+                side: BorderSide(color: pal.border),
+                backgroundColor: pal.brandSoft,
+                label: Text(
+                  ctrl.currencyPolicy.mode == CurrencyMode.dualCurrency
+                      ? 'YER / SAR'
+                      : ctrl.currencyPolicy.defaultCurrency.code,
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
@@ -128,14 +174,14 @@ class MainShellScreen extends StatelessWidget {
               ),
             ),
           IconButton(
-            tooltip: pal.isDark ? 'التبديل للفاتح' : 'التبديل للأسود الداكن',
+            tooltip: isDark ? 'تبديل للوضع الفاتح' : 'تبديل للوضع الأسود الداكن',
             onPressed: () => ctrl.setThemeChoice(
-              pal.isDark
+              isDark
                   ? AppThemeModeChoice.lightEnterprise
                   : AppThemeModeChoice.darkBlack,
             ),
             icon: Icon(
-              pal.isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+              isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
             ),
           ),
           IconButton(
@@ -145,17 +191,21 @@ class MainShellScreen extends StatelessWidget {
           ),
         ],
       ),
-      drawer: _ErpNavigationDrawer(ctrl: ctrl),
       body: wide
           ? Row(
               children: [
                 NavigationRail(
-                  selectedIndex: idx,
-                  extended: MediaQuery.sizeOf(context).width >= 1060,
-                  labelType: MediaQuery.sizeOf(context).width >= 1060
-                      ? NavigationRailLabelType.none
-                      : NavigationRailLabelType.all,
-                  onDestinationSelected: (v) => ctrl.setSection(v),
+                  selectedIndex: ctrl.sectionIndex,
+                  onDestinationSelected: ctrl.setSection,
+                  labelType: NavigationRailLabelType.all,
+                  leading: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: IconButton.filledTonal(
+                      tooltip: 'كافة الشاشات (12 شاشة)',
+                      onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                      icon: const Icon(Icons.grid_view_rounded),
+                    ),
+                  ),
                   destinations: const [
                     NavigationRailDestination(
                       icon: Icon(Icons.dashboard_outlined),
@@ -184,107 +234,194 @@ class MainShellScreen extends StatelessWidget {
                     ),
                   ],
                 ),
-                VerticalDivider(width: 1, thickness: 1, color: pal.border),
-                Expanded(child: bodyStack),
+                const VerticalDivider(width: 1),
+                Expanded(child: bodyContent),
               ],
             )
-          : bodyStack,
+          : bodyContent,
       bottomNavigationBar: wide
           ? null
-          : NavigationBar(
-              selectedIndex: idx,
-              onDestinationSelected: (v) => ctrl.setSection(v),
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.dashboard_outlined),
-                  selectedIcon: Icon(Icons.dashboard),
-                  label: 'الرئيسية',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.point_of_sale_outlined),
-                  selectedIcon: Icon(Icons.point_of_sale),
-                  label: 'المبيعات',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.inventory_2_outlined),
-                  selectedIcon: Icon(Icons.inventory_2),
-                  label: 'المخزون',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.swap_horiz_outlined),
-                  selectedIcon: Icon(Icons.swap_horiz),
-                  label: 'الحوالات',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.settings_outlined),
-                  selectedIcon: Icon(Icons.settings),
-                  label: 'الإعدادات',
-                ),
-              ],
+          : _QatAgencyBottomBar(
+              activeRoute: ctrl.activeRoute,
+              onRouteSelected: (route) => ctrl.navigateToRoute(route),
+              onMorePressed: () => _scaffoldKey.currentState?.openDrawer(),
             ),
     );
   }
 }
 
-class _ErpNavigationDrawer extends StatelessWidget {
-  const _ErpNavigationDrawer({required this.ctrl});
-  final AppController ctrl;
+/// Exact 6-Tab Bottom Bar matching original Android `QatAgencyBottomBar`:
+/// الرئيسية • المبيعات • العملاء • الرعيّة • الكشف • المزيد (opens categorized drawer).
+class _QatAgencyBottomBar extends StatelessWidget {
+  const _QatAgencyBottomBar({
+    required this.activeRoute,
+    required this.onRouteSelected,
+    required this.onMorePressed,
+  });
+
+  final AppScreenRoute activeRoute;
+  final ValueChanged<AppScreenRoute> onRouteSelected;
+  final VoidCallback onMorePressed;
+
+  static const _bottomTabs = <(AppScreenRoute, String, IconData)>[
+    (AppScreenRoute.dashboard, 'الرئيسية', Icons.dashboard_rounded),
+    (AppScreenRoute.sales, 'المبيعات', Icons.point_of_sale_rounded),
+    (AppScreenRoute.customers, 'العملاء', Icons.people_rounded),
+    (AppScreenRoute.suppliers, 'الرعيّة', Icons.local_shipping_rounded),
+    (AppScreenRoute.statement, 'الكشف', Icons.description_rounded),
+  ];
 
   @override
   Widget build(BuildContext context) {
     final pal = context.pal;
-    final user = ctrl.currentUser;
+    final isMoreActive =
+        !_bottomTabs.any((entry) => entry.$1 == activeRoute);
 
-    void go(int section, [int? subTab]) {
-      Navigator.pop(context);
-      ctrl.setSection(section, subTab: subTab);
+    return Material(
+      color: pal.card,
+      elevation: 0,
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: pal.border)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 62,
+            child: Row(
+              children: [
+                for (final item in _bottomTabs)
+                  Expanded(
+                    child: _BottomBarItem(
+                      label: item.$2,
+                      icon: item.$3,
+                      selected: activeRoute == item.$1,
+                      onTap: () => onRouteSelected(item.$1),
+                    ),
+                  ),
+                Expanded(
+                  child: _BottomBarItem(
+                    label: 'المزيد',
+                    icon: Icons.menu_rounded,
+                    selected: isMoreActive,
+                    onTap: onMorePressed,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BottomBarItem extends StatelessWidget {
+  const _BottomBarItem({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final pal = context.pal;
+    final color = selected ? pal.brand : pal.textSecondary;
+    return InkWell(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(
+              color: selected ? pal.brandSoft : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, size: 20, color: color),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Official 4-Group Categorized Drawer matching original Android `MainActivity.kt`.
+class _ErpCategorizedDrawer extends StatelessWidget {
+  const _ErpCategorizedDrawer({required this.onClose});
+
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.watch<AppController>();
+    final pal = context.pal;
+    final logoPath = ctrl.settings.logoPath;
+    final ImageProvider<Object> logoProvider =
+        (logoPath.isNotEmpty && File(logoPath).existsSync())
+            ? FileImage(File(logoPath))
+            : const AssetImage('assets/images/app_logo.png');
+
+    void go(AppScreenRoute route) {
+      onClose();
+      ctrl.navigateToRoute(route);
     }
 
     return Drawer(
-      width: 300,
       child: SafeArea(
-        child: Column(
+        child: ListView(
+          padding: const EdgeInsets.symmetric(vertical: 8),
           children: [
             Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
+              margin: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+              padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: pal.brandSoft,
-                border: Border(bottom: BorderSide(color: pal.border)),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: pal.brand.withValues(alpha: 0.25)),
               ),
               child: Row(
                 children: [
-                  ClipOval(
-                    child: Image.asset(
-                      'assets/images/app_logo.png',
-                      width: 44,
-                      height: 44,
-                    ),
-                  ),
+                  CircleAvatar(radius: 24, backgroundImage: logoProvider),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          ctrl.settings.agencyName,
+                          ctrl.settings.effectiveAppTitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 15,
+                          style: const TextStyle(
                             fontWeight: FontWeight.w700,
-                            color: pal.textPrimary,
+                            fontSize: 14.5,
                           ),
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '${user?.displayName ?? 'admin'} • ${user?.role.arabicLabel ?? 'مدير'}',
+                          '${ctrl.currentUser?.displayName ?? 'admin'} • ${ctrl.licenseStatus.isPro ? 'الباقة الاحترافية PRO' : 'الباقة الأساسية BASIC'}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 11.5,
-                            color: pal.brand,
-                            fontWeight: FontWeight.w600,
+                            color: pal.textSecondary,
                           ),
                         ),
                       ],
@@ -293,152 +430,102 @@ class _ErpNavigationDrawer extends StatelessWidget {
                 ],
               ),
             ),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                children: [
-                  const _DrawerGroupLabel('لوحة التحكم والعمليات'),
-                  _DrawerTile(
-                    icon: Icons.dashboard_outlined,
-                    label: 'لوحة التحكم الرئيسية',
-                    selected: ctrl.sectionIndex == 0,
-                    onTap: () => go(0),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.point_of_sale_outlined,
-                    label: 'نقطة البيع وفاتورة جديدة',
-                    selected: ctrl.sectionIndex == 1 && ctrl.salesSubTab == 0,
-                    onTap: () => go(1, 0),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.receipt_long_outlined,
-                    label: 'سجل المبيعات والفواتير',
-                    selected: ctrl.sectionIndex == 1 && ctrl.salesSubTab == 1,
-                    onTap: () => go(1, 1),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.fact_check_outlined,
-                    label: 'التحاسب والجرد اليومي',
-                    selected: ctrl.sectionIndex == 2 && ctrl.inventorySubTab == 2,
-                    onTap: () => go(2, 2),
-                  ),
-                  const _DrawerGroupLabel('الأطراف والذمم والكشوفات'),
-                  _DrawerTile(
-                    icon: Icons.people_outline,
-                    label: 'العملاء والديون والسندات',
-                    selected: ctrl.sectionIndex == 1 && ctrl.salesSubTab == 2,
-                    onTap: () => go(1, 2),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.table_chart_outlined,
-                    label: 'كشوفات الحساب التفصيلية',
-                    selected: ctrl.sectionIndex == 1 && ctrl.salesSubTab == 3,
-                    onTap: () => go(1, 3),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.local_shipping_outlined,
-                    label: 'الموردون وحساباتهم',
-                    selected: ctrl.sectionIndex == 2 && ctrl.inventorySubTab == 3,
-                    onTap: () => go(2, 3),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.shopping_bag_outlined,
-                    label: 'فواتير المشتريات والتوريد',
-                    selected: ctrl.sectionIndex == 2 && ctrl.inventorySubTab == 4,
-                    onTap: () => go(2, 4),
-                  ),
-                  const _DrawerGroupLabel('المخزون والحوالات'),
-                  _DrawerTile(
-                    icon: Icons.inventory_2_outlined,
-                    label: 'دفعات المخزون والرصيد',
-                    selected: ctrl.sectionIndex == 2 && ctrl.inventorySubTab == 0,
-                    onTap: () => go(2, 0),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.category_outlined,
-                    label: 'أنواع القات والتسعير',
-                    selected: ctrl.sectionIndex == 2 && ctrl.inventorySubTab == 1,
-                    onTap: () => go(2, 1),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.swap_horiz_outlined,
-                    label: 'الحوالات المالية والصرافة',
-                    selected: ctrl.sectionIndex == 3 && ctrl.transfersSubTab == 0,
-                    onTap: () => go(3, 0),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.badge_outlined,
-                    label: 'المستلمون وتقارير الحوالات',
-                    selected: ctrl.sectionIndex == 3 && ctrl.transfersSubTab == 1,
-                    onTap: () => go(3, 1),
-                  ),
-                  const _DrawerGroupLabel('المالية والتقارير والأرشيف'),
-                  _DrawerTile(
-                    icon: Icons.account_balance_wallet_outlined,
-                    label: 'المصاريف والصندوق والحسابات',
-                    selected: ctrl.sectionIndex == 4 && ctrl.settingsSubTab == 0,
-                    onTap: () => go(4, 0),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.analytics_outlined,
-                    label: 'التقارير المالية والأرباح',
-                    selected: ctrl.sectionIndex == 3 && ctrl.transfersSubTab == 2,
-                    onTap: () => go(3, 2),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.gavel_outlined,
-                    label: 'دفتر ضرائب القات',
-                    selected: ctrl.sectionIndex == 3 && ctrl.transfersSubTab == 3,
-                    onTap: () => go(3, 3),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.archive_outlined,
-                    label: 'الأرشيف المحاسبي',
-                    selected: ctrl.sectionIndex == 3 && ctrl.transfersSubTab == 4,
-                    onTap: () => go(3, 4),
-                  ),
-                  const _DrawerGroupLabel('الإدارة والنظام'),
-                  _DrawerTile(
-                    icon: Icons.store_outlined,
-                    label: 'الهوية والعملة والمظهر',
-                    selected: ctrl.sectionIndex == 4 && ctrl.settingsSubTab == 1,
-                    onTap: () => go(4, 1),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.backup_outlined,
-                    label: 'النسخ الاحتياطي والطباعة',
-                    selected: ctrl.sectionIndex == 4 && ctrl.settingsSubTab == 2,
-                    onTap: () => go(4, 2),
-                  ),
-                  _DrawerTile(
-                    icon: Icons.verified_user_outlined,
-                    label: 'التراخيص والمستخدمون والمطور',
-                    selected: ctrl.sectionIndex == 4 && ctrl.settingsSubTab == 3,
-                    onTap: () => go(4, 3),
-                  ),
-                ],
-              ),
+            const _DrawerGroupHeader('العمليات اليومية'),
+            _DrawerRouteTile(
+              route: AppScreenRoute.dashboard,
+              selected: ctrl.activeRoute == AppScreenRoute.dashboard,
+              onTap: () => go(AppScreenRoute.dashboard),
             ),
-            Divider(color: pal.border, height: 1),
+            _DrawerRouteTile(
+              route: AppScreenRoute.sales,
+              selected: ctrl.activeRoute == AppScreenRoute.sales,
+              onTap: () => go(AppScreenRoute.sales),
+            ),
+            _DrawerRouteTile(
+              route: AppScreenRoute.customers,
+              selected: ctrl.activeRoute == AppScreenRoute.customers,
+              onTap: () => go(AppScreenRoute.customers),
+            ),
+            _DrawerRouteTile(
+              route: AppScreenRoute.statement,
+              selected: ctrl.activeRoute == AppScreenRoute.statement,
+              onTap: () => go(AppScreenRoute.statement),
+            ),
+            const Divider(height: 14),
+            const _DrawerGroupHeader('إدارة النشاط'),
+            _DrawerRouteTile(
+              route: AppScreenRoute.suppliers,
+              selected: ctrl.activeRoute == AppScreenRoute.suppliers,
+              onTap: () => go(AppScreenRoute.suppliers),
+            ),
+            _DrawerRouteTile(
+              route: AppScreenRoute.inventory,
+              selected: ctrl.activeRoute == AppScreenRoute.inventory,
+              onTap: () => go(AppScreenRoute.inventory),
+            ),
+            _DrawerRouteTile(
+              route: AppScreenRoute.accounts,
+              selected: ctrl.activeRoute == AppScreenRoute.accounts,
+              onTap: () => go(AppScreenRoute.accounts),
+            ),
+            _DrawerRouteTile(
+              route: AppScreenRoute.transfers,
+              selected: ctrl.activeRoute == AppScreenRoute.transfers,
+              onTap: () => go(AppScreenRoute.transfers),
+            ),
+            _DrawerRouteTile(
+              route: AppScreenRoute.expenses,
+              selected: ctrl.activeRoute == AppScreenRoute.expenses,
+              onTap: () => go(AppScreenRoute.expenses),
+            ),
+            const Divider(height: 14),
+            const _DrawerGroupHeader('التقارير والمتابعة'),
+            _DrawerRouteTile(
+              route: AppScreenRoute.reports,
+              selected: ctrl.activeRoute == AppScreenRoute.reports,
+              proLocked: !ctrl.hasLicenseFeature(LicenseFeature.reports),
+              onTap: () => go(AppScreenRoute.reports),
+            ),
+            _DrawerRouteTile(
+              route: AppScreenRoute.archive,
+              selected: ctrl.activeRoute == AppScreenRoute.archive,
+              proLocked: !ctrl.hasLicenseFeature(LicenseFeature.archive),
+              onTap: () => go(AppScreenRoute.archive),
+            ),
+            const Divider(height: 14),
+            const _DrawerGroupHeader('الإعدادات والإدارة'),
+            _DrawerRouteTile(
+              route: AppScreenRoute.settings,
+              selected: ctrl.activeRoute == AppScreenRoute.settings,
+              onTap: () => go(AppScreenRoute.settings),
+            ),
+            if (ctrl.isDeveloperEdition && ctrl.developerKeyManager != null)
+              ListTile(
+                dense: true,
+                leading: Icon(Icons.developer_mode, color: pal.accent),
+                title: const Text('لوحة تحكم المطور (الإصدار الخاص)'),
+                onTap: () async {
+                  onClose();
+                  await Navigator.of(context).push<void>(
+                    MaterialPageRoute<void>(
+                      builder: (_) => DeveloperConsoleSheet(
+                        keyManager: ctrl.developerKeyManager!,
+                        devDb: ctrl.developerDb,
+                        onKeysUpdated: ctrl.refreshLicense,
+                      ),
+                    ),
+                  );
+                },
+              ),
             ListTile(
+              dense: true,
               leading: Icon(Icons.logout, color: pal.danger),
               title: Text(
-                'تسجيل الخروج',
-                style: TextStyle(
-                  color: pal.danger,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13.5,
-                ),
+                'قفل وتسجيل الخروج',
+                style: TextStyle(color: pal.danger),
               ),
-              onTap: () async {
-                final ok = await showErpConfirmDialog(
-                  context,
-                  title: 'تسجيل الخروج',
-                  message: 'هل تريد إغلاق الجلسة الحالية والعودة لشاشة الدخول؟',
-                  confirmLabel: 'خروج',
-                );
-                if (!ok || !context.mounted) return;
-                Navigator.pop(context);
+              onTap: () {
+                onClose();
                 ctrl.logout();
               },
             ),
@@ -449,65 +536,76 @@ class _ErpNavigationDrawer extends StatelessWidget {
   }
 }
 
-class _DrawerGroupLabel extends StatelessWidget {
-  const _DrawerGroupLabel(this.title);
+class _DrawerGroupHeader extends StatelessWidget {
+  const _DrawerGroupHeader(this.title);
   final String title;
 
   @override
   Widget build(BuildContext context) {
-    final pal = context.pal;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
       child: Text(
         title,
         style: TextStyle(
-          fontSize: 11,
+          fontSize: 11.5,
           fontWeight: FontWeight.w700,
-          color: pal.accent,
+          color: context.pal.brand,
         ),
       ),
     );
   }
 }
 
-class _DrawerTile extends StatelessWidget {
-  const _DrawerTile({
-    required this.icon,
-    required this.label,
+class _DrawerRouteTile extends StatelessWidget {
+  const _DrawerRouteTile({
+    required this.route,
     required this.selected,
     required this.onTap,
+    this.proLocked = false,
   });
 
-  final IconData icon;
-  final String label;
+  final AppScreenRoute route;
   final bool selected;
   final VoidCallback onTap;
+  final bool proLocked;
 
   @override
   Widget build(BuildContext context) {
     final pal = context.pal;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-      child: ListTile(
-        dense: true,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        selected: selected,
-        selectedTileColor: pal.brandSoft,
-        leading: Icon(
-          icon,
-          size: 20,
-          color: selected ? pal.brand : pal.textSecondary,
-        ),
-        title: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            color: selected ? pal.brand : pal.textPrimary,
-          ),
-        ),
-        onTap: onTap,
+    return ListTile(
+      dense: true,
+      selected: selected,
+      selectedTileColor: pal.brandSoft,
+      leading: Icon(
+        route.icon,
+        size: 20,
+        color: selected ? pal.brand : pal.textSecondary,
       ),
+      title: Text(
+        route.arabicTitle,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+        ),
+      ),
+      trailing: proLocked
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: pal.warningSoft,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                'PRO',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: pal.warning,
+                ),
+              ),
+            )
+          : null,
+      onTap: onTap,
     );
   }
 }

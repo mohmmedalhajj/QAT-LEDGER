@@ -119,6 +119,13 @@ class DashboardTab extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
+          // Period Filter Strip (Today / Yesterday / Weeks 1-5 / Month / Year / Custom / All)
+          PeriodFilterStrip(
+            filter: ctrl.periodFilter,
+            onChanged: ctrl.setPeriodFilter,
+          ),
+          const SizedBox(height: 14),
+
           // Quick ERP Actions Grid
           Text('إجراءات سريعة', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
@@ -134,43 +141,43 @@ class DashboardTab extends StatelessWidget {
                 icon: Icons.point_of_sale,
                 label: 'فاتورة بيع',
                 color: pal.brand,
-                onTap: () => ctrl.setSection(1, subTab: 0),
+                onTap: () => ctrl.navigateToRoute(AppScreenRoute.sales),
               ),
               _QuickActionTile(
                 icon: Icons.payments_outlined,
                 label: 'سند قبض',
                 color: pal.success,
-                onTap: () => ctrl.setSection(1, subTab: 2),
+                onTap: () => ctrl.navigateToRoute(AppScreenRoute.customers),
               ),
               _QuickActionTile(
                 icon: Icons.fact_check_outlined,
                 label: 'التحاسب والجرد',
                 color: pal.info,
-                onTap: () => ctrl.setSection(2, subTab: 2),
+                onTap: () => ctrl.navigateToRoute(AppScreenRoute.accounts),
               ),
               _QuickActionTile(
                 icon: Icons.swap_horiz,
                 label: 'حوالة مالية',
                 color: pal.accent,
-                onTap: () => ctrl.setSection(3, subTab: 0),
+                onTap: () => ctrl.navigateToRoute(AppScreenRoute.transfers),
               ),
               _QuickActionTile(
                 icon: Icons.receipt_long_outlined,
                 label: 'مصروف يومي',
                 color: pal.warning,
-                onTap: () => ctrl.setSection(4, subTab: 0),
+                onTap: () => ctrl.navigateToRoute(AppScreenRoute.expenses),
               ),
               _QuickActionTile(
                 icon: Icons.table_chart_outlined,
                 label: 'كشف حساب',
                 color: pal.brand,
-                onTap: () => ctrl.setSection(1, subTab: 3),
+                onTap: () => ctrl.navigateToRoute(AppScreenRoute.statement),
               ),
               _QuickActionTile(
                 icon: Icons.analytics_outlined,
                 label: 'التقارير',
                 color: pal.success,
-                onTap: () => ctrl.setSection(3, subTab: 2),
+                onTap: () => ctrl.navigateToRoute(AppScreenRoute.reports),
               ),
               _QuickActionTile(
                 icon: Icons.backup_outlined,
@@ -182,14 +189,19 @@ class DashboardTab extends StatelessWidget {
           ),
           const SizedBox(height: 18),
 
-          // Separated Per-Currency Financial Pulse + Inventory Valuation
+          // Separated Per-Currency Financial Pulse + Inventory Valuation + 7-Day Chart
           for (final cur in visibleCurrencies) ...[
-            _CurrencySectionHeader(currency: cur),
+            _CurrencySectionHeader(
+              currency: cur,
+              periodLabel: ctrl.periodFilter.arabicLabel,
+            ),
             const SizedBox(height: 8),
             _CurrencyKpiGrid(
               currency: cur,
               isWide: isWide,
-              metrics: ctrl.todayMetrics[cur] ??
+              periodLabel: ctrl.periodFilter.arabicLabel,
+              metrics: ctrl.filteredMetrics[cur] ??
+                  ctrl.todayMetrics[cur] ??
                   CurrencyDashboardMetrics(
                     currency: cur,
                     salesTotalMinor: 0,
@@ -210,14 +222,28 @@ class DashboardTab extends StatelessWidget {
                   ),
               valuation: ctrl.inventoryValuation[cur],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
+            if ((cur == CurrencyCode.yer
+                    ? ctrl.chartSeriesYer
+                    : ctrl.chartSeriesSar)
+                .any((p) => p.salesMinor > 0 || p.profitMinor != 0)) ...[
+              _DailyTrendChartCard(
+                currency: cur,
+                points: cur == CurrencyCode.yer
+                    ? ctrl.chartSeriesYer
+                    : ctrl.chartSeriesSar,
+              ),
+              const SizedBox(height: 16),
+            ],
           ],
 
           // Optional explicit user-rate preview card (strictly display only)
           if (policy.hasExplicitDisplayRate) ...[
             _DualCurrencyEstimateCard(
               policy: policy,
-              metricsByCurrency: ctrl.todayMetrics,
+              metricsByCurrency: ctrl.filteredMetrics.isNotEmpty
+                  ? ctrl.filteredMetrics
+                  : ctrl.todayMetrics,
             ),
             const SizedBox(height: 16),
           ],
@@ -390,8 +416,12 @@ class _QuickActionTile extends StatelessWidget {
 }
 
 class _CurrencySectionHeader extends StatelessWidget {
-  const _CurrencySectionHeader({required this.currency});
+  const _CurrencySectionHeader({
+    required this.currency,
+    required this.periodLabel,
+  });
   final CurrencyCode currency;
+  final String periodLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -401,7 +431,7 @@ class _CurrencySectionHeader extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            'ملخص اليوم — ${currency.arabicName}',
+            'ملخص ($periodLabel) — ${currency.arabicName}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.titleMedium,
@@ -417,12 +447,14 @@ class _CurrencyKpiGrid extends StatelessWidget {
     required this.currency,
     required this.metrics,
     required this.isWide,
+    required this.periodLabel,
     this.valuation,
   });
 
   final CurrencyCode currency;
   final CurrencyDashboardMetrics metrics;
   final bool isWide;
+  final String periodLabel;
   final InventoryValuation? valuation;
 
   @override
@@ -440,7 +472,7 @@ class _CurrencyKpiGrid extends StatelessWidget {
           childAspectRatio: isWide ? 1.38 : 1.28,
           children: [
             KpiMetricCard(
-              title: 'مبيعات اليوم',
+              title: 'مبيعات ($periodLabel)',
               value: Money(metrics.salesTotalMinor, currency).format(),
               subtitle:
                   'نقدي: ${Money(metrics.salesPaidMinor, currency).format()}',
@@ -449,20 +481,20 @@ class _CurrencyKpiGrid extends StatelessWidget {
               currency: currency,
             ),
             KpiMetricCard(
-              title: 'صافي التدفق النقدي',
-              value: Money(metrics.cashNetFlowMinor, currency).format(),
+              title: 'رصيد الصندوق النقدي',
+              value: Money(metrics.cashBoxBalanceMinor, currency).format(),
               subtitle:
                   'سندات قبض: ${Money(metrics.customerReceiptsMinor, currency).format()}',
               icon: Icons.account_balance_wallet_outlined,
               toneColor:
-                  metrics.cashNetFlowMinor >= 0 ? pal.success : pal.danger,
+                  metrics.cashBoxBalanceMinor >= 0 ? pal.success : pal.danger,
               currency: currency,
             ),
             KpiMetricCard(
               title: 'ديون العملاء القائمة',
               value: Money(metrics.totalCustomerDebtMinor, currency).format(),
               subtitle:
-                  'آجل اليوم: ${Money(metrics.salesCreditMinor, currency).format()}',
+                  'آجل الفترة: ${Money(metrics.salesCreditMinor, currency).format()}',
               icon: Icons.people_outline,
               toneColor: pal.warning,
               currency: currency,
@@ -471,7 +503,7 @@ class _CurrencyKpiGrid extends StatelessWidget {
               title: 'مستحقات الموردين',
               value: Money(metrics.totalSupplierPayableMinor, currency).format(),
               subtitle:
-                  'مصروفات اليوم: ${Money(metrics.expensesMinor, currency).format()}',
+                  'مصاريف وضرائب: ${Money(metrics.expensesMinor + metrics.totalTaxAndOutflowsMinor, currency).format()}',
               icon: Icons.local_shipping_outlined,
               toneColor: pal.accent,
               currency: currency,
@@ -502,6 +534,162 @@ class _CurrencyKpiGrid extends StatelessWidget {
             ],
           ),
         ],
+      ],
+    );
+  }
+}
+
+class _DailyTrendChartCard extends StatelessWidget {
+  const _DailyTrendChartCard({
+    required this.currency,
+    required this.points,
+  });
+
+  final CurrencyCode currency;
+  final List<DailyChartPoint> points;
+
+  @override
+  Widget build(BuildContext context) {
+    final pal = context.pal;
+    final maxVal = points.fold<int>(
+      1,
+      (m, p) {
+        final high = p.salesMinor > p.profitMinor.abs()
+            ? p.salesMinor
+            : p.profitMinor.abs();
+        return high > m ? high : m;
+      },
+    );
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.bar_chart_rounded, color: pal.brand, size: 18),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'اتجاه المبيعات وصافي الربح (آخر 7 أيام — ${currency.code})',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 112,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  for (final pt in points)
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            Expanded(
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Flexible(
+                                    child: FractionallySizedBox(
+                                      heightFactor: (pt.salesMinor / maxVal)
+                                          .clamp(0.05, 1.0),
+                                      child: Container(
+                                        width: 10,
+                                        decoration: BoxDecoration(
+                                          color: pal.brand,
+                                          borderRadius:
+                                              BorderRadius.circular(4),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Flexible(
+                                    child: FractionallySizedBox(
+                                      heightFactor:
+                                          (pt.profitMinor.abs() / maxVal)
+                                              .clamp(0.05, 1.0),
+                                      child: Container(
+                                        width: 10,
+                                        decoration: BoxDecoration(
+                                          color: pt.profitMinor >= 0
+                                              ? pal.success
+                                              : pal.danger,
+                                          borderRadius:
+                                              BorderRadius.circular(4),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              pt.labelAr.isNotEmpty
+                                  ? pt.labelAr
+                                  : pt.dateIso.substring(5),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: pal.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _LegendDot(color: pal.brand, label: 'المبيعات'),
+                const SizedBox(width: 14),
+                _LegendDot(color: pal.success, label: 'صافي الربح'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  const _LegendDot({required this.color, required this.label});
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(label, style: const TextStyle(fontSize: 11)),
       ],
     );
   }

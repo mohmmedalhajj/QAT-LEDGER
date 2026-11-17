@@ -11,7 +11,9 @@ import 'package:share_plus/share_plus.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../developer/developer_console_sheet.dart';
+import '../../licensing/license_models.dart';
 import '../../state/app_controller.dart';
+import '../widgets/common_widgets.dart';
 import '../widgets/erp_components.dart';
 
 class LicenseAndSecurityView extends StatefulWidget {
@@ -243,11 +245,46 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                 const SizedBox(height: 6),
                 Text(
                   lic.isValid && lic.payload != null
-                      ? 'العميل: ${lic.payload!.customerName} • الباقة: ${lic.payload!.planCode}${lic.remainingDays != null ? ' • متبقي: ${lic.remainingDays} يوم' : ' • ترخيص دائم'}'
+                      ? 'العميل: ${lic.payload!.customerName} • الباقة: ${lic.payload!.effectiveTier.arabicName} (${lic.payload!.effectiveLicenseType.arabicName})${lic.remainingDays != null ? ' • متبقي: ${lic.remainingDays} يوم' : ' • ترخيص دائم'}'
                       : (lic.reason.isEmpty
                           ? lic.kind.arabicDescription
                           : lic.reason),
                   style: TextStyle(fontSize: 12.5, color: pal.textSecondary),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    StatusPill(
+                      label: lic.isPro ? 'الباقة الاحترافية (PRO)' : 'الباقة الأساسية (BASIC)',
+                      bg: lic.isPro ? pal.successSoft : pal.warningSoft,
+                      fg: lic.isPro ? pal.success : pal.warning,
+                      icon: lic.isPro ? Icons.workspace_premium : Icons.shield_outlined,
+                    ),
+                    StatusPill(
+                      label: lic.hasFeature(LicenseFeature.reports)
+                          ? 'التقارير: مفعّلة'
+                          : 'التقارير: PRO فقط',
+                      bg: lic.hasFeature(LicenseFeature.reports)
+                          ? pal.successSoft
+                          : pal.cardElevated,
+                      fg: lic.hasFeature(LicenseFeature.reports)
+                          ? pal.success
+                          : pal.textSecondary,
+                    ),
+                    StatusPill(
+                      label: lic.hasFeature(LicenseFeature.archive)
+                          ? 'الأرشيف: مفعّل'
+                          : 'الأرشيف: PRO فقط',
+                      bg: lic.hasFeature(LicenseFeature.archive)
+                          ? pal.successSoft
+                          : pal.cardElevated,
+                      fg: lic.hasFeature(LicenseFeature.archive)
+                          ? pal.success
+                          : pal.textSecondary,
+                    ),
+                  ],
                 ),
                 const Divider(height: 20),
                 const Text(

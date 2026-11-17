@@ -1,5 +1,6 @@
 import 'package:url_launcher/url_launcher.dart';
 
+import '../core/date_utils.dart';
 import '../core/money.dart';
 import '../data/models.dart';
 
@@ -12,7 +13,7 @@ class WhatsappShareService {
       ..writeln(agency.agencyName)
       ..writeln('فاتورة مبيعات: ${sale.invoiceNumber}')
       ..writeln('العميل: ${sale.customerName}')
-      ..writeln('التاريخ: ${sale.dateIso}')
+      ..writeln('التاريخ: ${QatDateUtils.formatArabicDateTime12h(sale.dateMs)}')
       ..writeln('----------------');
     for (final it in sale.items) {
       sb.writeln(
@@ -24,8 +25,25 @@ class WhatsappShareService {
       ..writeln('الإجمالي: ${Money(sale.totalAmountMinor, sale.currency).format()}')
       ..writeln('المدفوع: ${Money(sale.paidAmountMinor, sale.currency).format()}')
       ..writeln('المتبقي: ${Money(sale.remainingAmountMinor, sale.currency).format()}')
-      ..writeln('الحالة: ${sale.paymentType.arabicLabel}');
+      ..writeln('الدفع: ${sale.effectivePaymentMethodLabel}');
     if (agency.footerNote.isNotEmpty) sb.writeln(agency.footerNote);
+    return sb.toString().trim();
+  }
+
+  String formatCustomerDebtReminder(AgencySettings agency, Customer customer) {
+    final sb = StringBuffer()
+      ..writeln(agency.agencyName)
+      ..writeln('تذكير رصيد حساب: ${customer.name}')
+      ..writeln('----------------');
+    for (final cur in CurrencyCode.values) {
+      final bal = customer.balanceFor(cur);
+      if (bal != 0) {
+        sb.writeln('• الرصيد (${cur.arabicName}): ${Money(bal, cur).format()}');
+      }
+    }
+    if (agency.agencyPhone.isNotEmpty) {
+      sb.writeln('للتواصل: ${agency.agencyPhone}');
+    }
     return sb.toString().trim();
   }
 
@@ -37,7 +55,9 @@ class WhatsappShareService {
       ..writeln(agency.agencyName)
       ..writeln('تقرير حوالات المستلم: ${summary.recipient.name}')
       ..writeln('إجمالي الحوالات: ${summary.totalTransfers}')
-      ..writeln('تم التسليم (${summary.deliveredCount}) • جاري التسليم (${summary.pendingCount}) • ملغي (${summary.cancelledCount})')
+      ..writeln(
+        'تم التسليم (${summary.deliveredCount}) • جاري التسليم (${summary.pendingCount}) • ملغي (${summary.cancelledCount})',
+      )
       ..writeln('----------------');
     for (final t in summary.transfers.take(15)) {
       sb.writeln(
@@ -64,6 +84,33 @@ class WhatsappShareService {
     final uri = Uri(scheme: 'smsto', path: digits, queryParameters: {'body': text});
     if (await canLaunchUrl(uri)) {
       return launchUrl(uri);
+    }
+    return false;
+  }
+
+  /// Launches Android/platform group SMS composer with multiple recipient phone numbers (`smsto:a;b;c`).
+  Future<bool> openGroupSms({
+    required List<String> phones,
+    required String text,
+  }) async {
+    final cleaned = phones
+        .map((p) => normalizeDigits(p).replaceAll(RegExp(r'[^0-9+]'), ''))
+        .where((p) => p.isNotEmpty)
+        .toSet()
+        .toList();
+    if (cleaned.isEmpty) return false;
+    final joined = cleaned.join(';');
+    final uri = Uri(scheme: 'smsto', path: joined, queryParameters: {'body': text});
+    if (await canLaunchUrl(uri)) {
+      return launchUrl(uri);
+    }
+    final fallbackUri = Uri(
+      scheme: 'sms',
+      path: cleaned.join(','),
+      queryParameters: {'body': text},
+    );
+    if (await canLaunchUrl(fallbackUri)) {
+      return launchUrl(fallbackUri);
     }
     return false;
   }

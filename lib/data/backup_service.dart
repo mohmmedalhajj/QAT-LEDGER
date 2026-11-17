@@ -87,7 +87,7 @@ class BackupService {
       final rowCounts = await _collectRowCounts(db);
 
       final manifest = {
-        'format_version': 2,
+        'format_version': 3,
         'app': 'QAT_LEDGER',
         'app_edition': appEdition,
         'db_version': QatLedgerSchema.currentVersion,
@@ -210,6 +210,8 @@ class BackupService {
       }
       await File(stagePath).rename(dbPath);
       await dbService.reopenAfterRestore();
+      // Ensure any v1/v2 backup upgrades idempotently to v3 schema columns/tables.
+      await dbService.database;
 
       // Restore bundled agency logo if present in .qbak
       for (final entry in archive.files) {
@@ -300,6 +302,7 @@ class BackupService {
       }
       await File(stagePath).rename(dbPath);
       await dbService.reopenAfterRestore();
+      await dbService.database;
       return RestoreResult(
         wasLegacyRoomDb: false,
         rollbackBackupPath: rollbackBackupPath,
@@ -317,6 +320,7 @@ class BackupService {
     const tables = [
       'qat_types',
       'inventory_batches',
+      'qat_import_weights',
       'customers',
       'sales',
       'customer_payments',
@@ -330,8 +334,12 @@ class BackupService {
     ];
     final out = <String, int>{};
     for (final t in tables) {
-      final count = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM $t')) ?? 0;
-      out[t] = count;
+      try {
+        final count = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM $t')) ?? 0;
+        out[t] = count;
+      } catch (_) {
+        out[t] = 0;
+      }
     }
     return out;
   }

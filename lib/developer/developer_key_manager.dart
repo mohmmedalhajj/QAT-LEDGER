@@ -10,6 +10,8 @@ import '../licensing/trusted_key_registry.dart';
 class DeveloperKeyInfo {
   const DeveloperKeyInfo({
     required this.keyId,
+    required this.kotlinKeyId,
+    required this.kotlinConfigLine,
     required this.spkiBase64,
     required this.spkiPem,
     required this.rawPublicBytes,
@@ -17,6 +19,8 @@ class DeveloperKeyInfo {
   });
 
   final String keyId;
+  final String kotlinKeyId;
+  final String kotlinConfigLine;
   final String spkiBase64;
   final String spkiPem;
   final List<int> rawPublicBytes;
@@ -93,6 +97,8 @@ class DeveloperKeyManager {
     if (kp == null) return null;
     final pub = await kp.extractPublicKey();
     final keyId = TrustedPublicKeyRegistry.computeKeyIdFromRaw(pub.bytes);
+    final kotlinKeyId = TrustedPublicKeyRegistry.computeKotlinKeyIdFromRaw(pub.bytes);
+    final kotlinLine = TrustedPublicKeyRegistry.formatKotlinBuildConfigEntry(pub.bytes);
     final spkiB64 = TrustedPublicKeyRegistry.encodeSpkiBase64(pub.bytes);
     final wrapped = StringBuffer();
     for (int i = 0; i < spkiB64.length; i += 64) {
@@ -102,6 +108,8 @@ class DeveloperKeyManager {
     final pem = '-----BEGIN PUBLIC KEY-----\n$wrapped-----END PUBLIC KEY-----';
     return DeveloperKeyInfo(
       keyId: keyId,
+      kotlinKeyId: kotlinKeyId,
+      kotlinConfigLine: kotlinLine,
       spkiBase64: spkiB64,
       spkiPem: pem,
       rawPublicBytes: pub.bytes,

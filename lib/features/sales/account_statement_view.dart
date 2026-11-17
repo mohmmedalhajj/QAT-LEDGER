@@ -14,9 +14,14 @@ import '../widgets/common_widgets.dart';
 import '../widgets/erp_components.dart';
 
 class AccountStatementView extends StatefulWidget {
-  const AccountStatementView({super.key, this.preselectedCustomerId});
+  const AccountStatementView({
+    super.key,
+    this.preselectedCustomerId,
+    this.preselectedSupplierId,
+  });
 
   final int? preselectedCustomerId;
+  final int? preselectedSupplierId;
 
   @override
   State<AccountStatementView> createState() => _AccountStatementViewState();
@@ -29,9 +34,38 @@ class _AccountStatementViewState extends State<AccountStatementView> {
   bool _loading = false;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final ctrl = context.read<AppController>();
+      if (widget.preselectedCustomerId != null) {
+        _isCustomer = true;
+        _partyId = widget.preselectedCustomerId;
+        unawaited(_loadStatement(ctrl));
+      } else if (ctrl.statementCustomerId != null) {
+        _isCustomer = true;
+        _partyId = ctrl.statementCustomerId;
+        unawaited(_loadStatement(ctrl));
+      } else if (ctrl.statementSupplierId != null) {
+        _isCustomer = false;
+        _partyId = ctrl.statementSupplierId;
+        unawaited(_loadStatement(ctrl));
+      }
+    });
+  }
+
+  @override
   void didUpdateWidget(AccountStatementView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.preselectedCustomerId != null &&
+    if (widget.preselectedSupplierId != null &&
+        widget.preselectedSupplierId != oldWidget.preselectedSupplierId) {
+      setState(() {
+        _isCustomer = false;
+        _partyId = widget.preselectedSupplierId;
+      });
+      unawaited(_loadStatement(context.read<AppController>()));
+    } else if (widget.preselectedCustomerId != null &&
         widget.preselectedCustomerId != oldWidget.preselectedCustomerId) {
       setState(() {
         _isCustomer = true;

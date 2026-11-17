@@ -1,7 +1,7 @@
-/// Normalized SQLite v2 DDL for `qat_ledger_v2.db`.
+/// Normalized SQLite v3 DDL for `qat_ledger_v2.db`.
 /// Every financial column uses INTEGER minor units (1/100) and quantities use INTEGER milli units (1/1000).
 abstract final class QatLedgerSchema {
-  static const int currentVersion = 2;
+  static const int currentVersion = 3;
   static const String databaseFileName = 'qat_ledger_v2.db';
 
   static const List<String> createStatements = [
@@ -111,7 +111,12 @@ abstract final class QatLedgerSchema {
       currency_code TEXT NOT NULL CHECK(currency_code IN ('YER','SAR')),
       purchase_date_ms INTEGER NOT NULL,
       purchase_date_iso TEXT NOT NULL,
-      is_archived INTEGER NOT NULL DEFAULT 0
+      is_archived INTEGER NOT NULL DEFAULT 0,
+      item_number TEXT NOT NULL DEFAULT '',
+      low_stock_threshold_milli INTEGER NOT NULL DEFAULT 0,
+      receiver_id INTEGER,
+      receiver_name TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT ''
     )
     ''',
     '''
@@ -133,7 +138,8 @@ abstract final class QatLedgerSchema {
       payment_type TEXT NOT NULL CHECK(payment_type IN ('PAID','PARTIAL','CREDIT')),
       status TEXT NOT NULL,
       notes TEXT NOT NULL DEFAULT '',
-      is_archived INTEGER NOT NULL DEFAULT 0
+      is_archived INTEGER NOT NULL DEFAULT 0,
+      payment_method TEXT NOT NULL DEFAULT ''
     )
     ''',
     '''
@@ -182,7 +188,13 @@ abstract final class QatLedgerSchema {
       remaining_amount_minor INTEGER NOT NULL DEFAULT 0,
       payment_type TEXT NOT NULL CHECK(payment_type IN ('PAID','PARTIAL','CREDIT')),
       notes TEXT NOT NULL DEFAULT '',
-      is_archived INTEGER NOT NULL DEFAULT 0
+      is_archived INTEGER NOT NULL DEFAULT 0,
+      payment_method TEXT NOT NULL DEFAULT '',
+      bank_name TEXT NOT NULL DEFAULT '',
+      transfer_number TEXT NOT NULL DEFAULT '',
+      demar_minor INTEGER NOT NULL DEFAULT 0,
+      demar_type TEXT NOT NULL DEFAULT '',
+      demar_number TEXT NOT NULL DEFAULT ''
     )
     ''',
     '''
@@ -233,6 +245,8 @@ abstract final class QatLedgerSchema {
       total_qty_milli INTEGER NOT NULL DEFAULT 0,
       tax_rate_minor INTEGER NOT NULL DEFAULT 0,
       tax_amount_minor INTEGER NOT NULL DEFAULT 0,
+      stall_outflow_minor INTEGER NOT NULL DEFAULT 0,
+      labor_outflow_minor INTEGER NOT NULL DEFAULT 0,
       currency_code TEXT NOT NULL DEFAULT 'YER' CHECK(currency_code IN ('YER','SAR')),
       source TEXT NOT NULL DEFAULT 'يدوي',
       notes TEXT NOT NULL DEFAULT '',
@@ -246,7 +260,8 @@ abstract final class QatLedgerSchema {
       phone TEXT NOT NULL DEFAULT '',
       company TEXT NOT NULL DEFAULT '',
       notes TEXT NOT NULL DEFAULT '',
-      created_at_ms INTEGER NOT NULL
+      created_at_ms INTEGER NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1
     )
     ''',
     '''
@@ -268,6 +283,17 @@ abstract final class QatLedgerSchema {
       is_archived INTEGER NOT NULL DEFAULT 0
     )
     ''',
+    '''
+    CREATE TABLE IF NOT EXISTS qat_import_weights (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date_ms INTEGER NOT NULL,
+      date_iso TEXT NOT NULL,
+      weight_milli INTEGER NOT NULL DEFAULT 0 CHECK(weight_milli >= 0),
+      receiver_name TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      is_archived INTEGER NOT NULL DEFAULT 0
+    )
+    ''',
   ];
 
   static const List<String> indexStatements = [
@@ -283,13 +309,42 @@ abstract final class QatLedgerSchema {
     'CREATE INDEX IF NOT EXISTS idx_transfers_recipient ON money_transfers(recipient_id, status_code, currency_code)',
     'CREATE INDEX IF NOT EXISTS idx_transfers_date ON money_transfers(date_iso, is_archived)',
     'CREATE INDEX IF NOT EXISTS idx_inventory_name ON inventory_batches(qat_type_name, is_archived)',
+    'CREATE INDEX IF NOT EXISTS idx_import_weights_date ON qat_import_weights(date_iso, is_archived)',
   ];
 
+  static const Map<String, List<String>> v3ColumnMigrations = {
+    'inventory_batches': [
+      "item_number TEXT NOT NULL DEFAULT ''",
+      'low_stock_threshold_milli INTEGER NOT NULL DEFAULT 0',
+      'receiver_id INTEGER',
+      "receiver_name TEXT NOT NULL DEFAULT ''",
+      "notes TEXT NOT NULL DEFAULT ''",
+    ],
+    'sales': [
+      "payment_method TEXT NOT NULL DEFAULT ''",
+    ],
+    'supplier_purchases': [
+      "payment_method TEXT NOT NULL DEFAULT ''",
+      "bank_name TEXT NOT NULL DEFAULT ''",
+      "transfer_number TEXT NOT NULL DEFAULT ''",
+      'demar_minor INTEGER NOT NULL DEFAULT 0',
+      "demar_type TEXT NOT NULL DEFAULT ''",
+      "demar_number TEXT NOT NULL DEFAULT ''",
+    ],
+    'qat_tax_entries': [
+      'stall_outflow_minor INTEGER NOT NULL DEFAULT 0',
+      'labor_outflow_minor INTEGER NOT NULL DEFAULT 0',
+    ],
+    'transfer_recipients': [
+      'is_active INTEGER NOT NULL DEFAULT 1',
+    ],
+  };
+
   static const List<Map<String, Object>> defaultLedgerAccounts = [
-    {'code': 'EXP_TRANSPORT', 'name': 'مصاريف نقل وتوصيل', 'category': 'مصروفات تشغيلية', 'is_system': 1},
-    {'code': 'EXP_RENT', 'name': 'إيجار المكتب / المحل', 'category': 'مصروفات ثابتة', 'is_system': 1},
-    {'code': 'EXP_BAGS', 'name': 'أكياس وتغليف وتبريد', 'category': 'مصروفات تشغيلية', 'is_system': 1},
-    {'code': 'EXP_SALARIES', 'name': 'رواتب وأجور عمال', 'category': 'مصروفات إدارية', 'is_system': 1},
-    {'code': 'EXP_OTHER', 'name': 'مصروفات نثرية وأخرى', 'category': 'مصروفات عامة', 'is_system': 1},
+    {'code': 'EXP_TRANSPORT', 'name': 'نقل ومواصلات', 'category': 'نقل ومواصلات', 'is_system': 1},
+    {'code': 'EXP_RENT', 'name': 'إيجار المحل والجمارك', 'category': 'إيجار المحل والجمارك', 'is_system': 1},
+    {'code': 'EXP_BAGS', 'name': 'تعبئة وتغليف وعمالة', 'category': 'تعبئة وتغليف وعمالة', 'is_system': 1},
+    {'code': 'EXP_SALARIES', 'name': 'خدمات وتبرعات وطاقة', 'category': 'خدمات وتبرعات وطاقة', 'is_system': 1},
+    {'code': 'EXP_OTHER', 'name': 'مصاريف عامة أخرى', 'category': 'مصاريف عامة أخرى', 'is_system': 1},
   ];
 }

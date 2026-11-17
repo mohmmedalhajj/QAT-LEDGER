@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -6,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../core/date_utils.dart';
 import '../core/money.dart';
+import '../core/theme.dart';
 import '../data/models.dart';
 import 'arabic_pdf_shaper.dart';
 
@@ -23,13 +25,43 @@ class PdfExportService {
 
   Future<PdfFonts> _loadFonts() async {
     if (_cachedFonts != null) return _cachedFonts!;
-    final regData = await rootBundle.load('assets/fonts/IBMPlexSansArabic-Regular.ttf');
-    final boldData = await rootBundle.load('assets/fonts/IBMPlexSansArabic-Bold.ttf');
+    final regData =
+        await rootBundle.load('assets/fonts/IBMPlexSansArabic-Regular.ttf');
+    final boldData =
+        await rootBundle.load('assets/fonts/IBMPlexSansArabic-Bold.ttf');
     _cachedFonts = PdfFonts(pw.Font.ttf(regData), pw.Font.ttf(boldData));
     return _cachedFonts!;
   }
 
   static String _ar(String text) => ArabicPdfShaper.shapeForPdf(text);
+
+  PdfColor _primaryColor(AgencySettings agency) {
+    if (!agency.syncColorsWithPdf) {
+      return const PdfColor.fromInt(0xFF144D3A);
+    }
+    final c = agency.activeColorPreset.primaryNormal;
+    return PdfColor.fromInt(c.toARGB32());
+  }
+
+  PdfColor _accentColor(AgencySettings agency) {
+    if (!agency.syncColorsWithPdf) {
+      return const PdfColor.fromInt(0xFFB8862D);
+    }
+    final c = agency.activeColorPreset.accentNormal;
+    return PdfColor.fromInt(c.toARGB32());
+  }
+
+  pw.MemoryImage? _tryLoadLogo(AgencySettings agency) {
+    final p = agency.logoPath.trim();
+    if (p.isEmpty) return null;
+    try {
+      final f = File(p);
+      if (!f.existsSync()) return null;
+      return pw.MemoryImage(f.readAsBytesSync());
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<Uint8List> buildSaleInvoicePdf({
     required AgencySettings agency,
@@ -38,50 +70,58 @@ class PdfExportService {
   }) async {
     final fonts = await _loadFonts();
     final doc = pw.Document();
+    final primary = _primaryColor(agency);
 
     doc.addPage(
       pw.MultiPage(
         pageFormat: format,
-        margin: const pw.EdgeInsets.all(24),
+        margin: const pw.EdgeInsets.all(20),
         theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
         build: (ctx) => [
           _headerBlock(agency, 'فاتورة مبيعات (${sale.invoiceNumber})'),
-          pw.SizedBox(height: 12),
+          pw.SizedBox(height: 10),
           _infoRow('العميل:', sale.customerName),
-          _infoRow('التاريخ:', sale.dateIso),
+          _infoRow('التاريخ:', QatDateUtils.formatArabicDateTime12h(sale.dateMs)),
           _infoRow('العملة:', '${sale.currency.arabicName} (${sale.currency.code})'),
-          _infoRow('حالة الدفع:', sale.paymentType.arabicLabel),
+          _infoRow('طريقة/حالة الدفع:', sale.effectivePaymentMethodLabel),
+          pw.SizedBox(height: 10),
+          if (sale.items.isNotEmpty)
+            pw.TableHelper.fromTextArray(
+              headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold,
+                fontSize: 10,
+                color: PdfColors.white,
+              ),
+              headerDecoration: pw.BoxDecoration(color: primary),
+              cellStyle: const pw.TextStyle(fontSize: 9.5),
+              cellAlignment: pw.Alignment.centerRight,
+              headers: [
+                _ar('الإجمالي'),
+                _ar('السعر'),
+                _ar('الوحدة'),
+                _ar('الكمية'),
+                _ar('الصنف'),
+              ],
+              data: sale.items
+                  .map((it) => [
+                        _ar(Money(it.lineTotalMinor, sale.currency).format()),
+                        _ar(Money(it.unitPriceMinor, sale.currency).format()),
+                        _ar(it.unit),
+                        QuantityMath.formatMilli(it.qtyMilli),
+                        _ar(it.qatTypeName),
+                      ])
+                  .toList(),
+            ),
           pw.SizedBox(height: 12),
-          pw.TableHelper.fromTextArray(
-            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.white),
-            headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF144D3A)),
-            cellStyle: const pw.TextStyle(fontSize: 9.5),
-            cellAlignment: pw.Alignment.centerRight,
-            headers: [
-              _ar('الإجمالي'),
-              _ar('السعر'),
-              _ar('الوحدة'),
-              _ar('الكمية'),
-              _ar('الصنف'),
-            ],
-            data: sale.items
-                .map((it) => [
-                      _ar(Money(it.lineTotalMinor, sale.currency).format()),
-                      _ar(Money(it.unitPriceMinor, sale.currency).format()),
-                      _ar(it.unit),
-                      QuantityMath.formatMilli(it.qtyMilli),
-                      _ar(it.qatTypeName),
-                    ])
-                .toList(),
-          ),
-          pw.SizedBox(height: 14),
           _summaryBox([
             ('المجموع الفرعي', Money(sale.subtotalMinor, sale.currency).format()),
             if (sale.discountMinor > 0)
               ('الخصم', Money(sale.discountMinor, sale.currency).format()),
             if (sale.taxAmountMinor > 0)
-              ('الضريبة (${InvoiceMath.formatBps(sale.taxBps)})',
-                  Money(sale.taxAmountMinor, sale.currency).format()),
+              (
+                'الضريبة (${InvoiceMath.formatBps(sale.taxBps)})',
+                Money(sale.taxAmountMinor, sale.currency).format()
+              ),
             ('الإجمالي النهائي', Money(sale.totalAmountMinor, sale.currency).format()),
             ('المدفوع', Money(sale.paidAmountMinor, sale.currency).format()),
             ('المتبقي', Money(sale.remainingAmountMinor, sale.currency).format()),
@@ -90,11 +130,179 @@ class PdfExportService {
             pw.SizedBox(height: 10),
             _infoRow('ملاحظات:', sale.notes),
           ],
-          pw.SizedBox(height: 18),
-          pw.Align(
-            alignment: pw.Alignment.center,
-            child: pw.Text(_ar(agency.footerNote), style: const pw.TextStyle(fontSize: 9)),
+          if (agency.footerEnabled && agency.footerNote.isNotEmpty) ...[
+            pw.SizedBox(height: 14),
+            pw.Align(
+              alignment: pw.Alignment.center,
+              child: pw.Text(_ar(agency.footerNote), style: const pw.TextStyle(fontSize: 9)),
+            ),
+          ],
+        ],
+      ),
+    );
+    return doc.save();
+  }
+
+  Future<Uint8List> buildSupplierPurchasePdf({
+    required AgencySettings agency,
+    required SupplierPurchase purchase,
+    PdfPageFormat format = PdfPageFormat.a4,
+  }) async {
+    final fonts = await _loadFonts();
+    final doc = pw.Document();
+    final primary = _primaryColor(agency);
+
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: format,
+        margin: const pw.EdgeInsets.all(20),
+        theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
+        build: (ctx) => [
+          _headerBlock(agency, 'سند/فاتورة توريد من المورد (${purchase.purchaseNumber})'),
+          pw.SizedBox(height: 10),
+          _infoRow('المورد / الرعية:', purchase.supplierName),
+          _infoRow('التاريخ:', QatDateUtils.formatArabicDateTime12h(purchase.dateMs)),
+          _infoRow('العملة:', '${purchase.currency.arabicName} (${purchase.currency.code})'),
+          _infoRow(
+            'طريقة الدفع:',
+            purchase.paymentMethod.isNotEmpty
+                ? purchase.paymentMethod
+                : purchase.paymentType.arabicLabel,
           ),
+          if (purchase.bankName.isNotEmpty) _infoRow('البنك/الصرافة:', purchase.bankName),
+          if (purchase.transferNumber.isNotEmpty)
+            _infoRow('رقم الحوالة/المرجع:', purchase.transferNumber),
+          pw.SizedBox(height: 10),
+          if (purchase.items.isNotEmpty)
+            pw.TableHelper.fromTextArray(
+              headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold,
+                fontSize: 10,
+                color: PdfColors.white,
+              ),
+              headerDecoration: pw.BoxDecoration(color: primary),
+              cellStyle: const pw.TextStyle(fontSize: 9.5),
+              cellAlignment: pw.Alignment.centerRight,
+              headers: [
+                _ar('الإجمالي'),
+                _ar('سعر الشراء'),
+                _ar('الوحدة'),
+                _ar('الكمية'),
+                _ar('الصنف'),
+              ],
+              data: purchase.items
+                  .map((it) => [
+                        _ar(Money(it.lineTotalMinor, purchase.currency).format()),
+                        _ar(Money(it.buyPriceMinor, purchase.currency).format()),
+                        _ar(it.unit),
+                        QuantityMath.formatMilli(it.qtyMilli),
+                        _ar(it.qatTypeName),
+                      ])
+                  .toList(),
+            ),
+          pw.SizedBox(height: 12),
+          _summaryBox([
+            ('إجمالي الفاتورة', Money(purchase.totalAmountMinor, purchase.currency).format()),
+            ('المدفوع للمورد', Money(purchase.paidAmountMinor, purchase.currency).format()),
+            (
+              purchase.remainingAmountMinor < 0 ? 'فائض لصالح الوكالة' : 'المتبقي للمورد',
+              Money(purchase.remainingAmountMinor.abs(), purchase.currency).format()
+            ),
+            if (purchase.demarMinor > 0)
+              (
+                'الدمار (${purchase.demarType})',
+                Money(purchase.demarMinor, purchase.currency).format()
+              ),
+          ]),
+          if (purchase.notes.isNotEmpty) ...[
+            pw.SizedBox(height: 10),
+            _infoRow('ملاحظات:', purchase.notes),
+          ],
+          if (agency.footerEnabled && agency.footerNote.isNotEmpty) ...[
+            pw.SizedBox(height: 14),
+            pw.Align(
+              alignment: pw.Alignment.center,
+              child: pw.Text(_ar(agency.footerNote), style: const pw.TextStyle(fontSize: 9)),
+            ),
+          ],
+        ],
+      ),
+    );
+    return doc.save();
+  }
+
+  /// Universal receipt/voucher PDF renderer for thermal 58mm/80mm rasterization or A4 PDF export.
+  Future<Uint8List> buildTextReceiptPdf({
+    required AgencySettings agency,
+    required String title,
+    required List<String> lines,
+    PdfPageFormat format = PdfPageFormat.roll80,
+  }) async {
+    final fonts = await _loadFonts();
+    final doc = pw.Document();
+    final primary = _primaryColor(agency);
+
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: format,
+        margin: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
+        build: (ctx) => [
+          if (agency.headerEnabled) ...[
+            pw.Center(
+              child: pw.Text(
+                _ar(agency.agencyName),
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(
+                  fontWeight: pw.FontWeight.bold,
+                  fontSize: 13,
+                  color: primary,
+                ),
+              ),
+            ),
+            if (agency.agencyPhone.isNotEmpty)
+              pw.Center(
+                child: pw.Text(_ar(agency.agencyPhone),
+                    style: const pw.TextStyle(fontSize: 8.5)),
+              ),
+            pw.Divider(color: primary),
+          ],
+          pw.Center(
+            child: pw.Text(
+              _ar(title),
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11),
+            ),
+          ),
+          pw.SizedBox(height: 6),
+          ...lines.map((raw) {
+            final clean = raw.trimRight();
+            if (clean.isEmpty) return pw.SizedBox(height: 3);
+            if (clean.startsWith('===') || clean.startsWith('---')) {
+              return pw.Divider(thickness: 0.7, color: PdfColors.grey600);
+            }
+            return pw.Padding(
+              padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+              child: pw.Align(
+                alignment: pw.Alignment.centerRight,
+                child: pw.Text(
+                  _ar(clean),
+                  textAlign: pw.TextAlign.right,
+                  style: const pw.TextStyle(fontSize: 9.2),
+                ),
+              ),
+            );
+          }),
+          if (agency.footerEnabled && agency.footerNote.isNotEmpty) ...[
+            pw.Divider(color: PdfColors.grey600),
+            pw.Center(
+              child: pw.Text(
+                _ar(agency.footerNote),
+                textAlign: pw.TextAlign.center,
+                style: const pw.TextStyle(fontSize: 8.5),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -109,6 +317,7 @@ class PdfExportService {
   }) async {
     final fonts = await _loadFonts();
     final doc = pw.Document();
+    final primary = _primaryColor(agency);
 
     final summaryLines = <(String, String)>[
       ('إجمالي الحوالات', '${summary.totalTransfers}'),
@@ -138,8 +347,12 @@ class PdfExportService {
           _summaryBox(summaryLines),
           pw.SizedBox(height: 12),
           pw.TableHelper.fromTextArray(
-            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9.5, color: PdfColors.white),
-            headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF144D3A)),
+            headerStyle: pw.TextStyle(
+              fontWeight: pw.FontWeight.bold,
+              fontSize: 9.5,
+              color: PdfColors.white,
+            ),
+            headerDecoration: pw.BoxDecoration(color: primary),
             cellStyle: const pw.TextStyle(fontSize: 9),
             cellAlignment: pw.Alignment.centerRight,
             headers: [
@@ -179,6 +392,7 @@ class PdfExportService {
   }) async {
     final fonts = await _loadFonts();
     final doc = pw.Document();
+    final primary = _primaryColor(agency);
 
     doc.addPage(
       pw.MultiPage(
@@ -188,7 +402,7 @@ class PdfExportService {
         build: (ctx) {
           final widgets = <pw.Widget>[
             _headerBlock(agency, 'كشف حساب $partyTitle: $partyName'),
-            _infoRow('تاريخ الإصدار:', QatDateUtils.todayIso()),
+            _infoRow('تاريخ الإصدار:', QatDateUtils.formatArabicDateTime12h(DateTime.now().millisecondsSinceEpoch)),
             pw.SizedBox(height: 12),
           ];
           if (linesByCurrency.isEmpty) {
@@ -209,8 +423,11 @@ class PdfExportService {
               widgets.add(
                 pw.TableHelper.fromTextArray(
                   headerStyle: pw.TextStyle(
-                      fontWeight: pw.FontWeight.bold, fontSize: 9.5, color: PdfColors.white),
-                  headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF144D3A)),
+                    fontWeight: pw.FontWeight.bold,
+                    fontSize: 9.5,
+                    color: PdfColors.white,
+                  ),
+                  headerDecoration: pw.BoxDecoration(color: primary),
                   cellStyle: const pw.TextStyle(fontSize: 9),
                   cellAlignment: pw.Alignment.centerRight,
                   headers: [
@@ -276,8 +493,9 @@ class PdfExportService {
               ('المقبوضات النقدية', Money(m.salesPaidMinor + m.customerReceiptsMinor, cur).format()),
               ('إجمالي المشتريات', Money(m.purchasesTotalMinor, cur).format()),
               ('المصروفات', Money(m.expensesMinor, cur).format()),
-              ('الضرائب', Money(m.taxMinor, cur).format()),
+              ('الضرائب والمصاريف اليومية', Money(m.totalTaxAndOutflowsMinor, cur).format()),
               ('صافي الربح التقديري', Money(m.netProfitMinor, cur).format()),
+              ('رصيد الصندوق النقدي', Money(m.cashBoxBalanceMinor, cur).format()),
               ('ديون العملاء القائمة', Money(m.totalCustomerDebtMinor, cur).format()),
               ('مستحقات الموردين', Money(m.totalSupplierPayableMinor, cur).format()),
             ]));
@@ -291,33 +509,66 @@ class PdfExportService {
   }
 
   pw.Widget _headerBlock(AgencySettings agency, String title) {
+    final primary = _primaryColor(agency);
+    final accent = _accentColor(agency);
+    final logo = _tryLoadLogo(agency);
+
     return pw.Container(
       padding: const pw.EdgeInsets.all(14),
       decoration: pw.BoxDecoration(
         color: const PdfColor.fromInt(0xFFF6F4EF),
-        border: pw.Border.all(color: const PdfColor.fromInt(0xFF144D3A), width: 1.2),
+        border: pw.Border.all(color: primary, width: 1.2),
         borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
       ),
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.end,
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
         children: [
-          pw.Text(
-            _ar(agency.agencyName),
-            style: pw.TextStyle(
-              fontWeight: pw.FontWeight.bold,
-              fontSize: 16,
-              color: const PdfColor.fromInt(0xFF144D3A),
+          if (logo != null)
+            pw.Container(
+              width: 48,
+              height: 48,
+              margin: const pw.EdgeInsets.only(right: 10),
+              child: pw.Image(logo, fit: pw.BoxFit.contain),
             ),
-          ),
-          if (agency.agencyPhone.isNotEmpty || agency.agencyAddress.isNotEmpty)
-            pw.Text(
-              _ar('${agency.agencyPhone}  ${agency.agencyAddress}'.trim()),
-              style: const pw.TextStyle(fontSize: 9.5),
+          pw.Expanded(
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.end,
+              children: [
+                if (agency.headerEnabled) ...[
+                  pw.Text(
+                    _ar(agency.headerText.isNotEmpty
+                        ? agency.headerText
+                        : agency.agencyName),
+                    style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold,
+                      fontSize: 16,
+                      color: primary,
+                    ),
+                  ),
+                  if (agency.tagline.isNotEmpty)
+                    pw.Text(
+                      _ar(agency.tagline),
+                      style: const pw.TextStyle(fontSize: 9),
+                    ),
+                  if (agency.agencyPhone.isNotEmpty || agency.agencyAddress.isNotEmpty)
+                    pw.Text(
+                      _ar('${agency.agencyPhone}  ${agency.agencyAddress}'.trim()),
+                      style: const pw.TextStyle(fontSize: 9.5),
+                    ),
+                  if (agency.commercialDetails.isNotEmpty)
+                    pw.Text(
+                      _ar(agency.commercialDetails),
+                      style: const pw.TextStyle(fontSize: 8.5),
+                    ),
+                ],
+                pw.Divider(color: accent),
+                pw.Text(
+                  _ar(title),
+                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13),
+                ),
+              ],
             ),
-          pw.Divider(color: const PdfColor.fromInt(0xFFB8862D)),
-          pw.Text(
-            _ar(title),
-            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13),
           ),
         ],
       ),
@@ -353,7 +604,8 @@ class PdfExportService {
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text(_ar(pair.$2), style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
+                    pw.Text(_ar(pair.$2),
+                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
                     pw.Text(_ar(pair.$1), style: const pw.TextStyle(fontSize: 10)),
                   ],
                 ),

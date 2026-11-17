@@ -42,7 +42,7 @@ class OfflineLicenseVerifier {
     }
 
     final candidateKeys = <MapEntry<String, SimplePublicKey>>[];
-    if (decoded.keyIdHint != null) {
+    if (decoded.keyIdHint != null && decoded.keyIdHint!.isNotEmpty) {
       final k = registry.findById(decoded.keyIdHint!);
       if (k != null) candidateKeys.add(MapEntry(decoded.keyIdHint!, k));
     } else {
@@ -52,8 +52,10 @@ class OfflineLicenseVerifier {
       }
     }
 
-    if (candidateKeys.isEmpty && allowUntrustedLocalKeyInDev && extraDevRegistry != null) {
-      if (decoded.keyIdHint != null) {
+    if (candidateKeys.isEmpty &&
+        allowUntrustedLocalKeyInDev &&
+        extraDevRegistry != null) {
+      if (decoded.keyIdHint != null && decoded.keyIdHint!.isNotEmpty) {
         final k = extraDevRegistry.findById(decoded.keyIdHint!);
         if (k != null) candidateKeys.add(MapEntry(decoded.keyIdHint!, k));
       } else {
@@ -71,7 +73,7 @@ class OfflineLicenseVerifier {
         keyId: decoded.keyIdHint,
         reason: registry.isEmpty
             ? 'لا توجد مفاتيح عامة موثوقة مدمجة في هذا البناء (QAT_LICENSE_PUBLIC_KEYS).'
-            : 'معرف المفتاح ${decoded.keyIdHint ?? ''} غير موثوق.',
+            : 'مفتاح التوقيع (${decoded.keyIdHint ?? ''}) غير معرّف كـ Public Key موثوق داخل هذه النسخة.',
       );
     }
 
@@ -90,7 +92,7 @@ class OfflineLicenseVerifier {
       return LicenseVerificationResult(
         kind: LicenseStateKind.invalidSignature,
         payload: payload,
-        reason: 'فشل التحقق من التوقيع الرقمي Ed25519.',
+        reason: 'فشل التحقق التشفيري Ed25519 — تم تعديل الترخيص أو التوقيع مزوّر.',
       );
     }
 
@@ -99,38 +101,63 @@ class OfflineLicenseVerifier {
         kind: LicenseStateKind.deviceMismatch,
         payload: payload,
         keyId: matchedKeyId,
-        reason: 'معرف الجهاز في الترخيص (${payload.installationId}) لا يطابق الجهاز الحالي ($currentInstallationId).',
+        reason:
+            'هذا الترخيص مرتبط بمعرّف تثبيت آخر (${payload.installationId}) ولا يطابق جهازك ($currentInstallationId).',
       );
     }
 
     final now = nowEpochMs ?? DateTime.now().millisecondsSinceEpoch;
-    final clock = await timeGuard.evaluateNow(now, anchorEpochMs: payload.issuedAtEpochMs);
+    final skewMs = (payload.maxClockSkewSeconds * 1000).clamp(60000, 86400000).toInt();
+
+    // Perpetual licenses don't expire and only require valid signature + install match
+    if (payload.isPerpetual()) {
+      return LicenseVerificationResult(
+        kind: LicenseStateKind.valid,
+        payload: payload,
+        keyId: matchedKeyId,
+      );
+    }
+
+    if (payload.expiresAtEpochMs <= payload.issuedAtEpochMs) {
+      return LicenseVerificationResult(
+        kind: LicenseStateKind.corrupted,
+        payload: payload,
+        keyId: matchedKeyId,
+        reason: 'بيانات تاريخ انتهاء الاشتراك غير صالحة.',
+      );
+    }
+
+    final clock = await timeGuard.evaluateNow(
+      now,
+      anchorEpochMs: payload.issuedAtEpochMs,
+      overrideMaxRollbackMs: skewMs,
+    );
     if (!clock.trusted) {
       return LicenseVerificationResult(
         kind: LicenseStateKind.clockTampered,
         payload: payload,
         keyId: matchedKeyId,
-        reason: 'ساعة النظام متراجعة بمقدار ${(clock.rollbackDeltaMs / 3600000).toStringAsFixed(1)} ساعة.',
+        reason:
+            'تم اكتشاف إرجاع ساعة الجهاز للخلف بمقدار ${(clock.rollbackDeltaMs / 3600000).toStringAsFixed(1)} ساعة. عاد النظام إلى الباقة الأساسية (BASIC) مع بقاء جميع بياناتك محفوظة.',
       );
     }
 
-    if (!payload.isPerpetual() && clock.effectiveNowMs > payload.expiresAtEpochMs) {
+    if (clock.effectiveNowMs > payload.expiresAtEpochMs) {
       return LicenseVerificationResult(
         kind: LicenseStateKind.expired,
         payload: payload,
         keyId: matchedKeyId,
-        reason: 'انتهت صلاحية الترخيص.',
+        reason:
+            'انتهت مدة صلاحية الاشتراك. تم إيقاف ميزات PRO فقط وبقيت جميع سجلاتك وبياناتك آمنة.',
         remainingDays: 0,
       );
     }
 
-    final int? remDays = payload.isPerpetual()
-        ? null
-        : ((payload.expiresAtEpochMs - clock.effectiveNowMs) /
-                Duration.millisecondsPerDay)
-            .ceil()
-            .clamp(0, 99999)
-            .toInt();
+    final remDays = ((payload.expiresAtEpochMs - clock.effectiveNowMs) /
+            Duration.millisecondsPerDay)
+        .ceil()
+        .clamp(1, 99999)
+        .toInt();
 
     return LicenseVerificationResult(
       kind: LicenseStateKind.valid,
