@@ -68,8 +68,8 @@ void main() {
     }
     controller.setSection(2, subTab: 2); // Reconciliation & Settlement
     await tester.pumpAndSettle();
-    expect(find.text('جرد المخزون'), findsOneWidget);
-    expect(find.text('تحاسب الصندوق'), findsOneWidget);
+    expect(find.text('جرد المخزون والمطابقة'), findsOneWidget);
+    expect(find.text('التحاسب اليومي للصندوق'), findsOneWidget);
 
     controller.setSection(1, subTab: 3); // Account statements
     await tester.pumpAndSettle();

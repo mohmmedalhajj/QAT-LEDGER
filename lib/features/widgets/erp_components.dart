@@ -450,7 +450,7 @@ class ErpDetailRow extends StatelessWidget {
             value,
             textDirection: ltr ? TextDirection.ltr : null,
             style: TextStyle(
-              fontSize: bold ? 14 : 12.5,
+              fontSize: bold ? 14.0 : 12.5,
               fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
               color: valueColor ?? pal.textPrimary,
               fontFeatures: const [FontFeature.tabularFigures()],

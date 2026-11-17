@@ -17,8 +17,8 @@ class CurrencyBadge extends StatelessWidget {
     final isYer = currency == CurrencyCode.yer;
     return Container(
       padding: EdgeInsets.symmetric(
-        horizontal: compact ? 6 : 8,
-        vertical: compact ? 2 : 3,
+        horizontal: compact ? 6.0 : 8.0,
+        vertical: compact ? 2.0 : 3.0,
       ),
       decoration: BoxDecoration(
         color: isYer ? pal.yerBadgeBg : pal.sarBadgeBg,
@@ -30,7 +30,7 @@ class CurrencyBadge extends StatelessWidget {
       child: Text(
         currency.code,
         style: TextStyle(
-          fontSize: compact ? 10 : 11,
+          fontSize: compact ? 10.0 : 11.0,
           fontWeight: FontWeight.w700,
           color: isYer ? pal.yerBadgeFg : pal.sarBadgeFg,
         ),

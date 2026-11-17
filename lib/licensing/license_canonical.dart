@@ -80,11 +80,12 @@ abstract final class LicenseCanonical {
     required LicensePayload payload,
     required List<int> signatureBytes,
   }) {
+    final Object? decodedPayload = jsonDecode(serializePayloadCanonical(payload));
     final obj = <String, Object?>{
       'format': licenseEnvelopeFormat,
       'keyId': keyId,
       'algorithm': algorithmEd25519,
-      'payload': jsonDecode(serializePayloadCanonical(payload)) as Object?,
+      'payload': decodedPayload,
       'signature': encodeBase64UrlNoPad(signatureBytes),
     };
     return const JsonEncoder.withIndent('  ').convert(obj);

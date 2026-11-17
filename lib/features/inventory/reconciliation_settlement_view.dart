@@ -200,12 +200,20 @@ class _ReconciliationSettlementViewState
             ButtonSegment<int>(
               value: 0,
               icon: Icon(Icons.inventory_outlined, size: 17),
-              label: Text('جرد المخزون والمطابقة'),
+              label: Text(
+                'جرد المخزون والمطابقة',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             ButtonSegment<int>(
               value: 1,
               icon: Icon(Icons.point_of_sale_outlined, size: 17),
-              label: Text('التحاسب اليومي للصندوق'),
+              label: Text(
+                'التحاسب اليومي للصندوق',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
           selected: {_mode},
