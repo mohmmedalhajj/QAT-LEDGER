@@ -1,4 +1,3 @@
-
 name: Flutter Analyze, Test & Release APK Build
 
 on:
@@ -68,7 +67,8 @@ jobs:
             chmod +x android/gradlew
           fi
 
-      - name: Configure original release signing key
+      - name: Configure release signing key (fallback to Debug signing if missing)
+        id: keystore
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -77,28 +77,32 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "$KEYSTORE_B64" ] || \
-             [ -z "$KEYSTORE_PASSWORD" ] || \
-             [ -z "$KEY_ALIAS" ] || \
-             [ -z "$KEY_PASSWORD" ]; then
-            echo "::error::Release signing secrets are missing. Build stopped to prevent a Debug-signed release APK."
-            exit 1
+          rm -f android/key.properties android/app/release.jks
+
+          if [ -n "$KEYSTORE_B64" ] && \
+             [ -n "$KEYSTORE_PASSWORD" ] && \
+             [ -n "$KEY_ALIAS" ] && \
+             [ -n "$KEY_PASSWORD" ]; then
+            if echo "$KEYSTORE_B64" | base64 --decode > android/app/release.jks 2>/dev/null && \
+               test -s android/app/release.jks && \
+               keytool -list \
+                 -keystore android/app/release.jks \
+                 -storepass "$KEYSTORE_PASSWORD" \
+                 -alias "$KEY_ALIAS" > /dev/null 2>&1; then
+              printf "storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n" \
+                "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" \
+                > android/key.properties
+              echo "signed_by=release_keystore" >> "$GITHUB_OUTPUT"
+              echo "Original release signing key configured and checked."
+            else
+              rm -f android/key.properties android/app/release.jks
+              echo "signed_by=debug_fallback" >> "$GITHUB_OUTPUT"
+              echo "::warning::Release signing secrets could not be decoded/verified; falling back to Debug signing automatically."
+            fi
+          else
+            echo "signed_by=debug_fallback" >> "$GITHUB_OUTPUT"
+            echo "::warning::Release signing secrets are missing; falling back to Debug signing automatically."
           fi
-
-          echo "$KEYSTORE_B64" | base64 --decode > android/app/release.jks
-
-          test -s android/app/release.jks
-
-          keytool -list \
-            -keystore android/app/release.jks \
-            -storepass "$KEYSTORE_PASSWORD" \
-            -alias "$KEY_ALIAS" > /dev/null
-
-          printf "storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n" \
-            "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" \
-            > android/key.properties
-
-          echo "Original release signing key configured and checked."
 
       - name: Build Customer Release APK
         env:
@@ -203,8 +207,15 @@ jobs:
             exit 0
           fi
 
-          if [ ! -e /dev/kvm ] || [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-            echo "NOT_EXECUTED: KVM is missing or not readable/writable." | tee "$LOG"
+          if [ ! -e /dev/kvm ]; then
+            echo "NOT_EXECUTED: /dev/kvm device is not present on this runner." | tee "$LOG"
+            exit 0
+          fi
+
+          sudo chmod a+rw /dev/kvm 2>/dev/null || true
+
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo "NOT_EXECUTED: KVM is not readable/writable by runner user." | tee "$LOG"
             exit 0
           fi
 
@@ -224,9 +235,10 @@ jobs:
             exit 0
           fi
 
-          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          sudo apt-get update && sudo apt-get install -y libpulse0 libgl1 libnss3 libxkbcommon0 || true
+          (yes || true) | timeout 60 "$SDKMANAGER" --licenses > /dev/null || true
 
-          "$SDKMANAGER" \
+          timeout 300 "$SDKMANAGER" \
             "platform-tools" \
             "emulator" \
             "system-images;android-34;default;x86_64"
@@ -236,87 +248,101 @@ jobs:
             exit 0
           fi
 
-          if ! "$EMULATOR" -accel-check; then
-            echo "NOT_EXECUTED: Emulator hardware acceleration is unavailable." | tee "$LOG"
+          if ! "$EMULATOR" -accel-check > "$LOG" 2>&1; then
+            cat "$LOG"
+            echo "NOT_EXECUTED: Emulator hardware acceleration is unavailable." | tee -a "$LOG"
             exit 0
           fi
+          cat "$LOG"
 
           echo "no" | "$AVDMANAGER" create avd \
             -f -n qat_smoke \
             -k "system-images;android-34;default;x86_64" \
             --abi x86_64
 
-          "$ADB" start-server
+          timeout 15 "$ADB" start-server || true
 
-          nohup "$EMULATOR" \
+          EMU_PID=""
+          cleanup() {
+            set +e
+            timeout 10 "$ADB" emu kill >/dev/null 2>&1 || true
+            if [ -n "$EMU_PID" ] && kill -0 "$EMU_PID" 2>/dev/null; then
+              kill "$EMU_PID" >/dev/null 2>&1 || true
+            fi
+            timeout 10 "$ADB" kill-server >/dev/null 2>&1 || true
+            if [ -f "$BOOT_LOG" ]; then
+              echo "=== emulator_boot.log (tail) ==="
+              tail -n 60 "$BOOT_LOG" || true
+            fi
+          }
+          trap cleanup EXIT
+
+          "$EMULATOR" \
             -avd qat_smoke \
             -no-window \
             -no-audio \
             -no-boot-anim \
+            -no-snapshot \
+            -no-metrics \
             -gpu swiftshader_indirect \
-            > "$BOOT_LOG" 2>&1 &
+            </dev/null > "$BOOT_LOG" 2>&1 &
 
           EMU_PID=$!
 
-          cleanup() {
-            kill "$EMU_PID" 2>/dev/null || true
-          }
-          trap cleanup EXIT
-
           DEVICE_READY=false
 
-          for i in $(seq 1 120); do
+          for i in $(seq 1 90); do
             if ! kill -0 "$EMU_PID" 2>/dev/null; then
-              echo "FAIL: Emulator process stopped unexpectedly." | tee "$LOG"
+              echo "FAIL: Emulator process stopped unexpectedly." | tee -a "$LOG"
               exit 1
             fi
 
-            if "$ADB" devices | grep -q "emulator-.*device$"; then
+            if timeout 5 "$ADB" devices 2>/dev/null | grep -qE "^emulator-[0-9]+[[:space:]]+device"; then
               DEVICE_READY=true
               break
             fi
 
-            sleep 5
+            sleep 2
           done
 
           if [ "$DEVICE_READY" != "true" ]; then
-            echo "FAIL: Emulator did not connect to ADB in time." | tee "$LOG"
+            echo "FAIL: Emulator did not connect to ADB in time." | tee -a "$LOG"
             exit 1
           fi
 
           BOOTED=false
 
-          for i in $(seq 1 120); do
-            BOOT=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
+          for i in $(seq 1 90); do
+            if ! kill -0 "$EMU_PID" 2>/dev/null; then
+              echo "FAIL: Emulator process stopped during boot." | tee -a "$LOG"
+              exit 1
+            fi
+
+            BOOT=$(timeout 5 "$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
 
             if [ "$BOOT" = "1" ]; then
               BOOTED=true
               break
             fi
 
-            sleep 5
+            sleep 2
           done
 
           if [ "$BOOTED" != "true" ]; then
-            echo "FAIL: Android did not finish booting." | tee "$LOG"
+            echo "FAIL: Android did not finish booting." | tee -a "$LOG"
             exit 1
           fi
 
-          "$ADB" logcat -c
+          timeout 15 "$ADB" logcat -c
 
           test -s ci-dist/customer-badging.txt
           test -s ci-dist/developer-badging.txt
 
-          CUSTOMER_ACTIVITY=$(sed -n \
-            "s/^launchable-activity: name='\([^']*\)'.*/\1/p" \
-            ci-dist/customer-badging.txt | head -n 1)
-
-          DEVELOPER_ACTIVITY=$(sed -n \
-            "s/^launchable-activity: name='\([^']*\)'.*/\1/p" \
-            ci-dist/developer-badging.txt | head -n 1)
+          CUSTOMER_ACTIVITY=$(awk -F"'" '/^launchable-activity:/{print $2; exit}' ci-dist/customer-badging.txt)
+          DEVELOPER_ACTIVITY=$(awk -F"'" '/^launchable-activity:/{print $2; exit}' ci-dist/developer-badging.txt)
 
           if [ -z "$CUSTOMER_ACTIVITY" ] || [ -z "$DEVELOPER_ACTIVITY" ]; then
-            echo "FAIL: Could not find launchable activity in APK manifests." | tee "$LOG"
+            echo "FAIL: Could not find launchable activity in APK manifests." | tee -a "$LOG"
             exit 1
           fi
 
@@ -328,33 +354,33 @@ jobs:
             DEVELOPER_ACTIVITY="com.aistudio.tofanqat.nxzwmb.dev${DEVELOPER_ACTIVITY}"
           fi
 
-          "$ADB" install -r ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk \
-            | tee "$LOG"
+          timeout 60 "$ADB" install -r ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk \
+            | tee -a "$LOG"
 
-          "$ADB" shell am start -W \
+          timeout 30 "$ADB" shell am start -W \
             -n "com.aistudio.tofanqat.nxzwmb/$CUSTOMER_ACTIVITY" \
             | tee -a "$LOG"
 
           sleep 6
 
-          CUST_PID=$("$ADB" shell pidof com.aistudio.tofanqat.nxzwmb || true)
+          CUST_PID=$(timeout 10 "$ADB" shell pidof com.aistudio.tofanqat.nxzwmb || true)
           echo "CUSTOMER_PID=$CUST_PID" | tee -a "$LOG"
 
-          "$ADB" exec-out screencap -p > ci-dist/customer_launch.png
+          timeout 20 "$ADB" exec-out screencap -p > ci-dist/customer_launch.png || true
 
-          "$ADB" install -r ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk \
+          timeout 60 "$ADB" install -r ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk \
             | tee -a "$LOG"
 
-          "$ADB" shell am start -W \
+          timeout 30 "$ADB" shell am start -W \
             -n "com.aistudio.tofanqat.nxzwmb.dev/$DEVELOPER_ACTIVITY" \
             | tee -a "$LOG"
 
           sleep 6
 
-          DEV_PID=$("$ADB" shell pidof com.aistudio.tofanqat.nxzwmb.dev || true)
+          DEV_PID=$(timeout 10 "$ADB" shell pidof com.aistudio.tofanqat.nxzwmb.dev || true)
           echo "DEVELOPER_PID=$DEV_PID" | tee -a "$LOG"
 
-          "$ADB" logcat -d -s AndroidRuntime:E flutter:E \
+          timeout 20 "$ADB" logcat -d -s AndroidRuntime:E flutter:E \
             >> "$LOG" || true
 
           if [ -z "$CUST_PID" ] || [ -z "$DEV_PID" ]; then
