@@ -8,11 +8,14 @@ import 'package:qat_ledger/data/qat_repository.dart';
 import 'package:qat_ledger/data/room_migrator.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '_ci_diag_helper.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
 
   test('migrates Room v18 SQLite database cleanly, preserves all records, separates currencies, and is idempotent', () async {
+    await runWithCiDiag('room_migration_test', () async {
     final tempDir = await Directory.systemTemp.createTemp('qat_room_mig_test_');
     try {
       final legacyPath = p.join(tempDir.path, 'tofan_al_aqsa_qat_db');
@@ -112,5 +115,6 @@ void main() {
     } finally {
       await tempDir.delete(recursive: true);
     }
+    });
   });
 }

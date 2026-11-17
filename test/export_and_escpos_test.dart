@@ -10,10 +10,13 @@ import 'package:qat_ledger/services/esc_pos_service.dart';
 import 'package:qat_ledger/services/pdf_export_service.dart';
 import 'package:qat_ledger/services/spreadsheet_export_service.dart';
 
+import '_ci_diag_helper.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('PDF export service builds valid Arabic PDF documents with bundled IBMPlexSansArabic', () async {
+    await runWithCiDiag('export_and_escpos_test#1_pdf', () async {
     const agency = AgencySettings(
       agencyName: 'وكالة ميزان القات',
       agencyPhone: '777000111',
@@ -113,9 +116,11 @@ void main() {
       summary: summary,
     );
     expect(String.fromCharCodes(recPdf.take(5)), '%PDF-');
+    });
   });
 
   test('Spreadsheet export generates valid XLSX and UTF-8 BOM CSV, and ESC/POS raster supports 58mm & 80mm', () async {
+    await runWithCiDiag('export_and_escpos_test#2_xlsx_escpos', () async {
     final tempDir = await Directory.systemTemp.createTemp('qat_export_test_');
     try {
       const transfers = [
@@ -165,5 +170,6 @@ void main() {
     } finally {
       await tempDir.delete(recursive: true);
     }
+    });
   });
 }
