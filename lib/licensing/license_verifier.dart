@@ -79,21 +79,34 @@ class OfflineLicenseVerifier {
 
     final messageBytes = LicenseCanonical.canonicalBytes(payload);
     String? matchedKeyId;
+    SimplePublicKey? matchedPubKey;
     for (final entry in candidateKeys) {
       final sig = Signature(decoded.signatureBytes, publicKey: entry.value);
       final ok = await _ed25519.verify(messageBytes, signature: sig);
       if (ok) {
         matchedKeyId = entry.key;
+        matchedPubKey = entry.value;
         break;
       }
     }
 
-    if (matchedKeyId == null) {
+    if (matchedKeyId == null || matchedPubKey == null) {
       return LicenseVerificationResult(
         kind: LicenseStateKind.invalidSignature,
         payload: payload,
         reason: 'فشل التحقق التشفيري Ed25519 — تم تعديل الترخيص أو التوقيع مزوّر.',
       );
+    }
+
+    if (decoded.keyIdHint == null || decoded.keyIdHint!.isEmpty) {
+      final flavorKeyId = payload.canonicalFlavor == LicenseCanonicalFlavor.kotlinLineV1
+          ? TrustedPublicKeyRegistry.computeKotlinKeyIdFromRaw(matchedPubKey.bytes)
+          : TrustedPublicKeyRegistry.computeKeyIdFromRaw(matchedPubKey.bytes);
+      if (registry.findById(flavorKeyId) != null ||
+          (allowUntrustedLocalKeyInDev &&
+              extraDevRegistry?.findById(flavorKeyId) != null)) {
+        matchedKeyId = flavorKeyId;
+      }
     }
 
     if (!payload.matchesInstallation(currentInstallationId)) {

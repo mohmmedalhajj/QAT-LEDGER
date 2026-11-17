@@ -48,9 +48,17 @@ class TrustedPublicKeyRegistry {
           continue;
         }
         final key = parsePublicKey(clean);
-        // Index under BOTH Kotlin raw32 KeyId and SPKI KeyId for full cross-compatibility
-        map[computeKotlinKeyIdFromRaw(key.bytes)] = key;
-        map[computeKeyIdFromRaw(key.bytes)] = key;
+        // Index under BOTH SPKI KeyId and Kotlin raw32 KeyId for full cross-compatibility,
+        // keeping the entry's native format ID primary in iteration order.
+        final spkiId = computeKeyIdFromRaw(key.bytes);
+        final kotlinId = computeKotlinKeyIdFromRaw(key.bytes);
+        if (_isSpkiEncoded(clean)) {
+          map[spkiId] = key;
+          map[kotlinId] = key;
+        } else {
+          map[kotlinId] = key;
+          map[spkiId] = key;
+        }
       } catch (_) {
         // Skip malformed entry safely without crashing startup
       }
@@ -139,6 +147,28 @@ class TrustedPublicKeyRegistry {
         .join()
         .toUpperCase();
     return 'QLK-$hex8';
+  }
+
+  static bool _isSpkiEncoded(String rawEntry) {
+    if (rawEntry.contains('BEGIN PUBLIC KEY')) return true;
+    try {
+      var norm = rawEntry
+          .replaceAll(RegExp(r'\s+'), '')
+          .replaceAll('+', '-')
+          .replaceAll('/', '_');
+      final rem = norm.length % 4;
+      if (rem == 2) {
+        norm += '==';
+      } else if (rem == 3) {
+        norm += '=';
+      } else if (rem == 1) {
+        return false;
+      }
+      final bytes = base64Url.decode(norm);
+      return bytes.length == 44 && _startsWith(bytes, ed25519SpkiPrefix);
+    } catch (_) {
+      return false;
+    }
   }
 
   static bool _startsWith(List<int> data, List<int> prefix) {
