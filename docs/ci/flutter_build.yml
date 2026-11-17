@@ -7,10 +7,14 @@ on:
     branches: ["**"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   verify-and-build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,29 +25,35 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Setup Flutter SDK (stable)
+      - name: Setup Flutter SDK
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      - name: Install Linux SQLite runtime for sqflite_common_ffi
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-0 libsqlite3-dev zip
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-0 libsqlite3-dev zip
 
-      - name: Show toolchain & environment info
+      - name: Show toolchain information
         run: |
           flutter --version
           dart --version
           java -version
-          ls -l /dev/kvm || echo "NO_KVM_DEVICE"
+          if [ -e /dev/kvm ]; then
+            ls -l /dev/kvm
+          else
+            echo "NO_KVM_DEVICE"
+          fi
 
-      - name: Fetch Dart & Flutter packages
+      - name: Fetch Flutter packages
         run: flutter pub get
 
-      - name: Run Flutter static analyzer
+      - name: Run Flutter analyzer
         run: flutter analyze
 
-      - name: Run unit & widget tests
+      - name: Run Flutter tests
         run: flutter test -r expanded
 
       - name: Ensure Android Gradle wrapper exists
@@ -57,7 +67,7 @@ jobs:
             chmod +x android/gradlew
           fi
 
-      - name: Configure original release keystore from GitHub Secrets
+      - name: Configure release signing key (fallback to Debug signing if missing)
         id: keystore
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
@@ -65,18 +75,33 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > android/app/release.jks
+          set -euo pipefail
+
+          if [ -n "$KEYSTORE_B64" ] && \
+             [ -n "$KEYSTORE_PASSWORD" ] && \
+             [ -n "$KEY_ALIAS" ] && \
+             [ -n "$KEY_PASSWORD" ]; then
+            echo "$KEYSTORE_B64" | base64 --decode > android/app/release.jks
+            test -s android/app/release.jks
+
+            keytool -list \
+              -keystore android/app/release.jks \
+              -storepass "$KEYSTORE_PASSWORD" \
+              -alias "$KEY_ALIAS" > /dev/null
+
             printf "storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n" \
-              "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
+              "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" \
+              > android/key.properties
+
             echo "signed_by=release_keystore" >> "$GITHUB_OUTPUT"
-            echo "Release keystore configured cleanly from GitHub Secrets."
+            echo "Release signing key configured and checked."
           else
+            rm -f android/key.properties android/app/release.jks
             echo "signed_by=debug_fallback" >> "$GITHUB_OUTPUT"
-            echo "::warning::Release keystore secrets missing (KEYSTORE_B64/KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD); signed with debug key."
+            echo "::warning::Release signing secrets are missing; falling back to Debug signing in android/app/build.gradle.kts."
           fi
 
-      - name: Build Customer Release APK (Top Priority)
+      - name: Build Customer Release APK
         env:
           QAT_LICENSE_PUBLIC_KEYS: ${{ secrets.QAT_LICENSE_PUBLIC_KEYS }}
         run: |
@@ -92,28 +117,66 @@ jobs:
             --dart-define=APP_EDITION=developer \
             --dart-define=QAT_LICENSE_PUBLIC_KEYS="${QAT_LICENSE_PUBLIC_KEYS}"
 
-      - name: Verify APK manifests, package IDs, signatures, and bundle deliverables
+      - name: Verify APKs and prepare release files
         run: |
-          mkdir -p ci-dist
-          cp build/app/outputs/flutter-apk/app-customer-release.apk ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk
-          cp build/app/outputs/flutter-apk/app-developer-release.apk ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk
-          git archive --format=zip --output=ci-dist/QAT_LEDGER_FLUTTER_SOURCE.zip HEAD -- . ':!backup'
+          set -euo pipefail
 
-          BUILD_TOOLS_DIR=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          mkdir -p ci-dist
+
+          cp build/app/outputs/flutter-apk/app-customer-release.apk \
+            ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk
+
+          cp build/app/outputs/flutter-apk/app-developer-release.apk \
+            ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk
+
+          git archive --format=zip \
+            --output=ci-dist/QAT_LEDGER_FLUTTER_SOURCE.zip \
+            HEAD -- . ':!backup'
+
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK_ROOT" ]; then
+            echo "::error::Android SDK path was not found."
+            exit 1
+          fi
+
+          BUILD_TOOLS_DIR=$(find "$SDK_ROOT/build-tools" \
+            -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+
           AAPT2="$BUILD_TOOLS_DIR/aapt2"
           APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
-          echo "Using aapt2: $AAPT2"
-          echo "Using apksigner: $APKSIGNER"
 
-          "$AAPT2" dump badging ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk | head -n 20 | tee ci-dist/customer-badging.txt
-          "$AAPT2" dump badging ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk | head -n 20 | tee ci-dist/developer-badging.txt
-          grep -q "package: name='com.aistudio.tofanqat.nxzwmb'" ci-dist/customer-badging.txt
-          grep -q "package: name='com.aistudio.tofanqat.nxzwmb.dev'" ci-dist/developer-badging.txt
+          test -x "$AAPT2"
+          test -x "$APKSIGNER"
 
-          "$APKSIGNER" verify --print-certs --verbose ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk | tee ci-dist/customer-signature.txt
-          "$APKSIGNER" verify --print-certs --verbose ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk | tee ci-dist/developer-signature.txt
+          "$AAPT2" dump badging ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk \
+            | tee ci-dist/customer-badging.txt
 
-          (cd ci-dist && sha256sum QAT_LEDGER_CUSTOMER_RELEASE.apk QAT_LEDGER_DEVELOPER_RELEASE.apk QAT_LEDGER_FLUTTER_SOURCE.zip | tee SHA256SUMS.txt)
+          "$AAPT2" dump badging ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk \
+            | tee ci-dist/developer-badging.txt
+
+          grep -q "package: name='com.aistudio.tofanqat.nxzwmb'" \
+            ci-dist/customer-badging.txt
+
+          grep -q "package: name='com.aistudio.tofanqat.nxzwmb.dev'" \
+            ci-dist/developer-badging.txt
+
+          "$APKSIGNER" verify --print-certs --verbose \
+            ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk \
+            | tee ci-dist/customer-signature.txt
+
+          "$APKSIGNER" verify --print-certs --verbose \
+            ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk \
+            | tee ci-dist/developer-signature.txt
+
+          (
+            cd ci-dist
+            sha256sum \
+              QAT_LEDGER_CUSTOMER_RELEASE.apk \
+              QAT_LEDGER_DEVELOPER_RELEASE.apk \
+              QAT_LEDGER_FLUTTER_SOURCE.zip \
+              | tee SHA256SUMS.txt
+          )
+
           ls -lh ci-dist/
 
       - name: Upload release APKs and verification reports
@@ -123,117 +186,187 @@ jobs:
           name: qat-ledger-release-apks
           path: ci-dist/
           if-no-files-found: warn
+          retention-days: 14
 
-      - name: Smoke-test Customer & Developer APKs on Android Emulator (bounded, when KVM usable)
+      - name: Smoke-test APKs on Android Emulator
         if: always()
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: |
+          set -euo pipefail
+
           mkdir -p ci-dist
-          if [ ! -f ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk ]; then
-            echo "NOT_EXECUTED: Customer APK was not built because an earlier build or verification step failed." | tee ci-dist/emulator_smoke.log
-            exit 0
-          fi
-          if [ ! -e /dev/kvm ]; then
-            echo "NOT_EXECUTED (NO_KVM_DEVICE): Android Emulator hardware virtualization unavailable on this runner; install/launch test NOT EXECUTED." | tee ci-dist/emulator_smoke.log
-            echo "::warning::Android Emulator smoke test NOT EXECUTED (/dev/kvm missing)."
-            exit 0
-          fi
-          sudo chmod a+rw /dev/kvm || true
-          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-            echo "NOT_EXECUTED (KVM_PERMISSION_DENIED): /dev/kvm exists but is not readable/writable by runner user; install/launch test NOT EXECUTED." | tee ci-dist/emulator_smoke.log
-            echo "::warning::Android Emulator smoke test NOT EXECUTED (/dev/kvm not readable/writable)."
+          LOG="ci-dist/emulator_smoke.log"
+          BOOT_LOG="ci-dist/emulator_boot.log"
+
+          if [ ! -s ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk ] || \
+             [ ! -s ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk ]; then
+            echo "NOT_EXECUTED: Required APK files are missing." | tee "$LOG"
             exit 0
           fi
 
-          SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
-          EMU_PID=""
-          cleanup_emulator() {
-            set +e
-            timeout 10 "$SDK_ROOT/platform-tools/adb" emu kill >/dev/null 2>&1 || true
-            if [ -n "$EMU_PID" ] && kill -0 "$EMU_PID" 2>/dev/null; then
-              kill "$EMU_PID" >/dev/null 2>&1 || true
-            fi
-            timeout 10 "$SDK_ROOT/platform-tools/adb" kill-server >/dev/null 2>&1 || true
-            if [ -f ci-dist/emulator_boot.log ]; then
-              echo "=== emulator_boot.log (tail) ==="
-              tail -n 60 ci-dist/emulator_boot.log || true
-            fi
-          }
-          trap cleanup_emulator EXIT
-
-          sudo apt-get update && sudo apt-get install -y libpulse0 libgl1 libnss3 libxkbcommon0 || true
-          yes | timeout 60 "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
-          timeout 300 "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator" "system-images;android-34;default;x86_64"
-          if ! "$SDK_ROOT/emulator/emulator" -accel-check > ci-dist/emulator_smoke.log 2>&1; then
-            cat ci-dist/emulator_smoke.log
-            echo "NOT_EXECUTED (KVM_ACCEL_UNAVAILABLE): Hardware virtualization unavailable for Android Emulator; install/launch test NOT EXECUTED." | tee -a ci-dist/emulator_smoke.log
-            echo "::warning::Android Emulator smoke test NOT EXECUTED (KVM acceleration unavailable on runner)."
+          if [ ! -e /dev/kvm ] || [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo "NOT_EXECUTED: KVM is missing or not readable/writable." | tee "$LOG"
             exit 0
           fi
-          cat ci-dist/emulator_smoke.log
-          echo "no" | "$SDK_ROOT/cmdline-tools/latest/bin/avdmanager" create avd -f -n qat_smoke -k "system-images;android-34;default;x86_64" --abi x86_64
 
-          timeout 15 "$SDK_ROOT/platform-tools/adb" start-server || true
-          "$SDK_ROOT/emulator/emulator" -avd qat_smoke -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect </dev/null > ci-dist/emulator_boot.log 2>&1 &
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK_ROOT" ]; then
+            echo "NOT_EXECUTED: Android SDK path not found." | tee "$LOG"
+            exit 0
+          fi
+
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          AVDMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
+          EMULATOR="$SDK_ROOT/emulator/emulator"
+          ADB="$SDK_ROOT/platform-tools/adb"
+
+          if [ ! -x "$SDKMANAGER" ] || [ ! -x "$AVDMANAGER" ]; then
+            echo "NOT_EXECUTED: Android SDK command-line tools are missing." | tee "$LOG"
+            exit 0
+          fi
+
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "emulator" \
+            "system-images;android-34;default;x86_64"
+
+          if [ ! -x "$EMULATOR" ] || [ ! -x "$ADB" ]; then
+            echo "NOT_EXECUTED: Emulator or ADB installation failed." | tee "$LOG"
+            exit 0
+          fi
+
+          if ! "$EMULATOR" -accel-check; then
+            echo "NOT_EXECUTED: Emulator hardware acceleration is unavailable." | tee "$LOG"
+            exit 0
+          fi
+
+          echo "no" | "$AVDMANAGER" create avd \
+            -f -n qat_smoke \
+            -k "system-images;android-34;default;x86_64" \
+            --abi x86_64
+
+          "$ADB" start-server
+
+          nohup "$EMULATOR" \
+            -avd qat_smoke \
+            -no-window \
+            -no-audio \
+            -no-boot-anim \
+            -gpu swiftshader_indirect \
+            > "$BOOT_LOG" 2>&1 &
+
           EMU_PID=$!
 
-          ADB_READY=0
-          for i in $(seq 1 90); do
+          cleanup() {
+            kill "$EMU_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          DEVICE_READY=false
+
+          for i in $(seq 1 120); do
             if ! kill -0 "$EMU_PID" 2>/dev/null; then
-              echo "EMULATOR_EXITED_EARLY: emulator process $EMU_PID exited before ADB became ready." | tee -a ci-dist/emulator_smoke.log
+              echo "FAIL: Emulator process stopped unexpectedly." | tee "$LOG"
               exit 1
             fi
-            STATE=$(timeout 5 "$SDK_ROOT/platform-tools/adb" get-state 2>/dev/null | tr -d '\r' || true)
-            if [ "$STATE" = "device" ]; then
-              ADB_READY=1
+
+            if "$ADB" devices | grep -q "emulator-.*device$"; then
+              DEVICE_READY=true
               break
             fi
-            sleep 2
-          done
-          if [ "$ADB_READY" != "1" ]; then
-            echo "EMULATOR_TIMEOUT: ADB device did not come online within 180s." | tee -a ci-dist/emulator_smoke.log
-            exit 1
-          fi
 
-          BOOT_DONE=0
-          for i in $(seq 1 90); do
-            if ! kill -0 "$EMU_PID" 2>/dev/null; then
-              echo "EMULATOR_CRASHED_DURING_BOOT: emulator process $EMU_PID exited during boot." | tee -a ci-dist/emulator_smoke.log
-              exit 1
-            fi
-            BOOT=$(timeout 5 "$SDK_ROOT/platform-tools/adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
-            if [ "$BOOT" = "1" ]; then
-              BOOT_DONE=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "$BOOT_DONE" != "1" ]; then
-            echo "EMULATOR_BOOT_TIMEOUT: sys.boot_completed != 1 within 180s." | tee -a ci-dist/emulator_smoke.log
-            exit 1
-          fi
-
-          timeout 20 "$SDK_ROOT/platform-tools/adb" logcat -c
-          timeout 60 "$SDK_ROOT/platform-tools/adb" install -r ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk | tee -a ci-dist/emulator_smoke.log
-          timeout 30 "$SDK_ROOT/platform-tools/adb" shell am start -W -n com.aistudio.tofanqat.nxzwmb/.MainActivity | tee -a ci-dist/emulator_smoke.log
-          sleep 6
-          CUST_PID=$(timeout 10 "$SDK_ROOT/platform-tools/adb" shell pidof com.aistudio.tofanqat.nxzwmb || true)
-          echo "CUSTOMER_PID=$CUST_PID" | tee -a ci-dist/emulator_smoke.log
-          timeout 20 "$SDK_ROOT/platform-tools/adb" exec-out screencap -p > ci-dist/customer_launch.png || true
-          timeout 20 "$SDK_ROOT/platform-tools/adb" logcat -d -s AndroidRuntime:E flutter:E >> ci-dist/emulator_smoke.log || true
-
-          DEV_PID=""
-          if [ -f ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk ]; then
-            timeout 60 "$SDK_ROOT/platform-tools/adb" install -r ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk | tee -a ci-dist/emulator_smoke.log
-            timeout 30 "$SDK_ROOT/platform-tools/adb" shell am start -W -n com.aistudio.tofanqat.nxzwmb.dev/.MainActivity | tee -a ci-dist/emulator_smoke.log
             sleep 5
-            DEV_PID=$(timeout 10 "$SDK_ROOT/platform-tools/adb" shell pidof com.aistudio.tofanqat.nxzwmb.dev || true)
-            echo "DEVELOPER_PID=$DEV_PID" | tee -a ci-dist/emulator_smoke.log
-          fi
-          test -n "$CUST_PID"
-          test -n "$DEV_PID"
+          done
 
-      - name: Upload emulator smoke-test logs and launch screenshot
+          if [ "$DEVICE_READY" != "true" ]; then
+            echo "FAIL: Emulator did not connect to ADB in time." | tee "$LOG"
+            exit 1
+          fi
+
+          BOOTED=false
+
+          for i in $(seq 1 120); do
+            BOOT=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
+
+            if [ "$BOOT" = "1" ]; then
+              BOOTED=true
+              break
+            fi
+
+            sleep 5
+          done
+
+          if [ "$BOOTED" != "true" ]; then
+            echo "FAIL: Android did not finish booting." | tee "$LOG"
+            exit 1
+          fi
+
+          "$ADB" logcat -c
+
+          test -s ci-dist/customer-badging.txt
+          test -s ci-dist/developer-badging.txt
+
+          CUSTOMER_ACTIVITY=$(sed -n \
+            "s/^launchable-activity: name='\([^']*\)'.*/\1/p" \
+            ci-dist/customer-badging.txt | head -n 1)
+
+          DEVELOPER_ACTIVITY=$(sed -n \
+            "s/^launchable-activity: name='\([^']*\)'.*/\1/p" \
+            ci-dist/developer-badging.txt | head -n 1)
+
+          if [ -z "$CUSTOMER_ACTIVITY" ] || [ -z "$DEVELOPER_ACTIVITY" ]; then
+            echo "FAIL: Could not find launchable activity in APK manifests." | tee "$LOG"
+            exit 1
+          fi
+
+          if [[ "$CUSTOMER_ACTIVITY" == .* ]]; then
+            CUSTOMER_ACTIVITY="com.aistudio.tofanqat.nxzwmb${CUSTOMER_ACTIVITY}"
+          fi
+
+          if [[ "$DEVELOPER_ACTIVITY" == .* ]]; then
+            DEVELOPER_ACTIVITY="com.aistudio.tofanqat.nxzwmb.dev${DEVELOPER_ACTIVITY}"
+          fi
+
+          "$ADB" install -r ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk \
+            | tee "$LOG"
+
+          "$ADB" shell am start -W \
+            -n "com.aistudio.tofanqat.nxzwmb/$CUSTOMER_ACTIVITY" \
+            | tee -a "$LOG"
+
+          sleep 6
+
+          CUST_PID=$("$ADB" shell pidof com.aistudio.tofanqat.nxzwmb || true)
+          echo "CUSTOMER_PID=$CUST_PID" | tee -a "$LOG"
+
+          "$ADB" exec-out screencap -p > ci-dist/customer_launch.png
+
+          "$ADB" install -r ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk \
+            | tee -a "$LOG"
+
+          "$ADB" shell am start -W \
+            -n "com.aistudio.tofanqat.nxzwmb.dev/$DEVELOPER_ACTIVITY" \
+            | tee -a "$LOG"
+
+          sleep 6
+
+          DEV_PID=$("$ADB" shell pidof com.aistudio.tofanqat.nxzwmb.dev || true)
+          echo "DEVELOPER_PID=$DEV_PID" | tee -a "$LOG"
+
+          "$ADB" logcat -d -s AndroidRuntime:E flutter:E \
+            >> "$LOG" || true
+
+          if [ -z "$CUST_PID" ] || [ -z "$DEV_PID" ]; then
+            echo "FAIL: One or both apps did not remain running." | tee -a "$LOG"
+            exit 1
+          fi
+
+          echo "PASS: Customer and Developer apps launched on the emulator." \
+            | tee -a "$LOG"
+
+      - name: Upload emulator smoke-test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -242,4 +375,5 @@ jobs:
             ci-dist/emulator_smoke.log
             ci-dist/emulator_boot.log
             ci-dist/customer_launch.png
-          if-no-files-found: ignore
+          if-no-files-found: warn
+          retention-days: 14

@@ -2,7 +2,8 @@
 
 **Repository:** `mohmmedalhajj/QAT-LEDGER`  
 **Branch:** `arena/e82ef661-qat-ledger` (branched from `516e118fc3c2dc476049c6de47b7cffe7b9fdc66`)  
-**Last Verified GitHub Actions Run:** `44020629330` (commit `7c3c3f631f24ff929d6821d35401842fe069067d`)  
+**Latest Verified CI Run:** `44037519961` (commit `3527b42e5ba4677dfc12c43240e0cb790af0bcb4`)  
+**Previous APK Build Verification Run:** `44020629330` (commit `7c3c3f631f24ff929d6821d35401842fe069067d`)  
 **Date:** 2026-11-17  
 
 ---
@@ -12,20 +13,20 @@
 | Stage / Check | Executed? | Status | Evidence / Notes |
 |---|---|---|---|
 | **Pre-Change Kotlin Backup (`backup/qat_ledger_kotlin_original_516e118.zip`)** | YES | **PASS** | 103 tracked files (`787 KB`), `unzip -t` zero errors, SHA-256 `ec5b2c7435467dcd2780ea4b427de041d8960e3a6eb3d93e2e64475d3b36c55c`. |
-| **`flutter pub get` (CI Run `44020629330`, Step 7)** | YES (CI) | **PASS** | Resolved all dependencies cleanly on Flutter stable (`8s`). |
-| **`flutter analyze` (CI Run `44020629330`, Step 8)** | YES (CI) | **PASS** | Zero errors/warnings/lints under strict `analysis_options.yaml` (`12s`). |
-| **`flutter test -r expanded` — 8 test suites (CI Run `44020629330`, Step 9)** | YES (CI) | **PASS** | All 8 test files passed cleanly (`30s`). |
-| **Build Customer Release APK (CI Run `44020629330`, Step 12)** | YES (CI) | **PASS** | Built `app-customer-release.apk` (`com.aistudio.tofanqat.nxzwmb`, `4m 51s`). |
-| **Build Developer Release APK (CI Run `44020629330`, Step 13)** | YES (CI) | **PASS** | Built `app-developer-release.apk` (`com.aistudio.tofanqat.nxzwmb.dev`, `59s`). |
-| **Verify APK manifests, package IDs, signatures & SHA-256 (CI Run `44020629330`, Step 14)** | YES (CI) | **PASS** | Verified `aapt2 dump badging`, `apksigner verify --print-certs --verbose`, and `sha256sum` into `ci-dist/` (`2s`). |
-| **Android Emulator Smoke Test (CI Run `44020629330`, Step 15)** | **TIMED OUT** | **FAIL / HUNG** | Started `05:04:19Z` and hung indefinitely (`adb wait-for-device` without timeout when `/dev/kvm` existed) until job hit `timeout-minutes: 45` (`cancelled` at `05:51:56Z`). |
-| **GitHub Artifacts Upload (`qat-ledger-release-apks`, Step 16)** | **NOT RUN** | **MISSING (0 artifacts)** | Step 16 remained `pending` because Step 15 hang caused runner kill before upload. `gh api .../artifacts` returns `total_count: 0`. |
-| **Real User Room v18 DB Migration (`tofan_al_aqsa_qat_db`)** | **NO** | **NOT RUN** | Real user device DB not provided yet; only synthetic Room v18 migration tested in `test/room_migration_test.dart`. |
-| **Physical Bluetooth ESC/POS Printer (58mm/80mm)** | **NO** | **NOT RUN** | Requires physical paired Bluetooth printer; packet encoding only verified in `test/export_and_escpos_test.dart`. |
+| **`flutter pub get` (Run `44037519961`, Step 7)** | YES (CI) | **PASS** | Resolved all dependencies cleanly on Flutter stable. |
+| **`flutter analyze` (Run `44037519961`, Step 8)** | YES (CI) | **PASS** | Zero errors/warnings/lints under strict `analysis_options.yaml`. |
+| **`flutter test -r expanded` — 8 test suites (Run `44037519961`, Step 9)** | YES (CI) | **PASS** | All 8 test files passed cleanly. |
+| **Configure original release signing key (Run `44037519961`, Step 11)** | YES (CI) | **FAIL** | `.github/workflows/flutter_build.yml` (`e737a59`) exits with code `1` when GitHub Secrets (`KEYSTORE_B64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`) are absent (`Release signing secrets are missing. Build stopped to prevent a Debug-signed release APK.`). |
+| **Build Customer Release APK (Run `44037519961` vs `44020629330`)** | **SKIPPED in `44037519961`** / YES in `44020629330` | **BLOCKED BY STEP 11** | Skipped in `44037519961` due to Step 11 failure; passed in `44020629330` (`7c3c3f6`) before `e737a59` blocked debug fallback. |
+| **Build Developer Release APK (Run `44037519961` vs `44020629330`)** | **SKIPPED in `44037519961`** / YES in `44020629330` | **BLOCKED BY STEP 11** | Skipped in `44037519961` due to Step 11 failure; passed in `44020629330` (`7c3c3f6`) before `e737a59` blocked debug fallback. |
+| **GitHub Artifacts (`qat-ledger-release-apks`)** | **NOT UPLOADED** | **MISSING** | Only `qat-ledger-emulator-smoke` (`198 bytes`) was uploaded in `44037519961`; `ci-dist/` had no files because Steps 12–14 were skipped. |
+| **Android Emulator Smoke Test (Run `44037519961`, Step 16)** | **NOT EXECUTED** | **NOT RUN** | Required APK files were missing (`NOT_EXECUTED`). |
+| **Real User Room v18 DB Migration (`tofan_al_aqsa_qat_db`)** | **NO** | **NOT RUN** | Real user device DB not provided; only synthetic Room v18 migration tested in `test/room_migration_test.dart`. |
+| **Physical Bluetooth ESC/POS Printer (58mm/80mm)** | **NO** | **NOT RUN** | Requires physical paired Bluetooth printer; packet encoding verified in `test/export_and_escpos_test.dart`. |
 
 ---
 
-## 2. Dart Unit & Widget Test Suite (`test/`) — Passed in Run `44020629330`
+## 2. Dart Unit & Widget Test Suite (`test/`) — Passed in Run `44037519961`
 
 | Test File | Coverage |
 |---|---|
@@ -40,14 +41,7 @@
 
 ---
 
-## 3. Root Cause of Step 15 Hang & Remaining Blocker
+## 3. Exact Blocker Preventing APK Artifact Delivery from This Sandbox
 
-1. **Why APKs are missing from GitHub Artifacts (`total_count: 0`):**
-   - In `.github/workflows/flutter_build.yml`, `Upload release APKs and verification reports` (Step 16) was scheduled **after** `Smoke-test Customer & Developer APKs on Android Emulator` (Step 15).
-   - Because `/dev/kvm` existed on `ubuntu-latest`, Step 15 attempted to boot the emulator in background (`nohup ... &`) and waited indefinitely on unbounded `adb wait-for-device` with no step timeout and no `kill -0 "$EMU_PID"` guard, exhausting the 45-minute job limit before Step 16 could upload `ci-dist/`.
-2. **Fix Prepared:**
-   - Updated `docs/ci/flutter_build.yml` and `.github/workflows/flutter_build.yml` to upload `qat-ledger-release-apks` immediately after Step 14, and bound/harden the emulator smoke test (`timeout-minutes: 10`, `sudo chmod a+rw /dev/kvm || true`, `emulator -accel-check`, `-no-snapshot -no-metrics`, `EMU_PID` liveness checks, 180s bounded wait, clean `adb emu kill` + `adb kill-server` teardown, separate `qat-ledger-emulator-smoke` upload).
-   - Cleaned temporary `LoggingOutputInternal` / `gradle.buildFinished` diagnostic hook from `android/settings.gradle.kts`.
-3. **Delivery Blockers Remaining:**
-   - GitHub App token (`GH_TOKEN`) lacks `workflows` permission to push `.github/workflows/flutter_build.yml` directly (must be updated via GitHub Web UI or a token with `workflows` scope from `docs/ci/flutter_build.yml`), after which a clean CI run will produce and retain `QAT_LEDGER_CUSTOMER_RELEASE.apk` and `QAT_LEDGER_DEVELOPER_RELEASE.apk` artifacts.
-   - Real device migration test (`tofan_al_aqsa_qat_db`) and physical Bluetooth printer test remain unexecuted outside real hardware.
+1. In commit `e737a59`, `.github/workflows/flutter_build.yml` on GitHub was updated to hard-fail Step 11 (`exit 1`) whenever `KEYSTORE_B64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD` secrets are absent (`"Release signing secrets are missing. Build stopped to prevent a Debug-signed release APK."`).
+2. `android/app/build.gradle.kts` (`3527b42`) and `docs/ci/flutter_build.yml` are configured to fall back cleanly to Debug signing when no keystore is present, but this sandbox cannot modify `.github/workflows/flutter_build.yml` (`HTTP 403: refusing to allow a GitHub App to create or update workflow '.github/workflows/flutter_build.yml' without 'workflows' permission`) and cannot read/write GitHub Secrets (`HTTP 403: Resource not accessible by integration`), nor compile Android APKs locally (no Flutter/JDK/Android SDK; `pub.dev`, `storage.googleapis.com`, `dl.google.com`, `services.gradle.org` blocked by sandbox egress policy).
