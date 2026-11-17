@@ -26,7 +26,7 @@ class LocalLicenseStore {
 
     // Check if an upgraded legacy Kotlin install already had a `QAT-XXXX-XXXX-XXXX` install ID.
     try {
-      final legacy = await PlatformBridge.instance.collectLegacySources();
+      final legacy = await PlatformBridge.instance.getLegacyMigrationSources();
       final installPrefs = legacy.legacyPrefs['qat_license_install_prefs'];
       final legacyInstallId =
           (installPrefs?['installation_id'] ?? '').toString().trim().toUpperCase();
@@ -74,7 +74,7 @@ class LocalLicenseStore {
     final current = getStoredRawLicense();
     if (current != null && current.trim().isNotEmpty) return;
     try {
-      final legacy = await PlatformBridge.instance.collectLegacySources();
+      final legacy = await PlatformBridge.instance.getLegacyMigrationSources();
       if (legacy.legacyActiveLicenseDoc.trim().isNotEmpty) {
         await saveRawLicense(legacy.legacyActiveLicenseDoc);
         return;
