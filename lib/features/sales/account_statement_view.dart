@@ -110,6 +110,7 @@ class _AccountStatementViewState extends State<AccountStatementView> {
                   key: ValueKey<String>('stmt_party_${_isCustomer}_$_partyId'),
                   initialValue:
                       partyList.any((e) => e.id == _partyId) ? _partyId : null,
+                  isExpanded: true,
                   decoration: InputDecoration(
                     labelText: _isCustomer ? 'اختر العميل' : 'اختر المورد',
                   ),

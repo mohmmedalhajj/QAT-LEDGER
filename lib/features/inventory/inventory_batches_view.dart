@@ -66,6 +66,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                 if (existing == null && ctrl.qatTypes.isNotEmpty)
                   DropdownButtonFormField<String>(
                     initialValue: null,
+                    isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'اختيار من الأصناف المعرفة',
                     ),

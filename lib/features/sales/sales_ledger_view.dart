@@ -183,6 +183,7 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
                   initialValue: ctrl.customers.any((c) => c.id == custId)
                       ? custId
                       : null,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'العميل'),
                   items: [
                     const DropdownMenuItem<int?>(

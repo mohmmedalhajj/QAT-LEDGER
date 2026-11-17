@@ -53,6 +53,7 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
                       'exp_acc_${selectedAcc?.id ?? 'none'}',
                     ),
                     initialValue: selectedAcc?.id,
+                    isExpanded: true,
                     decoration:
                         const InputDecoration(labelText: 'حساب / بند المصروف'),
                     items: activeAccounts

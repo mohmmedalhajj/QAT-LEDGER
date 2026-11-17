@@ -172,6 +172,7 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                   key: ValueKey<String>('plan_${_plans.length}_$_selectedPlan'),
                   initialValue:
                       _plans.any((p) => p['code'] == _selectedPlan) ? _selectedPlan : null,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'الباقة'),
                   items: _plans
                       .map((pl) => DropdownMenuItem<String>(

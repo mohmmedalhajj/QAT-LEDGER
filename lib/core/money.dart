@@ -310,6 +310,10 @@ String normalizeDigits(String input) {
       sb.write('.');
       continue;
     }
+    if (ch == '٬') {
+      sb.write(',');
+      continue;
+    }
     sb.write(ch);
   }
   return sb.toString();

@@ -72,6 +72,7 @@ class _TransfersLedgerViewState extends State<TransfersLedgerView> {
                       ctrl.recipients.any((r) => r.id == selectedRecipientId)
                           ? selectedRecipientId
                           : null,
+                  isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'المستلم المسجل (اختياري)',
                   ),

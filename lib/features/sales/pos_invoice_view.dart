@@ -378,6 +378,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                   initialValue: ctrl.customers.any((c) => c.id == _customerId)
                       ? _customerId
                       : null,
+                  isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'العميل',
                     prefixIcon: Icon(Icons.person_outline),
@@ -422,6 +423,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                       availableBatches.any((b) => b.id == _selectedBatchId)
                           ? _selectedBatchId
                           : null,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'دفعة المخزون'),
                   items: [
                     const DropdownMenuItem<int?>(

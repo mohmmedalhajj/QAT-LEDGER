@@ -373,7 +373,7 @@ class AccountingNumberField extends StatelessWidget {
       style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]),
       inputFormatters: [
         FilteringTextInputFormatter.allow(
-          RegExp(allowDecimal ? r'[0-9٠-٩۰-۹.,٫]' : r'[0-9٠-٩۰-۹]'),
+          RegExp(allowDecimal ? r'[0-9٠-٩۰-۹.,٫٬]' : r'[0-9٠-٩۰-۹]'),
         ),
       ],
       decoration: InputDecoration(

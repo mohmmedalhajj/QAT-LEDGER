@@ -221,6 +221,7 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
                 if (ctrl.qatTypes.isNotEmpty) ...[
                   DropdownButtonFormField<String>(
                     initialValue: null,
+                    isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'اختيار من دليل الأصناف (اختياري)',
                     ),
