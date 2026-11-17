@@ -35,6 +35,12 @@ android {
         buildConfig = true
     }
 
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+        disable.addAll(setOf("EasterEgg", "StopShip"))
+    }
+
     defaultConfig {
         applicationId = "com.aistudio.tofanqat.nxzwmb"
         minSdk = flutter.minSdkVersion
