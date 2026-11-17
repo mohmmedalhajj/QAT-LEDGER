@@ -108,6 +108,121 @@ class DashboardTab extends StatelessWidget {
       );
     }
 
+    Future<void> openSupplierCommitmentsDialog() async {
+      final sb = StringBuffer()
+        ..writeln(ctrl.settings.agencyName)
+        ..writeln('تقرير التزامات وأرصدة الموردين')
+        ..writeln('التاريخ: ${QatDateUtils.todayIso()}')
+        ..writeln('--------------------------------');
+      for (final s in ctrl.suppliers) {
+        final yer = s.balanceFor(CurrencyCode.yer);
+        final sar = s.balanceFor(CurrencyCode.sar);
+        if (yer == 0 && sar == 0) continue;
+        sb.writeln('• ${s.name}:');
+        if (yer != 0) {
+          sb.writeln('  - يمني: ${Money(yer, CurrencyCode.yer).format()}');
+        }
+        if (sar != 0) {
+          sb.writeln('  - سعودي: ${Money(sar, CurrencyCode.sar).format()}');
+        }
+      }
+      final reportText = sb.toString().trim();
+
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('التزامات وأرصدة الموردين'),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (ctrl.suppliers.isEmpty)
+                    const Text('لا يوجد موردون مسجلون حالياً.')
+                  else
+                    for (final s in ctrl.suppliers)
+                      Builder(
+                        builder: (cCtx) {
+                          final yer = s.balanceFor(CurrencyCode.yer);
+                          final sar = s.balanceFor(CurrencyCode.sar);
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    s.name,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      'YER: ${Money(yer, CurrencyCode.yer).format()}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: yer > 0
+                                            ? cCtx.pal.warning
+                                            : cCtx.pal.success,
+                                        fontFeatures: const [
+                                          FontFeature.tabularFigures(),
+                                        ],
+                                      ),
+                                    ),
+                                    if (sar != 0 ||
+                                        policy.canSwitchCurrency)
+                                      Text(
+                                        'SAR: ${Money(sar, CurrencyCode.sar).format()}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: sar > 0
+                                              ? cCtx.pal.warning
+                                              : cCtx.pal.success,
+                                          fontFeatures: const [
+                                            FontFeature.tabularFigures(),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إغلاق'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await showReceiptPreviewPrintSheet(
+                  context,
+                  agency: ctrl.settings,
+                  title: 'تقرير التزامات الموردين',
+                  receiptText: reportText,
+                );
+              },
+              icon: const Icon(Icons.print_outlined, size: 17),
+              label: const Text('حراري / مشاركة'),
+            ),
+          ],
+        ),
+      );
+    }
+
     return RefreshIndicator(
       onRefresh: ctrl.reloadAll,
       child: ListView(
@@ -275,6 +390,12 @@ class DashboardTab extends StatelessWidget {
                 label: 'جرد المخزون',
                 color: pal.info,
                 onTap: () => ctrl.navigateToRoute(AppScreenRoute.inventory),
+              ),
+              _QuickActionTile(
+                icon: Icons.handshake_outlined,
+                label: 'التزامات الموردين',
+                color: pal.accent,
+                onTap: openSupplierCommitmentsDialog,
               ),
             ],
           ),

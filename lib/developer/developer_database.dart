@@ -21,8 +21,8 @@ class DeveloperDatabaseService {
       dbPath,
       options: OpenDatabaseOptions(
         version: 2,
-        onCreate: (db, _) async => _createSchema(db),
-        onUpgrade: (db, _, _) async => _createSchema(db),
+        onCreate: (db, version) async => _createSchema(db),
+        onUpgrade: (db, oldVersion, newVersion) async => _createSchema(db),
         onOpen: (db) async => _ensureColumns(db),
       ),
     );

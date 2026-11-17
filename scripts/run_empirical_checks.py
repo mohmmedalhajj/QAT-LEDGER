@@ -275,6 +275,9 @@ def test_assets_and_dart_structure():
         assert "tofan_backups" not in src
         assert "150.0" not in src
         assert not re.search(r"\b_{2,}\b", src), f"Unnecessary multiple underscores in {df}"
+        assert not re.search(r"\([^)]*\b_\b[^)]*\b_\b[^)]*\)", src), (
+            f"Duplicate '_' parameter fails Dart 3.4 language version in {df}"
+        )
 
     with open(os.path.join(ROOT, "lib/data/models.dart"), "r", encoding="utf-8") as mf:
         models_src = mf.read()

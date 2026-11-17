@@ -155,8 +155,20 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
                       ),
                       subtitle:
                           Text('${r.dateIso} • ${r.paymentMethod} ${r.notes}'),
-                      trailing: ctrl.canDeleteCurrent
-                          ? IconButton(
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: 'تعديل السند',
+                            icon: const Icon(Icons.edit_outlined, size: 18),
+                            onPressed: () async {
+                              await _openEditPaymentDialog(ctrl, customer, r);
+                              if (ctx.mounted) Navigator.pop(ctx);
+                            },
+                          ),
+                          if (ctrl.canDeleteCurrent)
+                            IconButton(
+                              tooltip: 'حذف السند',
                               icon: const Icon(Icons.delete_outline, size: 18),
                               onPressed: () async {
                                 final ok = await showErpConfirmDialog(
@@ -172,8 +184,9 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
                                 await ctrl.reloadAll();
                                 if (ctx.mounted) Navigator.pop(ctx);
                               },
-                            )
-                          : null,
+                            ),
+                        ],
+                      ),
                     );
                   },
                 ),
@@ -184,6 +197,189 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
             child: const Text('إغلاق'),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _openEditPaymentDialog(
+    AppController ctrl,
+    Customer customer,
+    CustomerPayment payment,
+  ) async {
+    final amountCtrl = TextEditingController(
+      text: Money.formatMinor(payment.amountMinor, showZeroDecimals: false)
+          .replaceAll(',', ''),
+    );
+    final notesCtrl = TextEditingController(text: payment.notes);
+    CurrencyCode selectedCur = payment.currency;
+    String paymentMethod =
+        payment.paymentMethod.isNotEmpty ? payment.paymentMethod : 'نقدي';
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [amountCtrl, notesCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text('تعديل سند قبض — ${customer.name}'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  CurrencySelectorRow(
+                    policy: ctrl.currencyPolicy,
+                    selected: selectedCur,
+                    onChanged: (c) => setModalState(() => selectedCur = c),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    children: [
+                      for (final m in const ['نقدي', 'تحويل', 'إيداع'])
+                        ChoiceChip(
+                          label: Text(m),
+                          selected: paymentMethod == m,
+                          onSelected: (_) =>
+                              setModalState(() => paymentMethod = m),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  AccountingNumberField(
+                    controller: amountCtrl,
+                    label: 'المبلغ (${selectedCur.shortSymbol})',
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: notesCtrl,
+                    decoration: const InputDecoration(labelText: 'ملاحظات'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final minor = Money.parseMinorUnits(amountCtrl.text);
+                  if (minor <= 0) return;
+                  await ctrl.repo.updateCustomerPayment(
+                    paymentId: payment.id,
+                    amountMinor: minor,
+                    currency: selectedCur,
+                    paymentMethod: paymentMethod,
+                    notes: notesCtrl.text,
+                  );
+                  await ctrl.reloadAll();
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                child: const Text('حفظ التعديل'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openDirectDebtDialog(
+    AppController ctrl,
+    Customer customer,
+  ) async {
+    final amountCtrl = TextEditingController();
+    final statementCtrl = TextEditingController(text: 'دين مباشر');
+    final refCtrl = TextEditingController();
+    final notesCtrl = TextEditingController();
+    CurrencyCode selectedCur = ctrl.currencyPolicy.defaultCurrency;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [amountCtrl, statementCtrl, refCtrl, notesCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text('تسجيل دين مباشر — ${customer.name}'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ErpDetailRow(
+                    label: 'الدين القائم حالياً',
+                    value: Money(customer.balanceFor(selectedCur), selectedCur)
+                        .format(),
+                    valueColor: customer.balanceFor(selectedCur) > 0
+                        ? ctx.pal.danger
+                        : ctx.pal.success,
+                  ),
+                  const SizedBox(height: 8),
+                  CurrencySelectorRow(
+                    policy: ctrl.currencyPolicy,
+                    selected: selectedCur,
+                    onChanged: (c) => setModalState(() => selectedCur = c),
+                  ),
+                  const SizedBox(height: 10),
+                  AccountingNumberField(
+                    controller: amountCtrl,
+                    label: 'مبلغ الدين (${selectedCur.shortSymbol}) *',
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: statementCtrl,
+                    decoration: const InputDecoration(labelText: 'البيان / السبب'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: refCtrl,
+                    textDirection: TextDirection.ltr,
+                    decoration:
+                        const InputDecoration(labelText: 'رقم مرجعي (اختياري)'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: notesCtrl,
+                    decoration: const InputDecoration(labelText: 'ملاحظات'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final minor = Money.parseMinorUnits(amountCtrl.text);
+                  if (minor <= 0) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      const SnackBar(
+                        content: Text('أدخل مبلغ دين أكبر من الصفر'),
+                      ),
+                    );
+                    return;
+                  }
+                  await ctrl.repo.addDirectCustomerDebt(
+                    customerId: customer.id,
+                    customerName: customer.name,
+                    amountMinor: minor,
+                    currency: selectedCur,
+                    statement: statementCtrl.text,
+                    referenceNumber: refCtrl.text,
+                    notes: notesCtrl.text,
+                  );
+                  await ctrl.reloadAll();
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                child: const Text('اعتماد الدين'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -583,6 +779,15 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
                                       size: 16,
                                     ),
                                     label: const Text('سند قبض'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _openDirectDebtDialog(ctrl, c),
+                                    icon: const Icon(
+                                      Icons.post_add_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('دين مباشر'),
                                   ),
                                   OutlinedButton.icon(
                                     onPressed: () =>

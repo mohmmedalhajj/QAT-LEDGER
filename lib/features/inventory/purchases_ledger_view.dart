@@ -190,7 +190,19 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
           .replaceAll(',', ''),
     );
     final notesCtrl = TextEditingController(text: p.notes);
+    final bankCtrl = TextEditingController(text: p.bankName);
+    final transferNoCtrl = TextEditingController(text: p.transferNumber);
+    final demarAmountCtrl = TextEditingController(
+      text: p.demarMinor > 0
+          ? Money.formatMinor(p.demarMinor, showZeroDecimals: false)
+              .replaceAll(',', '')
+          : '0',
+    );
+    final demarTypeCtrl = TextEditingController(text: p.demarType);
+    final demarNoCtrl = TextEditingController(text: p.demarNumber);
     PaymentType pType = p.paymentType;
+    String paymentMethod =
+        p.paymentMethod.isNotEmpty ? p.paymentMethod : 'نقداً';
 
     await showDialog<void>(
       context: context,
@@ -202,6 +214,11 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
           sellCtrl,
           discCtrl,
           paidCtrl,
+          bankCtrl,
+          transferNoCtrl,
+          demarAmountCtrl,
+          demarTypeCtrl,
+          demarNoCtrl,
           notesCtrl,
         ],
         child: StatefulBuilder(
@@ -271,13 +288,79 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
                   onSelectionChanged: (s) =>
                       setModalState(() => pType = s.first),
                 ),
-                if (pType == PaymentType.partial) ...[
+                if (pType != PaymentType.credit) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    children: [
+                      for (final m in const ['نقداً', 'تحويل', 'إيداع'])
+                        ChoiceChip(
+                          label: Text(m),
+                          selected: paymentMethod == m,
+                          onSelected: (_) =>
+                              setModalState(() => paymentMethod = m),
+                        ),
+                    ],
+                  ),
+                ],
+                if (pType == PaymentType.partial || pType == PaymentType.paid) ...[
                   const SizedBox(height: 8),
                   AccountingNumberField(
                     controller: paidCtrl,
                     label: 'المدفوع',
                   ),
                 ],
+                if (pType != PaymentType.credit && paymentMethod != 'نقداً') ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: bankCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'البنك / الصرافة',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: transferNoCtrl,
+                          textDirection: TextDirection.ltr,
+                          decoration: const InputDecoration(
+                            labelText: 'رقم الحوالة',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 8),
+                AccountingNumberField(
+                  controller: demarAmountCtrl,
+                  label: 'مبلغ الدمار (اختياري)',
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: demarTypeCtrl,
+                        decoration:
+                            const InputDecoration(labelText: 'نوع الدمار'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: demarNoCtrl,
+                        textDirection: TextDirection.ltr,
+                        decoration:
+                            const InputDecoration(labelText: 'رقم الدمار'),
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: notesCtrl,
@@ -326,6 +409,13 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
                   discountMinor: Money.parseMinorUnits(discCtrl.text),
                   paymentType: pType,
                   paidAmountMinor: Money.parseMinorUnits(paidCtrl.text),
+                  paymentMethod:
+                      pType == PaymentType.credit ? 'آجل' : paymentMethod,
+                  bankName: bankCtrl.text,
+                  transferNumber: transferNoCtrl.text,
+                  demarMinor: Money.parseMinorUnits(demarAmountCtrl.text),
+                  demarType: demarTypeCtrl.text,
+                  demarNumber: demarNoCtrl.text,
                   notes: notesCtrl.text,
                 );
                 await ctrl.reloadAll();

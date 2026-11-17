@@ -293,6 +293,47 @@ void main() {
       await repo.deletePermanently('expenses', expId);
       expect(await repo.getExpenses(includeArchived: true), isEmpty);
 
+      // 7. Direct customer debt, customer payment edit, supplier return, tax outflows & transfer update
+      final directDebtSaleId = await repo.addDirectCustomerDebt(
+        customerId: custId,
+        customerName: 'عميل عدن',
+        amountMinor: 50000,
+        currency: CurrencyCode.yer,
+        statement: 'دين مباشر للاختبار',
+      );
+      expect(directDebtSaleId, greaterThan(0));
+      expect((await repo.getCustomers()).single.balanceFor(CurrencyCode.yer), 300000);
+
+      final custPays = await repo.getCustomerPayments(customerId: custId);
+      await repo.updateCustomerPayment(
+        paymentId: custPays.single.id,
+        amountMinor: 150000,
+        currency: CurrencyCode.yer,
+        paymentMethod: 'تحويل',
+      );
+      expect((await repo.getCustomers()).single.balanceFor(CurrencyCode.yer), 250000);
+
+      await repo.addSupplierReturn(
+        supplierId: supId,
+        supplierName: 'مورد صنعاء',
+        amountMinor: 200000,
+        currency: CurrencyCode.yer,
+      );
+      expect((await repo.getSuppliers()).single.balanceFor(CurrencyCode.yer), 1500000);
+
+      final taxList = await repo.getTaxEntries();
+      await repo.updateTaxEntry(
+        id: taxList.single.id,
+        taxAmountMinor: 55000,
+        stallOutflowMinor: 10000,
+        laborOutflowMinor: 15000,
+      );
+      final updatedTax = (await repo.getTaxEntries()).single;
+      expect(updatedTax.totalOutflowMinor, 80000);
+
+      await repo.setTransferRecipientActive(recId, false);
+      expect((await repo.getTransferRecipients()).single.isActive, false);
+
       await dbService.close();
     } finally {
       await tempDir.delete(recursive: true);
