@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../licensing/license_canonical.dart';
 import '../licensing/license_models.dart';
@@ -670,92 +671,126 @@ class DeveloperLicenseSigner {
 
   Future<bool> importRegistryBackupJson(String jsonText) async {
     try {
-      final root = jsonDecode(jsonText) as Map<String, dynamic>;
+      final Object? rawRoot = jsonDecode(jsonText);
+      if (rawRoot is! Map<Object?, Object?>) return false;
+      final root = rawRoot.map<String, Object?>(
+        (k, v) => MapEntry<String, Object?>(k.toString(), v),
+      );
       if (root['format'] != backupFormat) return false;
       final db = await devDb.database;
 
       await db.transaction<void>((txn) async {
-        for (final p in (root['prices'] as List<dynamic>? ?? const [])) {
-          final m = p as Map<String, dynamic>;
-          await txn.insert(
-            'dev_package_prices',
-            {
-              'package_code': m['packageCode'],
-              'currency': m['currency'] ?? 'ريال يمني',
-              'perpetual_price': m['perpetualPrice'],
-              'monthly_price': m['monthlyPrice'],
-              'quarterly_price': m['quarterlyPrice'],
-              'yearly_price': m['yearlyPrice'],
-              'updated_at_ms': m['updatedAt'] ?? DateTime.now().millisecondsSinceEpoch,
-            },
-            conflictAlgorithm: ConflictAlgorithm.replace,
-          );
+        final rawPrices = root['prices'];
+        if (rawPrices is List<Object?>) {
+          for (final p in rawPrices) {
+            if (p is! Map<Object?, Object?>) continue;
+            final m = p.map<String, Object?>(
+              (k, v) => MapEntry<String, Object?>(k.toString(), v),
+            );
+            await txn.insert(
+              'dev_package_prices',
+              {
+                'package_code': m['packageCode'],
+                'currency': m['currency'] ?? 'ريال يمني',
+                'perpetual_price': m['perpetualPrice'],
+                'monthly_price': m['monthlyPrice'],
+                'quarterly_price': m['quarterlyPrice'],
+                'yearly_price': m['yearlyPrice'],
+                'updated_at_ms':
+                    m['updatedAt'] ?? DateTime.now().millisecondsSinceEpoch,
+              },
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
+          }
         }
-        for (final c in (root['customers'] as List<dynamic>? ?? const [])) {
-          final m = c as Map<String, dynamic>;
-          await txn.insert(
-            'dev_customers',
-            {
-              'id': m['id'],
-              'full_name': m['ownerName'] ?? '',
-              'business_name': m['agencyName'] ?? '',
-              'phone': m['phone'] ?? '',
-              'city': m['city'] ?? '',
-              'notes': m['notes'] ?? '',
-              'created_at_ms': m['createdAt'] ?? DateTime.now().millisecondsSinceEpoch,
-              'updated_at_ms': m['updatedAt'] ?? DateTime.now().millisecondsSinceEpoch,
-            },
-            conflictAlgorithm: ConflictAlgorithm.replace,
-          );
+        final rawCustomers = root['customers'];
+        if (rawCustomers is List<Object?>) {
+          for (final c in rawCustomers) {
+            if (c is! Map<Object?, Object?>) continue;
+            final m = c.map<String, Object?>(
+              (k, v) => MapEntry<String, Object?>(k.toString(), v),
+            );
+            await txn.insert(
+              'dev_customers',
+              {
+                'id': m['id'],
+                'full_name': m['ownerName'] ?? '',
+                'business_name': m['agencyName'] ?? '',
+                'phone': m['phone'] ?? '',
+                'city': m['city'] ?? '',
+                'notes': m['notes'] ?? '',
+                'created_at_ms':
+                    m['createdAt'] ?? DateTime.now().millisecondsSinceEpoch,
+                'updated_at_ms':
+                    m['updatedAt'] ?? DateTime.now().millisecondsSinceEpoch,
+              },
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
+          }
         }
-        for (final l in (root['licenses'] as List<dynamic>? ?? const [])) {
-          final m = l as Map<String, dynamic>;
-          final exp = m['expiresAtEpochMs'];
-          await txn.insert(
-            'issued_licenses',
-            {
-              'license_id': m['licenseId'],
-              'plan_code': '${m['packageCode']}_${m['licenseType']}',
-              'package_code': m['packageCode'] ?? 'PRO',
-              'license_type': m['licenseType'] ?? 'PERPETUAL',
-              'duration_days': m['durationDays'],
-              'customer_id': m['customerId'],
-              'installation_id': m['installationId'] ?? '*',
-              'licensee_name': m['ownerNameSnapshot'] ?? '',
-              'business_name': m['agencyNameSnapshot'] ?? '',
-              'phone_snapshot': m['phoneSnapshot'] ?? '',
-              'issued_at_ms': m['issuedAtEpochMs'],
-              'expires_at_ms': exp ?? 0,
-              'max_devices': 1,
-              'features_csv': m['featuresCsv'] ?? '',
-              'token_compact': m['compactToken'] ?? '',
-              'qlic_json': m['qlicJson'] ?? '',
-              'key_id': m['keyId'] ?? '',
-              'status': m['status'] ?? 'ACTIVE',
-              'price_charged': m['priceCharged'],
-              'price_currency': m['priceCurrency'] ?? 'ريال يمني',
-              'paid_amount': m['paidAmount'],
-              'payment_status': m['paymentStatus'] ?? 'UNPAID',
-              'payment_confirmed_at_ms': m['paymentConfirmedAt'],
-              'notes': m['notes'] ?? '',
-              'created_at_ms': m['createdAt'] ?? DateTime.now().millisecondsSinceEpoch,
-              'updated_at_ms': m['updatedAt'] ?? DateTime.now().millisecondsSinceEpoch,
-            },
-            conflictAlgorithm: ConflictAlgorithm.replace,
-          );
+        final rawLicenses = root['licenses'];
+        if (rawLicenses is List<Object?>) {
+          for (final l in rawLicenses) {
+            if (l is! Map<Object?, Object?>) continue;
+            final m = l.map<String, Object?>(
+              (k, v) => MapEntry<String, Object?>(k.toString(), v),
+            );
+            final exp = m['expiresAtEpochMs'];
+            await txn.insert(
+              'issued_licenses',
+              {
+                'license_id': m['licenseId'],
+                'plan_code': '${m['packageCode']}_${m['licenseType']}',
+                'package_code': m['packageCode'] ?? 'PRO',
+                'license_type': m['licenseType'] ?? 'PERPETUAL',
+                'duration_days': m['durationDays'],
+                'customer_id': m['customerId'],
+                'installation_id': m['installationId'] ?? '*',
+                'licensee_name': m['ownerNameSnapshot'] ?? '',
+                'business_name': m['agencyNameSnapshot'] ?? '',
+                'phone_snapshot': m['phoneSnapshot'] ?? '',
+                'issued_at_ms': m['issuedAtEpochMs'],
+                'expires_at_ms': exp ?? 0,
+                'max_devices': 1,
+                'features_csv': m['featuresCsv'] ?? '',
+                'token_compact': m['compactToken'] ?? '',
+                'qlic_json': m['qlicJson'] ?? '',
+                'key_id': m['keyId'] ?? '',
+                'status': m['status'] ?? 'ACTIVE',
+                'price_charged': m['priceCharged'],
+                'price_currency': m['priceCurrency'] ?? 'ريال يمني',
+                'paid_amount': m['paidAmount'],
+                'payment_status': m['paymentStatus'] ?? 'UNPAID',
+                'payment_confirmed_at_ms': m['paymentConfirmedAt'],
+                'notes': m['notes'] ?? '',
+                'created_at_ms':
+                    m['createdAt'] ?? DateTime.now().millisecondsSinceEpoch,
+                'updated_at_ms':
+                    m['updatedAt'] ?? DateTime.now().millisecondsSinceEpoch,
+              },
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
+          }
         }
-        for (final a in (root['audits'] as List<dynamic>? ?? const [])) {
-          final m = a as Map<String, dynamic>;
-          await txn.insert('developer_audit_logs', {
-            'action': m['actionType'] ?? 'AUDIT',
-            'actor': 'developer',
-            'target_id': m['licenseId'] ?? '',
-            'details': m['detailsArabic'] ?? '',
-            'prev_installation_id': m['previousInstallationId'],
-            'new_installation_id': m['newInstallationId'],
-            'reason': m['reason'],
-            'created_at_ms': m['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
-          });
+        final rawAudits = root['audits'];
+        if (rawAudits is List<Object?>) {
+          for (final a in rawAudits) {
+            if (a is! Map<Object?, Object?>) continue;
+            final m = a.map<String, Object?>(
+              (k, v) => MapEntry<String, Object?>(k.toString(), v),
+            );
+            await txn.insert('developer_audit_logs', {
+              'action': m['actionType'] ?? 'AUDIT',
+              'actor': 'developer',
+              'target_id': m['licenseId'] ?? '',
+              'details': m['detailsArabic'] ?? '',
+              'prev_installation_id': m['previousInstallationId'],
+              'new_installation_id': m['newInstallationId'],
+              'reason': m['reason'],
+              'created_at_ms':
+                  m['timestamp'] ?? DateTime.now().millisecondsSinceEpoch,
+            });
+          }
         }
         await txn.insert('developer_audit_logs', {
           'action': 'BACKUP_RESTORED',
@@ -788,7 +823,10 @@ class DeveloperLicenseSigner {
   String _generateLicenseId(PackageTier tier) {
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
     final rng = Random.secure();
-    final suffix = List.generate(6, (_) => chars[rng.nextInt(chars.length)]).join();
+    final suffix = List<String>.generate(
+      6,
+      (_) => chars[rng.nextInt(chars.length)],
+    ).join();
     final prefix = tier == PackageTier.pro ? 'QLP' : 'QLB';
     return '$prefix-$suffix';
   }

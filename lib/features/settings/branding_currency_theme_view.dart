@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 
 import '../../core/money.dart';
 import '../../core/theme.dart';
-import '../../data/models.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/erp_components.dart';
@@ -24,9 +23,11 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
   late TextEditingController _displayAppCtrl;
   late TextEditingController _ownerCtrl;
   late TextEditingController _phoneCtrl;
+  late TextEditingController _extraContactCtrl;
   late TextEditingController _addrCtrl;
   late TextEditingController _taglineCtrl;
   late TextEditingController _commercialCtrl;
+  late TextEditingController _qatTypesRawCtrl;
   late TextEditingController _headerTextCtrl;
   late TextEditingController _footerCtrl;
   late TextEditingController _rateCtrl;
@@ -48,9 +49,11 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
     _displayAppCtrl = TextEditingController(text: s.appDisplayName);
     _ownerCtrl = TextEditingController(text: s.ownerName);
     _phoneCtrl = TextEditingController(text: s.agencyPhone);
+    _extraContactCtrl = TextEditingController(text: s.additionalContact);
     _addrCtrl = TextEditingController(text: s.agencyAddress);
     _taglineCtrl = TextEditingController(text: s.tagline);
     _commercialCtrl = TextEditingController(text: s.commercialDetails);
+    _qatTypesRawCtrl = TextEditingController(text: s.qatTypesRaw);
     _headerTextCtrl = TextEditingController(text: s.headerText);
     _footerCtrl = TextEditingController(text: s.footerNote);
     _rateCtrl = TextEditingController(
@@ -74,9 +77,11 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
     _displayAppCtrl.dispose();
     _ownerCtrl.dispose();
     _phoneCtrl.dispose();
+    _extraContactCtrl.dispose();
     _addrCtrl.dispose();
     _taglineCtrl.dispose();
     _commercialCtrl.dispose();
+    _qatTypesRawCtrl.dispose();
     _headerTextCtrl.dispose();
     _footerCtrl.dispose();
     _rateCtrl.dispose();
@@ -98,9 +103,11 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
         appDisplayName: _displayAppCtrl.text.trim(),
         ownerName: _ownerCtrl.text.trim(),
         agencyPhone: _phoneCtrl.text.trim(),
+        additionalContact: _extraContactCtrl.text.trim(),
         agencyAddress: _addrCtrl.text.trim(),
         tagline: _taglineCtrl.text.trim(),
         commercialDetails: _commercialCtrl.text.trim(),
+        qatTypesRaw: _qatTypesRawCtrl.text.trim(),
         headerText: _headerTextCtrl.text.trim(),
         footerNote: _footerCtrl.text.trim(),
         logoPath: _logoPath,
@@ -370,6 +377,15 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
                 ),
                 const SizedBox(height: 8),
                 TextField(
+                  controller: _extraContactCtrl,
+                  enabled: canEdit,
+                  textDirection: TextDirection.ltr,
+                  decoration: const InputDecoration(
+                    labelText: 'رقم إضافي / واتساب / بريد (اختياري)',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
                   controller: _addrCtrl,
                   enabled: canEdit,
                   decoration: const InputDecoration(labelText: 'العنوان'),
@@ -386,6 +402,14 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
                   enabled: canEdit,
                   decoration: const InputDecoration(
                     labelText: 'السجل التجاري / بيانات مرجعية',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _qatTypesRawCtrl,
+                  enabled: canEdit,
+                  decoration: const InputDecoration(
+                    labelText: 'الأصناف الافتراضية للوكالة (مفصولة بفاصلة)',
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -428,6 +452,42 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
                   icon: const Icon(Icons.save_outlined),
                   label: const Text('حفظ التعديلات'),
                 ),
+                if (canEdit) ...[
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final ok = await showErpConfirmDialog(
+                        context,
+                        title: 'إعادة تعيين الهوية الافتراضية',
+                        message:
+                            'سيتم إعادة تعيين الاسم والشعار والألوان الافتراضية للوكالة دون المساس بالدفاتر المالية.',
+                        confirmLabel: 'إعادة التعيين',
+                        destructive: true,
+                      );
+                      if (!ok || !mounted) return;
+                      await ctrl.resetBrandingToDefaults();
+                      if (!mounted) return;
+                      final next = ctrl.settings;
+                      setState(() {
+                        _nameCtrl.text = next.agencyName;
+                        _displayAppCtrl.text = next.appDisplayName;
+                        _ownerCtrl.text = next.ownerName;
+                        _phoneCtrl.text = next.agencyPhone;
+                        _extraContactCtrl.text = next.additionalContact;
+                        _addrCtrl.text = next.agencyAddress;
+                        _taglineCtrl.text = next.tagline;
+                        _commercialCtrl.text = next.commercialDetails;
+                        _qatTypesRawCtrl.text = next.qatTypesRaw;
+                        _headerTextCtrl.text = next.headerText;
+                        _footerCtrl.text = next.footerNote;
+                        _logoPath = next.logoPath;
+                        _paletteId = next.paletteId;
+                      });
+                    },
+                    icon: const Icon(Icons.restart_alt),
+                    label: const Text('إعادة تعيين الهوية الافتراضية'),
+                  ),
+                ],
               ],
             ),
           ),

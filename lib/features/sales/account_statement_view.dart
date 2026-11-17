@@ -4,12 +4,14 @@ import 'package:material_ui/material_ui.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/date_utils.dart';
 import '../../core/money.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../services/pdf_export_service.dart';
 import '../../services/whatsapp_share_service.dart';
 import '../../state/app_controller.dart';
+import '../transfers/recipients_reports_view.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/erp_components.dart';
 
@@ -30,6 +32,9 @@ class AccountStatementView extends StatefulWidget {
 class _AccountStatementViewState extends State<AccountStatementView> {
   bool _isCustomer = true;
   int? _partyId;
+  ReportPeriodPreset _preset = ReportPeriodPreset.all;
+  String? _fromIso;
+  String? _toIso;
   Map<CurrencyCode, List<StatementLine>> _lines = {};
   bool _loading = false;
 
@@ -75,6 +80,34 @@ class _AccountStatementViewState extends State<AccountStatementView> {
     }
   }
 
+  Future<void> _selectPreset(
+    AppController ctrl,
+    ReportPeriodPreset preset,
+  ) async {
+    if (preset == ReportPeriodPreset.custom) {
+      final range = await showDateRangePicker(
+        context: context,
+        firstDate: DateTime(2020),
+        lastDate: DateTime(DateTime.now().year + 1),
+      );
+      if (range == null || !mounted) return;
+      setState(() {
+        _preset = ReportPeriodPreset.custom;
+        _fromIso = QatDateUtils.toIsoDate(range.start);
+        _toIso = QatDateUtils.toIsoDate(range.end);
+      });
+      await _loadStatement(ctrl);
+      return;
+    }
+    final range = resolveReportPresetRange(preset);
+    setState(() {
+      _preset = preset;
+      _fromIso = range.fromIso;
+      _toIso = range.toIso;
+    });
+    await _loadStatement(ctrl);
+  }
+
   Future<void> _loadStatement(AppController ctrl) async {
     if (_partyId == null) {
       setState(() => _lines = {});
@@ -83,8 +116,16 @@ class _AccountStatementViewState extends State<AccountStatementView> {
     setState(() => _loading = true);
     try {
       final res = _isCustomer
-          ? await ctrl.repo.getCustomerStatement(_partyId!)
-          : await ctrl.repo.getSupplierStatement(_partyId!);
+          ? await ctrl.repo.getCustomerStatement(
+              _partyId!,
+              fromIso: _fromIso,
+              toIso: _toIso,
+            )
+          : await ctrl.repo.getSupplierStatement(
+              _partyId!,
+              fromIso: _fromIso,
+              toIso: _toIso,
+            );
       if (!mounted) return;
       setState(() => _lines = res);
     } finally {
@@ -163,6 +204,22 @@ class _AccountStatementViewState extends State<AccountStatementView> {
                     setState(() => _partyId = v);
                     unawaited(_loadStatement(ctrl));
                   },
+                ),
+                const SizedBox(height: 10),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (final p in ReportPeriodPreset.values) ...[
+                        ChoiceChip(
+                          label: Text(p.arabicLabel),
+                          selected: _preset == p,
+                          onSelected: (_) => unawaited(_selectPreset(ctrl, p)),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
+                    ],
+                  ),
                 ),
                 if (_partyId != null && _lines.isNotEmpty) ...[
                   const SizedBox(height: 12),

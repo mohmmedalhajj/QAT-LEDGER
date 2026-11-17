@@ -4,7 +4,9 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/money.dart';
+import '../../core/theme.dart';
 import '../../licensing/license_models.dart';
+import '../../services/whatsapp_share_service.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/erp_components.dart';
@@ -158,6 +160,7 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
+    final pal = context.pal;
     final isArchiveActive = ctrl.sectionIndex == 3 && ctrl.transfersSubTab == 4;
     if (!isArchiveActive) {
       _wasArchiveActive = false;
@@ -214,6 +217,21 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
         ErpSearchFilterBar(
           searchHint: 'بحث في السجلات المؤرشفة...',
           onSearchChanged: (v) => setState(() => _search = v.trim()),
+          trailingAction: filteredItems.isEmpty
+              ? null
+              : IconButton.outlined(
+                  tooltip: 'مشاركة ملخص الأرشيف',
+                  onPressed: () async {
+                    final summary = [
+                      'أرشيف ${ctrl.settings.agencyName} (${filteredItems.length} سجل):',
+                      for (final it in filteredItems.take(40))
+                        '• [${it.categoryLabel}] ${it.title} (${it.subtitle})',
+                    ].join('\n');
+                    await WhatsappShareService.instance
+                        .openWhatsApp(text: summary);
+                  },
+                  icon: const Icon(Icons.chat_outlined, size: 18),
+                ),
           filters: [
             for (final cat in categories)
               ChoiceChip(
@@ -259,31 +277,64 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
                                 subtitle: Text(
                                   '${item.categoryLabel} • ${item.subtitle}',
                                 ),
-                                trailing: FilledButton.tonalIcon(
-                                  onPressed: () async {
-                                    final ok = await showErpConfirmDialog(
-                                      context,
-                                      title: 'استعادة من الأرشيف',
-                                      message:
-                                          'هل تريد استعادة "${item.title}" وإرجاعها للدفاتر النشطة؟',
-                                      confirmLabel: 'استعادة',
-                                    );
-                                    if (!ok) return;
-                                    await ctrl.repo.setArchived(
-                                      item.table,
-                                      item.id,
-                                      false,
-                                    );
-                                    await ctrl.reloadAll();
-                                    if (mounted) {
-                                      await _refreshArchived(ctrl);
-                                    }
-                                  },
-                                  icon: const Icon(
-                                    Icons.unarchive_outlined,
-                                    size: 16,
-                                  ),
-                                  label: const Text('استعادة'),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    FilledButton.tonalIcon(
+                                      onPressed: () async {
+                                        final ok = await showErpConfirmDialog(
+                                          context,
+                                          title: 'استعادة من الأرشيف',
+                                          message:
+                                              'هل تريد استعادة "${item.title}" وإرجاعها للدفاتر النشطة؟',
+                                          confirmLabel: 'استعادة',
+                                        );
+                                        if (!ok) return;
+                                        await ctrl.repo.setArchived(
+                                          item.table,
+                                          item.id,
+                                          false,
+                                        );
+                                        await ctrl.reloadAll();
+                                        if (mounted) {
+                                          await _refreshArchived(ctrl);
+                                        }
+                                      },
+                                      icon: const Icon(
+                                        Icons.unarchive_outlined,
+                                        size: 16,
+                                      ),
+                                      label: const Text('استعادة'),
+                                    ),
+                                    if (ctrl.canDeleteCurrent)
+                                      IconButton(
+                                        tooltip: 'حذف نهائي من الأرشيف',
+                                        onPressed: () async {
+                                          final ok = await showErpConfirmDialog(
+                                            context,
+                                            title: 'حذف نهائي',
+                                            message:
+                                                'هل تريد حذف "${item.title}" نهائياً من قاعدة البيانات؟ لا يمكن التراجع.',
+                                            confirmLabel: 'حذف نهائي',
+                                            destructive: true,
+                                          );
+                                          if (!ok) return;
+                                          await ctrl.repo.deletePermanently(
+                                            item.table,
+                                            item.id,
+                                          );
+                                          await ctrl.reloadAll();
+                                          if (mounted) {
+                                            await _refreshArchived(ctrl);
+                                          }
+                                        },
+                                        icon: Icon(
+                                          Icons.delete_forever_outlined,
+                                          color: pal.danger,
+                                          size: 20,
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
                             );

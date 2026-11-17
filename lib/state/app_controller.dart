@@ -376,21 +376,28 @@ class AppController extends ChangeNotifier {
     required bool canViewReports,
   }) async {
     final clean = username.trim();
-    if (clean.isEmpty || password.length < 4) {
-      throw ArgumentError('اسم المستخدم مطلوب وكلمة المرور 4 أحرف على الأقل.');
+    if (clean.isEmpty) {
+      throw ArgumentError('اسم المستخدم مطلوب.');
+    }
+    final next = List<AppUser>.from(_users);
+    final idx = next.indexWhere((u) => u.username == clean);
+    if (idx < 0 && password.length < 4) {
+      throw ArgumentError('كلمة المرور يجب أن تكون 4 أحرف على الأقل.');
+    }
+    if (password.isNotEmpty && password.length < 4) {
+      throw ArgumentError('كلمة المرور الجديدة يجب أن تكون 4 أحرف على الأقل.');
     }
     final user = AppUser(
       username: clean,
       displayName: displayName.trim().isEmpty ? clean : displayName.trim(),
       role: role,
-      passwordSha256: _hashPassword(password),
+      passwordSha256:
+          password.isEmpty ? next[idx].passwordSha256 : _hashPassword(password),
       canDelete: canDelete,
       canEditPrices: canEditPrices,
       canManageSettings: canManageSettings,
       canViewReports: canViewReports,
     );
-    final next = List<AppUser>.from(_users);
-    final idx = next.indexWhere((u) => u.username == clean);
     if (idx >= 0) {
       next[idx] = user;
     } else {
@@ -679,6 +686,25 @@ class AppController extends ChangeNotifier {
       logoPath: updated.logoPath,
     );
     notifyListeners();
+  }
+
+  Future<void> resetBrandingToDefaults() async {
+    final prev = _settings;
+    final reset = AgencySettings(
+      agencyName: 'وكالة ميزان القات',
+      agencyPhone: '',
+      agencyAddress: '',
+      footerNote: 'شكراً لتعاملكم معنا',
+      logoPath: '',
+      currencyMode: prev.currencyMode,
+      displaySarToYerMilli: prev.displaySarToYerMilli,
+      themeChoice: prev.themeChoice,
+      onboardingComplete: prev.onboardingComplete,
+      savedPrinterName: prev.savedPrinterName,
+      savedPrinterAddress: prev.savedPrinterAddress,
+      printerPaperMm: prev.printerPaperMm,
+    );
+    await updateSettings(reset);
   }
 
   Future<void> setThemeChoice(AppThemeModeChoice choice) async {

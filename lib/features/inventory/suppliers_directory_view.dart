@@ -210,44 +210,87 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
     Supplier supplier,
   ) async {
     final amountCtrl = TextEditingController();
+    final bankCtrl = TextEditingController();
+    final transferNoCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
     CurrencyCode cur = ctrl.currencyPolicy.defaultCurrency;
+    String paymentMethod = 'نقدي';
 
     await showDialog<void>(
       context: context,
       builder: (ctx) => ErpDialogControllerScope(
-        controllers: [amountCtrl, notesCtrl],
+        controllers: [amountCtrl, bankCtrl, transferNoCtrl, notesCtrl],
         child: StatefulBuilder(
           builder: (ctx, setModalState) => AlertDialog(
             title: Text('سند صرف لمورد — ${supplier.name}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              ErpDetailRow(
-                label: 'المستحق للمورد',
-                value: Money(supplier.balanceFor(cur), cur).format(),
-                valueColor: supplier.balanceFor(cur) > 0
-                    ? ctx.pal.warning
-                    : ctx.pal.success,
-              ),
-              const SizedBox(height: 8),
-              CurrencySelectorRow(
-                policy: ctrl.currencyPolicy,
-                selected: cur,
-                onChanged: (c) => setModalState(() => cur = c),
-              ),
-              const SizedBox(height: 10),
-              AccountingNumberField(
-                controller: amountCtrl,
-                label: 'المبلغ المدفوع (${cur.shortSymbol})',
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: notesCtrl,
-                decoration: const InputDecoration(labelText: 'ملاحظات'),
-              ),
-            ],
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ErpDetailRow(
+                  label: 'المستحق للمورد',
+                  value: Money(supplier.balanceFor(cur), cur).format(),
+                  valueColor: supplier.balanceFor(cur) > 0
+                      ? ctx.pal.warning
+                      : ctx.pal.success,
+                ),
+                const SizedBox(height: 8),
+                CurrencySelectorRow(
+                  policy: ctrl.currencyPolicy,
+                  selected: cur,
+                  onChanged: (c) => setModalState(() => cur = c),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  children: [
+                    for (final m in const ['نقدي', 'تحويل', 'إيداع'])
+                      ChoiceChip(
+                        label: Text(m),
+                        selected: paymentMethod == m,
+                        onSelected: (_) =>
+                            setModalState(() => paymentMethod = m),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                AccountingNumberField(
+                  controller: amountCtrl,
+                  label: 'المبلغ المدفوع (${cur.shortSymbol})',
+                ),
+                if (paymentMethod != 'نقدي') ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: bankCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'البنك / الصرافة',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: transferNoCtrl,
+                          textDirection: TextDirection.ltr,
+                          decoration: const InputDecoration(
+                            labelText: 'رقم الحوالة / الإيداع',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 10),
+                TextField(
+                  controller: notesCtrl,
+                  decoration: const InputDecoration(labelText: 'ملاحظات'),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -263,6 +306,9 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
                   supplierName: supplier.name,
                   amountMinor: minor,
                   currency: cur,
+                  paymentMethod: paymentMethod,
+                  bankName: bankCtrl.text,
+                  transferNumber: transferNoCtrl.text,
                   notes: notesCtrl.text,
                 );
                 await ctrl.reloadAll();
@@ -286,14 +332,32 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
     final buyCtrl = TextEditingController();
     final sellCtrl = TextEditingController();
     final paidCtrl = TextEditingController(text: '0');
+    final bankCtrl = TextEditingController();
+    final transferNoCtrl = TextEditingController();
+    final demarAmountCtrl = TextEditingController(text: '0');
+    final demarTypeCtrl = TextEditingController();
+    final demarNoCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
     CurrencyCode cur = ctrl.currencyPolicy.defaultCurrency;
     PaymentType pType = PaymentType.credit;
+    String paymentMethod = 'نقداً';
 
     await showDialog<void>(
       context: context,
       builder: (ctx) => ErpDialogControllerScope(
-        controllers: [qatCtrl, qtyCtrl, buyCtrl, sellCtrl, paidCtrl, notesCtrl],
+        controllers: [
+          qatCtrl,
+          qtyCtrl,
+          buyCtrl,
+          sellCtrl,
+          paidCtrl,
+          bankCtrl,
+          transferNoCtrl,
+          demarAmountCtrl,
+          demarTypeCtrl,
+          demarNoCtrl,
+          notesCtrl,
+        ],
         child: StatefulBuilder(
           builder: (ctx, setModalState) => AlertDialog(
             title: Text('فاتورة شراء من ${supplier.name}'),
@@ -386,13 +450,83 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
                   onSelectionChanged: (s) =>
                       setModalState(() => pType = s.first),
                 ),
-                if (pType == PaymentType.partial) ...[
+                if (pType != PaymentType.credit) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    children: [
+                      for (final m in const ['نقداً', 'تحويل', 'إيداع'])
+                        ChoiceChip(
+                          label: Text(m),
+                          selected: paymentMethod == m,
+                          onSelected: (_) =>
+                              setModalState(() => paymentMethod = m),
+                        ),
+                    ],
+                  ),
+                ],
+                if (pType == PaymentType.partial || pType == PaymentType.paid) ...[
                   const SizedBox(height: 8),
                   AccountingNumberField(
                     controller: paidCtrl,
-                    label: 'المدفوع مقدماً',
+                    label: pType == PaymentType.paid
+                        ? 'المدفوع الفعلي (أو اترك 0 لاحتساب الإجمالي)'
+                        : 'المدفوع مقدماً',
                   ),
                 ],
+                if (pType != PaymentType.credit && paymentMethod != 'نقداً') ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: bankCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'البنك / الصرافة',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: transferNoCtrl,
+                          textDirection: TextDirection.ltr,
+                          decoration: const InputDecoration(
+                            labelText: 'رقم الحوالة',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 8),
+                AccountingNumberField(
+                  controller: demarAmountCtrl,
+                  label: 'مبلغ الدمار (اختياري)',
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: demarTypeCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'نوع الدمار (إن وجد)',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: demarNoCtrl,
+                        textDirection: TextDirection.ltr,
+                        decoration: const InputDecoration(
+                          labelText: 'رقم الدمار',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: notesCtrl,
@@ -427,6 +561,13 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
                   currency: cur,
                   paymentType: pType,
                   paidAmountMinor: Money.parseMinorUnits(paidCtrl.text),
+                  paymentMethod:
+                      pType == PaymentType.credit ? 'آجل' : paymentMethod,
+                  bankName: bankCtrl.text,
+                  transferNumber: transferNoCtrl.text,
+                  demarMinor: Money.parseMinorUnits(demarAmountCtrl.text),
+                  demarType: demarTypeCtrl.text,
+                  demarNumber: demarNoCtrl.text,
                   notes: notesCtrl.text,
                 );
                 await ctrl.reloadAll();
@@ -575,9 +716,12 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
                                     ),
                                 ],
                               ),
-                              if (s.phone.isNotEmpty)
+                              if (s.phone.isNotEmpty || s.region.isNotEmpty)
                                 Text(
-                                  s.phone,
+                                  [
+                                    if (s.phone.isNotEmpty) s.phone,
+                                    if (s.region.isNotEmpty) s.region,
+                                  ].join(' • '),
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: pal.textSecondary,

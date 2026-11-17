@@ -170,20 +170,7 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
                   onSelectionChanged: (s) async {
                     final prev = ctrl.settings;
                     await ctrl.updateSettings(
-                      AgencySettings(
-                        agencyName: prev.agencyName,
-                        agencyPhone: prev.agencyPhone,
-                        agencyAddress: prev.agencyAddress,
-                        footerNote: prev.footerNote,
-                        logoPath: prev.logoPath,
-                        currencyMode: prev.currencyMode,
-                        displaySarToYerMilli: prev.displaySarToYerMilli,
-                        themeChoice: prev.themeChoice,
-                        onboardingComplete: prev.onboardingComplete,
-                        savedPrinterName: prev.savedPrinterName,
-                        savedPrinterAddress: prev.savedPrinterAddress,
-                        printerPaperMm: s.first,
-                      ),
+                      prev.copyWith(printerPaperMm: s.first),
                     );
                   },
                 ),
@@ -269,26 +256,21 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
                 for (final p in _printers)
                   ListTile(
                     dense: true,
-                    leading: const Icon(Icons.print_outlined),
+                    leading: Icon(
+                      p.isLikelyPrinter
+                          ? Icons.print_outlined
+                          : Icons.bluetooth_connected,
+                      color: p.isLikelyPrinter ? pal.success : pal.textSecondary,
+                    ),
                     title: Text(p.name),
-                    subtitle: Text(p.address),
+                    subtitle: Text('${p.address} • ${p.deviceCategoryLabel}'),
                     trailing: TextButton(
                       onPressed: () async {
                         final prev = ctrl.settings;
                         await ctrl.updateSettings(
-                          AgencySettings(
-                            agencyName: prev.agencyName,
-                            agencyPhone: prev.agencyPhone,
-                            agencyAddress: prev.agencyAddress,
-                            footerNote: prev.footerNote,
-                            logoPath: prev.logoPath,
-                            currencyMode: prev.currencyMode,
-                            displaySarToYerMilli: prev.displaySarToYerMilli,
-                            themeChoice: prev.themeChoice,
-                            onboardingComplete: prev.onboardingComplete,
+                          prev.copyWith(
                             savedPrinterName: p.name,
                             savedPrinterAddress: p.address,
-                            printerPaperMm: prev.printerPaperMm,
                           ),
                         );
                       },

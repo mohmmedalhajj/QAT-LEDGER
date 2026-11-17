@@ -134,6 +134,22 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
             icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
             label: const Text('PDF'),
           ),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final text = ThermalReceiptFormatter.buildSaleReceiptText(
+                ctrl.settings,
+                sale,
+              );
+              await showReceiptPreviewPrintSheet(
+                ctx,
+                agency: ctrl.settings,
+                title: 'فاتورة ${sale.invoiceNumber}',
+                receiptText: text,
+              );
+            },
+            icon: const Icon(Icons.receipt_long_outlined, size: 16),
+            label: const Text('حراري'),
+          ),
         ],
       ),
     );
@@ -165,6 +181,8 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
     );
     final notesCtrl = TextEditingController(text: sale.notes);
     PaymentType pType = sale.paymentType;
+    String paymentMethod =
+        sale.paymentMethod.isNotEmpty ? sale.paymentMethod : 'نقداً';
     int? custId = sale.customerId;
 
     await showDialog<void>(
@@ -277,6 +295,21 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
                     label: 'المدفوع',
                   ),
                 ],
+                if (pType != PaymentType.credit) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    children: [
+                      for (final m in const ['نقداً', 'تحويل', 'إيداع'])
+                        ChoiceChip(
+                          label: Text(m),
+                          selected: paymentMethod == m,
+                          onSelected: (_) =>
+                              setModalState(() => paymentMethod = m),
+                        ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 8),
                 TextField(
                   controller: notesCtrl,
@@ -342,6 +375,8 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
                     taxBps: InvoiceMath.parsePercentBps(taxCtrl.text),
                     paymentType: pType,
                     paidAmountMinor: Money.parseMinorUnits(paidCtrl.text),
+                    paymentMethod:
+                        pType == PaymentType.credit ? 'آجل' : paymentMethod,
                     notes: notesCtrl.text,
                   );
                   await ctrl.reloadAll();

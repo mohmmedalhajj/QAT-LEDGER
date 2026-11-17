@@ -38,18 +38,37 @@ class _TransfersLedgerViewState extends State<TransfersLedgerView> {
     super.dispose();
   }
 
-  Future<void> _openNewTransferDialog(AppController ctrl) async {
-    final senderCtrl = TextEditingController(text: ctrl.settings.agencyName);
-    final customRecCtrl = TextEditingController();
-    final amountCtrl = TextEditingController();
-    final feeCtrl = TextEditingController(text: '0');
-    final companyCtrl = TextEditingController();
-    final numberCtrl = TextEditingController();
-    final notesCtrl = TextEditingController();
+  Future<void> _openNewTransferDialog(
+    AppController ctrl, {
+    MoneyTransfer? existing,
+  }) async {
+    final senderCtrl = TextEditingController(
+      text: existing?.senderName ?? ctrl.settings.agencyName,
+    );
+    final customRecCtrl =
+        TextEditingController(text: existing?.receiverName ?? '');
+    final amountCtrl = TextEditingController(
+      text: existing != null
+          ? Money.formatMinor(existing.amountMinor, showZeroDecimals: false)
+              .replaceAll(',', '')
+          : '',
+    );
+    final feeCtrl = TextEditingController(
+      text: existing != null
+          ? Money.formatMinor(existing.feeMinor, showZeroDecimals: false)
+              .replaceAll(',', '')
+          : '0',
+    );
+    final companyCtrl =
+        TextEditingController(text: existing?.transferCompany ?? '');
+    final numberCtrl =
+        TextEditingController(text: existing?.transferNumber ?? '');
+    final notesCtrl = TextEditingController(text: existing?.notes ?? '');
 
-    int? selectedRecipientId;
-    CurrencyCode currency = ctrl.currencyPolicy.defaultCurrency;
-    TransferStatus status = TransferStatus.pending;
+    int? selectedRecipientId = existing?.recipientId;
+    CurrencyCode currency =
+        existing?.currency ?? ctrl.currencyPolicy.defaultCurrency;
+    TransferStatus status = existing?.status ?? TransferStatus.pending;
 
     await showDialog<void>(
       context: context,
@@ -65,7 +84,9 @@ class _TransfersLedgerViewState extends State<TransfersLedgerView> {
         ],
         child: StatefulBuilder(
           builder: (ctx, setModalState) => AlertDialog(
-            title: const Text('تسجيل حوالة مالية'),
+            title: Text(
+              existing == null ? 'تسجيل حوالة مالية' : 'تعديل الحوالة المالية',
+            ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -210,18 +231,34 @@ class _TransfersLedgerViewState extends State<TransfersLedgerView> {
                   );
                   return;
                 }
-                await ctrl.repo.addTransfer(
-                  senderName: senderCtrl.text,
-                  receiverName: customRecCtrl.text,
-                  recipientId: selectedRecipientId,
-                  amountMinor: amountMinor,
-                  feeMinor: Money.parseMinorUnits(feeCtrl.text),
-                  currency: currency,
-                  transferCompany: companyCtrl.text,
-                  transferNumber: numberCtrl.text,
-                  status: status,
-                  notes: notesCtrl.text,
-                );
+                if (existing == null) {
+                  await ctrl.repo.addTransfer(
+                    senderName: senderCtrl.text,
+                    receiverName: customRecCtrl.text,
+                    recipientId: selectedRecipientId,
+                    amountMinor: amountMinor,
+                    feeMinor: Money.parseMinorUnits(feeCtrl.text),
+                    currency: currency,
+                    transferCompany: companyCtrl.text,
+                    transferNumber: numberCtrl.text,
+                    status: status,
+                    notes: notesCtrl.text,
+                  );
+                } else {
+                  await ctrl.repo.updateTransfer(
+                    id: existing.id,
+                    senderName: senderCtrl.text,
+                    receiverName: customRecCtrl.text,
+                    recipientId: selectedRecipientId,
+                    amountMinor: amountMinor,
+                    feeMinor: Money.parseMinorUnits(feeCtrl.text),
+                    currency: currency,
+                    transferCompany: companyCtrl.text,
+                    transferNumber: numberCtrl.text,
+                    status: status,
+                    notes: notesCtrl.text,
+                  );
+                }
                 await ctrl.reloadAll();
                 if (ctx.mounted) Navigator.pop(ctx);
               },
@@ -634,6 +671,17 @@ class _TransfersLedgerViewState extends State<TransfersLedgerView> {
                                     },
                                     icon: const Icon(
                                       Icons.print_outlined,
+                                      size: 18,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'تعديل الحوالة',
+                                    onPressed: () => _openNewTransferDialog(
+                                      ctrl,
+                                      existing: t,
+                                    ),
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
                                       size: 18,
                                     ),
                                   ),

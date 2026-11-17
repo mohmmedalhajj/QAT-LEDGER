@@ -223,15 +223,51 @@ class _RecipientsAndReportsViewState extends State<RecipientsAndReportsView> {
                               Row(
                                 children: [
                                   Expanded(
-                                    child: Text(
-                                      r.name,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 14.5,
-                                      ),
+                                    child: Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            r.name,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 14.5,
+                                            ),
+                                          ),
+                                        ),
+                                        if (!r.isActive) ...[
+                                          const SizedBox(width: 6),
+                                          StatusPill(
+                                            label: 'موقوف',
+                                            bg: pal.dangerSoft,
+                                            fg: pal.danger,
+                                          ),
+                                        ],
+                                      ],
                                     ),
                                   ),
                                   IconButton(
+                                    tooltip: r.isActive
+                                        ? 'إيقاف المستلم'
+                                        : 'تفعيل المستلم',
+                                    onPressed: () async {
+                                      await ctrl.repo.setTransferRecipientActive(
+                                        r.id,
+                                        !r.isActive,
+                                      );
+                                      await ctrl.reloadAll();
+                                    },
+                                    icon: Icon(
+                                      r.isActive
+                                          ? Icons.toggle_on_outlined
+                                          : Icons.toggle_off_outlined,
+                                      color: r.isActive
+                                          ? pal.success
+                                          : pal.textSecondary,
+                                      size: 22,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'تعديل المستلم',
                                     onPressed: () => _openRecipientDialog(
                                       context,
                                       ctrl,
@@ -242,6 +278,30 @@ class _RecipientsAndReportsViewState extends State<RecipientsAndReportsView> {
                                       size: 18,
                                     ),
                                   ),
+                                  if (ctrl.canDeleteCurrent &&
+                                      rep.totalTransfers == 0)
+                                    IconButton(
+                                      tooltip: 'حذف المستلم',
+                                      onPressed: () async {
+                                        final ok = await showErpConfirmDialog(
+                                          context,
+                                          title: 'حذف المستلم',
+                                          message:
+                                              'هل تريد حذف المستلم "${r.name}"؟',
+                                          confirmLabel: 'حذف',
+                                          destructive: true,
+                                        );
+                                        if (!ok) return;
+                                        await ctrl.repo
+                                            .deleteTransferRecipient(r.id);
+                                        await ctrl.reloadAll();
+                                      },
+                                      icon: Icon(
+                                        Icons.delete_outline,
+                                        color: pal.danger,
+                                        size: 18,
+                                      ),
+                                    ),
                                 ],
                               ),
                               if (r.phone.isNotEmpty || r.company.isNotEmpty)

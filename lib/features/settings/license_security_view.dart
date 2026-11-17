@@ -51,15 +51,18 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
     if (res.isValid) _tokenCtrl.clear();
   }
 
-  Future<void> _addOrEditUserDialog(AppController ctrl) async {
-    final userCtrl = TextEditingController();
-    final nameCtrl = TextEditingController();
+  Future<void> _addOrEditUserDialog(
+    AppController ctrl, {
+    AppUser? existing,
+  }) async {
+    final userCtrl = TextEditingController(text: existing?.username ?? '');
+    final nameCtrl = TextEditingController(text: existing?.displayName ?? '');
     final passCtrl = TextEditingController();
-    UserRole role = UserRole.cashier;
-    bool canDelete = false;
-    bool canEditPrices = true;
-    bool canManageSettings = false;
-    bool canViewReports = true;
+    UserRole role = existing?.role ?? UserRole.cashier;
+    bool canDelete = existing?.canDelete ?? false;
+    bool canEditPrices = existing?.canEditPrices ?? true;
+    bool canManageSettings = existing?.canManageSettings ?? false;
+    bool canViewReports = existing?.canViewReports ?? true;
 
     await showDialog<void>(
       context: context,
@@ -67,13 +70,18 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
         controllers: [userCtrl, nameCtrl, passCtrl],
         child: StatefulBuilder(
           builder: (ctx, setModalState) => AlertDialog(
-            title: const Text('إضافة مستخدم وصلاحياته'),
+            title: Text(
+              existing == null
+                  ? 'إضافة مستخدم وصلاحياته'
+                  : 'تعديل صلاحيات ${existing.displayName}',
+            ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
                   controller: userCtrl,
+                  enabled: existing == null,
                   textDirection: TextDirection.ltr,
                   decoration: const InputDecoration(labelText: 'اسم الدخول *'),
                 ),
@@ -87,8 +95,10 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                   controller: passCtrl,
                   obscureText: true,
                   textDirection: TextDirection.ltr,
-                  decoration: const InputDecoration(
-                    labelText: 'كلمة المرور (4+ أحرف) *',
+                  decoration: InputDecoration(
+                    labelText: existing == null
+                        ? 'كلمة المرور (4+ أحرف) *'
+                        : 'كلمة مرور جديدة (اتركها فارغة للإبقاء)',
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -377,6 +387,37 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                     ),
                   ],
                 ),
+                if (lic.payload != null) ...[
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: TextButton.icon(
+                      onPressed: () async {
+                        final ok = await showErpConfirmDialog(
+                          context,
+                          title: 'إزالة الترخيص الحالي',
+                          message:
+                              'هل تريد إزالة رمز الترخيص المخزن والعودة إلى الوضع الأساسي (BASIC)؟ لن تتأثر سجلاتك المالية.',
+                          confirmLabel: 'إزالة الترخيص',
+                          destructive: true,
+                        );
+                        if (!ok || !mounted) return;
+                        await ctrl.clearActiveLicense();
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('تم إزالة الترخيص والعودة للباقة الأساسية'),
+                          ),
+                        );
+                      },
+                      icon: Icon(Icons.link_off, size: 16, color: pal.danger),
+                      label: Text(
+                        'إزالة الترخيص النشط',
+                        style: TextStyle(color: pal.danger),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -489,27 +530,39 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                     subtitle: Text(
                       '${u.role.arabicLabel}${u.canDelete ? ' • حذف' : ''}${u.canEditPrices ? ' • أسعار' : ''}${u.canViewReports ? ' • تقارير' : ''}${u.canManageSettings ? ' • إعدادات' : ''}',
                     ),
-                    trailing: (ctrl.users.length > 1 &&
-                            u.username != ctrl.currentUser?.username &&
-                            ctrl.canManageSettingsCurrent)
-                        ? IconButton(
-                            onPressed: () async {
-                              final ok = await showErpConfirmDialog(
-                                context,
-                                title: 'حذف المستخدم',
-                                message:
-                                    'هل تريد حذف المستخدم "${u.displayName}"؟',
-                                confirmLabel: 'حذف',
-                                destructive: true,
-                              );
-                              if (!ok) return;
-                              await ctrl.deleteUser(u.username);
-                            },
-                            icon: Icon(
-                              Icons.delete_outline,
-                              color: pal.danger,
-                              size: 18,
-                            ),
+                    trailing: ctrl.canManageSettingsCurrent
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'تعديل الصلاحيات',
+                                onPressed: () =>
+                                    _addOrEditUserDialog(ctrl, existing: u),
+                                icon: const Icon(Icons.edit_outlined, size: 18),
+                              ),
+                              if (ctrl.users.length > 1 &&
+                                  u.username != ctrl.currentUser?.username)
+                                IconButton(
+                                  tooltip: 'حذف المستخدم',
+                                  onPressed: () async {
+                                    final ok = await showErpConfirmDialog(
+                                      context,
+                                      title: 'حذف المستخدم',
+                                      message:
+                                          'هل تريد حذف المستخدم "${u.displayName}"؟',
+                                      confirmLabel: 'حذف',
+                                      destructive: true,
+                                    );
+                                    if (!ok) return;
+                                    await ctrl.deleteUser(u.username);
+                                  },
+                                  icon: Icon(
+                                    Icons.delete_outline,
+                                    color: pal.danger,
+                                    size: 18,
+                                  ),
+                                ),
+                            ],
                           )
                         : null,
                   ),

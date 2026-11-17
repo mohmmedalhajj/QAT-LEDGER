@@ -23,10 +23,16 @@ class PosInvoiceBuilderView extends StatefulWidget {
 class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
   CurrencyCode? _currency;
   int? _customerId;
+  bool _createNewCustomer = false;
   int? _selectedBatchId;
   String _customUnit = 'ربطة';
   PaymentType _paymentType = PaymentType.paid;
+  String _paymentMethod = 'نقداً';
 
+  final _newCustNameCtrl = TextEditingController();
+  final _newCustPhoneCtrl = TextEditingController();
+  final _newCustAddrCtrl = TextEditingController();
+  final _newCustNotesCtrl = TextEditingController();
   final _customQatCtrl = TextEditingController();
   final _qtyCtrl = TextEditingController(text: '1');
   final _priceCtrl = TextEditingController();
@@ -39,9 +45,14 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
   bool _saving = false;
 
   static const _units = ['ربطة', 'علاقية', 'كيلو', 'حبة'];
+  static const _paymentMethods = ['نقداً', 'تحويل', 'إيداع', 'آجل'];
 
   @override
   void dispose() {
+    _newCustNameCtrl.dispose();
+    _newCustPhoneCtrl.dispose();
+    _newCustAddrCtrl.dispose();
+    _newCustNotesCtrl.dispose();
     _customQatCtrl.dispose();
     _qtyCtrl.dispose();
     _priceCtrl.dispose();
@@ -144,10 +155,12 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
       );
       return;
     }
-    if (_paymentType != PaymentType.paid && _customerId == null) {
+    if (_paymentType != PaymentType.paid &&
+        _customerId == null &&
+        (!_createNewCustomer || _newCustNameCtrl.text.trim().isEmpty)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('الفاتورة الآجلة أو الجزئية تتطلب اختيار عميل'),
+          content: Text('الفاتورة الآجلة أو الجزئية تتطلب اختيار أو إدخال عميل'),
         ),
       );
       return;
@@ -186,12 +199,31 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
 
     setState(() => _saving = true);
     try {
-      final custName = _customerId == null
-          ? 'عميل نقدي'
-          : ctrl.customers.firstWhere((c) => c.id == _customerId).name;
+      int? effectiveCustId = _customerId;
+      String custName = 'عميل نقدي';
+      if (_createNewCustomer && _newCustNameCtrl.text.trim().isNotEmpty) {
+        final typed = _newCustNameCtrl.text.trim();
+        final existing = ctrl.customers
+            .where((c) => c.name.trim().toLowerCase() == typed.toLowerCase())
+            .toList();
+        if (existing.isNotEmpty) {
+          effectiveCustId = existing.first.id;
+          custName = existing.first.name;
+        } else {
+          effectiveCustId = await ctrl.repo.upsertCustomer(
+            name: typed,
+            phone: _newCustPhoneCtrl.text,
+            address: _newCustAddrCtrl.text,
+            notes: _newCustNotesCtrl.text,
+          );
+          custName = typed;
+        }
+      } else if (effectiveCustId != null) {
+        custName = ctrl.customers.firstWhere((c) => c.id == effectiveCustId).name;
+      }
 
       final saleId = await ctrl.repo.makeSale(
-        customerId: _customerId,
+        customerId: effectiveCustId,
         customerName: custName,
         items: List<NewSaleItemInput>.from(_cart),
         currency: activeCur,
@@ -199,6 +231,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
         taxBps: taxBps,
         paymentType: _paymentType,
         paidAmountMinor: paidInput,
+        paymentMethod: _paymentType == PaymentType.credit ? 'آجل' : _paymentMethod,
         notes: _notesCtrl.text,
       );
 
@@ -212,6 +245,11 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
         _taxCtrl.text = '0';
         _paidCtrl.text = '0';
         _notesCtrl.text = '';
+        _createNewCustomer = false;
+        _newCustNameCtrl.clear();
+        _newCustPhoneCtrl.clear();
+        _newCustAddrCtrl.clear();
+        _newCustNotesCtrl.clear();
       });
       if (created != null) {
         await _showPostSaleActions(ctrl, created);
@@ -307,6 +345,23 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
             icon: const Icon(Icons.picture_as_pdf_outlined, size: 17),
             label: const Text('PDF / طباعة'),
           ),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final text = ThermalReceiptFormatter.buildSaleReceiptText(
+                ctrl.settings,
+                sale,
+              );
+              await showReceiptPreviewPrintSheet(
+                ctx,
+                agency: ctrl.settings,
+                title: 'فاتورة ${sale.invoiceNumber}',
+                receiptText: text,
+                whatsappPhone: custPhone,
+              );
+            },
+            icon: const Icon(Icons.receipt_long_outlined, size: 17),
+            label: const Text('معاينة حرارية'),
+          ),
         ],
       ),
     );
@@ -371,34 +426,78 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                   }),
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<int?>(
-                  key: ValueKey<String>(
-                    'pos_cust_${ctrl.customers.any((c) => c.id == _customerId) ? _customerId : 'none'}',
-                  ),
-                  initialValue: ctrl.customers.any((c) => c.id == _customerId)
-                      ? _customerId
-                      : null,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'العميل',
-                    prefixIcon: Icon(Icons.person_outline),
-                  ),
-                  items: [
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('عميل نقدي (مباشر)'),
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('تسجيل عميل جديد تلقائياً مع الفاتورة'),
+                  value: _createNewCustomer,
+                  onChanged: (v) => setState(() {
+                    _createNewCustomer = v;
+                    if (v) _customerId = null;
+                  }),
+                ),
+                if (_createNewCustomer) ...[
+                  TextField(
+                    controller: _newCustNameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'اسم العميل الجديد *',
+                      prefixIcon: Icon(Icons.person_add_outlined),
                     ),
-                    ...ctrl.customers.map(
-                      (c) => DropdownMenuItem<int?>(
-                        value: c.id,
-                        child: Text(
-                          '${c.name}${c.balanceFor(activeCur) > 0 ? ' (عليه: ${Money(c.balanceFor(activeCur), activeCur).format()})' : ''}',
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _newCustPhoneCtrl,
+                          textDirection: TextDirection.ltr,
+                          keyboardType: TextInputType.phone,
+                          decoration: const InputDecoration(labelText: 'الهاتف'),
                         ),
                       ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _newCustAddrCtrl,
+                          decoration: const InputDecoration(labelText: 'العنوان'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _newCustNotesCtrl,
+                    decoration: const InputDecoration(labelText: 'ملاحظات العميل'),
+                  ),
+                ] else
+                  DropdownButtonFormField<int?>(
+                    key: ValueKey<String>(
+                      'pos_cust_${ctrl.customers.any((c) => c.id == _customerId) ? _customerId : 'none'}',
                     ),
-                  ],
-                  onChanged: (v) => setState(() => _customerId = v),
-                ),
+                    initialValue: ctrl.customers.any((c) => c.id == _customerId)
+                        ? _customerId
+                        : null,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'العميل',
+                      prefixIcon: Icon(Icons.person_outline),
+                    ),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('عميل نقدي (مباشر)'),
+                      ),
+                      ...ctrl.customers.map(
+                        (c) => DropdownMenuItem<int?>(
+                          value: c.id,
+                          child: Text(
+                            '${c.name}${c.balanceFor(activeCur) > 0 ? ' (عليه: ${Money(c.balanceFor(activeCur), activeCur).format()})' : ''}',
+                          ),
+                        ),
+                      ),
+                    ],
+                    onChanged: (v) => setState(() => _customerId = v),
+                  ),
               ],
             ),
           ),
@@ -662,6 +761,21 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                   controller: _paidCtrl,
                   label: 'المبلغ المدفوع مقدماً',
                   onChanged: (_) => setState(() {}),
+                ),
+              ],
+              if (_paymentType != PaymentType.credit) ...[
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final m in _paymentMethods.where((m) => m != 'آجل'))
+                      ChoiceChip(
+                        label: Text(m),
+                        selected: _paymentMethod == m,
+                        onSelected: (_) => setState(() => _paymentMethod = m),
+                      ),
+                  ],
                 ),
               ],
               const SizedBox(height: 10),

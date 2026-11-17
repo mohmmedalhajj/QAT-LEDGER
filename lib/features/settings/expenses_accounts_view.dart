@@ -1,9 +1,12 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/money.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../services/pdf_export_service.dart';
+import '../../services/whatsapp_share_service.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/erp_components.dart';
@@ -20,17 +23,31 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
   String _search = '';
   CurrencyCode? _currencyFilter;
 
-  Future<void> _addExpenseDialog(
+  Future<void> _openExpenseDialog(
     BuildContext context,
-    AppController ctrl,
-  ) async {
-    final descCtrl = TextEditingController();
-    final amountCtrl = TextEditingController();
-    final notesCtrl = TextEditingController();
-    CurrencyCode cur = ctrl.currencyPolicy.defaultCurrency;
+    AppController ctrl, {
+    Expense? existing,
+  }) async {
+    final descCtrl = TextEditingController(text: existing?.description ?? '');
+    final amountCtrl = TextEditingController(
+      text: existing != null
+          ? Money.formatMinor(existing.amountMinor, showZeroDecimals: false)
+              .replaceAll(',', '')
+          : '',
+    );
+    final notesCtrl = TextEditingController(text: existing?.notes ?? '');
+    CurrencyCode cur = existing?.currency ?? ctrl.currencyPolicy.defaultCurrency;
     final activeAccounts = ctrl.accounts.where((a) => a.isActive).toList();
-    LedgerAccount? selectedAcc =
-        activeAccounts.isEmpty ? null : activeAccounts.first;
+    LedgerAccount? selectedAcc;
+    if (existing?.accountId != null) {
+      for (final a in activeAccounts) {
+        if (a.id == existing!.accountId) {
+          selectedAcc = a;
+          break;
+        }
+      }
+    }
+    selectedAcc ??= activeAccounts.isEmpty ? null : activeAccounts.first;
 
     await showDialog<void>(
       context: context,
@@ -38,7 +55,9 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
         controllers: [descCtrl, amountCtrl, notesCtrl],
         child: StatefulBuilder(
           builder: (ctx, setModalState) => AlertDialog(
-            title: const Text('تسجيل مصروف يومي'),
+            title: Text(
+              existing == null ? 'تسجيل مصروف يومي' : 'تعديل بند المصروف',
+            ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -109,14 +128,26 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
                   );
                   return;
                 }
-                await ctrl.repo.addExpense(
-                  description: descCtrl.text,
-                  category: selectedAcc?.name ?? 'مصروفات عامة',
-                  accountId: selectedAcc?.id,
-                  amountMinor: minor,
-                  currency: cur,
-                  notes: notesCtrl.text,
-                );
+                if (existing == null) {
+                  await ctrl.repo.addExpense(
+                    description: descCtrl.text,
+                    category: selectedAcc?.name ?? 'مصروفات عامة',
+                    accountId: selectedAcc?.id,
+                    amountMinor: minor,
+                    currency: cur,
+                    notes: notesCtrl.text,
+                  );
+                } else {
+                  await ctrl.repo.updateExpense(
+                    id: existing.id,
+                    description: descCtrl.text,
+                    category: selectedAcc?.name ?? existing.category,
+                    accountId: selectedAcc?.id,
+                    amountMinor: minor,
+                    currency: cur,
+                    notes: notesCtrl.text,
+                  );
+                }
                 await ctrl.reloadAll();
                 if (ctx.mounted) Navigator.pop(ctx);
               },
@@ -227,7 +258,7 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
 
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _addExpenseDialog(context, ctrl),
+        onPressed: () => _openExpenseDialog(context, ctrl),
         icon: const Icon(Icons.add),
         label: const Text('مصروف جديد'),
       ),
@@ -283,9 +314,41 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
             ErpSummaryBar(metrics: summaryMetrics),
             const SizedBox(height: 12),
           ],
-          const ErpSectionHeader(
+          ErpSectionHeader(
             title: 'سجل المصروفات التشغيلية',
             icon: Icons.receipt_long_outlined,
+            trailing: filtered.isEmpty
+                ? null
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'مشاركة واتساب',
+                        onPressed: () async {
+                          final lines = [
+                            'كشف المصروفات — ${ctrl.settings.agencyName}',
+                            for (final e in filtered.take(30))
+                              '• ${e.dateIso}: ${e.description} (${e.category}) — ${Money(e.amountMinor, e.currency).format()}',
+                          ].join('\n');
+                          await WhatsappShareService.instance
+                              .openWhatsApp(text: lines);
+                        },
+                        icon: const Icon(Icons.chat_outlined, size: 18),
+                      ),
+                      IconButton(
+                        tooltip: 'تصدير PDF',
+                        onPressed: () async {
+                          final bytes = await PdfExportService.instance
+                              .buildExpensesReportPdf(
+                            agency: ctrl.settings,
+                            expenses: filtered,
+                          );
+                          await Printing.layoutPdf(onLayout: (_) async => bytes);
+                        },
+                        icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                      ),
+                    ],
+                  ),
           ),
           const SizedBox(height: 8),
           if (filtered.isEmpty)
@@ -322,6 +385,12 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      IconButton(
+                        tooltip: 'تعديل',
+                        onPressed: () =>
+                            _openExpenseDialog(context, ctrl, existing: e),
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                      ),
                       IconButton(
                         tooltip: 'أرشفة',
                         onPressed: () async {

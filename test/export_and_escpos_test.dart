@@ -113,6 +113,27 @@ void main() {
       summary: summary,
     );
     expect(String.fromCharCodes(recPdf.take(5)), '%PDF-');
+
+    final invPdf = await PdfExportService.instance.buildInventoryReportPdf(
+      agency: agency,
+      batches: const [],
+      valuation: {
+        CurrencyCode.yer: const InventoryValuation(
+          currency: CurrencyCode.yer,
+          batchCount: 1,
+          totalQtyMilli: 5000,
+          totalCostMinor: 1000000,
+          totalRetailMinor: 1500000,
+        ),
+      },
+    );
+    expect(String.fromCharCodes(invPdf.take(5)), '%PDF-');
+
+    final expPdf = await PdfExportService.instance.buildExpensesReportPdf(
+      agency: agency,
+      expenses: const [],
+    );
+    expect(String.fromCharCodes(expPdf.take(5)), '%PDF-');
   });
 
   test('Spreadsheet export generates valid XLSX and UTF-8 BOM CSV, and ESC/POS raster supports 58mm & 80mm', () async {

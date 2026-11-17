@@ -242,6 +242,57 @@ void main() {
       expect(settlements.length, 1);
       expect(settlements.single.varianceMinor, -5000);
 
+      // 6. Date-filtered customer/supplier statements with opening balance, plus updates & permanent archive deletion
+      await repo.makeSale(
+        customerId: custId,
+        customerName: 'عميل عدن',
+        items: [
+          NewSaleItemInput(
+            inventoryBatchId: updatedBatches.single.id,
+            qatTypeName: 'أرحبي',
+            qtyMilli: 1000,
+            unit: 'ربطة',
+            unitPriceMinor: 350000,
+            buyPriceMinor: 220000,
+          ),
+        ],
+        currency: CurrencyCode.yer,
+        paymentType: PaymentType.credit,
+        dateMs: DateTime(2026, 11, 10).millisecondsSinceEpoch,
+      );
+      await repo.addCustomerPayment(
+        customerId: custId,
+        customerName: 'عميل عدن',
+        amountMinor: 100000,
+        currency: CurrencyCode.yer,
+        dateMs: DateTime(2026, 11, 15).millisecondsSinceEpoch,
+      );
+      final stmt = await repo.getCustomerStatement(
+        custId,
+        fromIso: '2026-11-12',
+        toIso: '2026-11-16',
+      );
+      expect(stmt[CurrencyCode.yer]?.first.reference, 'OPEN');
+      expect(stmt[CurrencyCode.yer]?.first.runningBalanceMinor, 350000);
+      expect(stmt[CurrencyCode.yer]?.last.runningBalanceMinor, 250000);
+
+      await repo.updateExpense(
+        id: expId,
+        description: 'إيجار محدث',
+        category: 'إيجار',
+        amountMinor: 120000,
+        currency: CurrencyCode.yer,
+      );
+      expect((await repo.getExpenses()).single.amountMinor, 120000);
+
+      final iwId = await repo.addImportWeight(weightMilli: 15000, receiverName: 'سالم');
+      await repo.updateImportWeight(id: iwId, weightMilli: 18500, receiverName: 'سالم المحدث');
+      expect((await repo.getImportWeights()).single.weightMilli, 18500);
+
+      await repo.setArchived('expenses', expId, true);
+      await repo.deletePermanently('expenses', expId);
+      expect(await repo.getExpenses(includeArchived: true), isEmpty);
+
       await dbService.close();
     } finally {
       await tempDir.delete(recursive: true);

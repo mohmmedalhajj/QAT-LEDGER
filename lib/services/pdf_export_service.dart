@@ -7,7 +7,6 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../core/date_utils.dart';
 import '../core/money.dart';
-import '../core/theme.dart';
 import '../data/models.dart';
 import 'arabic_pdf_shaper.dart';
 
@@ -503,6 +502,136 @@ class PdfExportService {
           }
           return widgets;
         },
+      ),
+    );
+    return doc.save();
+  }
+
+  Future<Uint8List> buildInventoryReportPdf({
+    required AgencySettings agency,
+    required List<InventoryBatch> batches,
+    required Map<CurrencyCode, InventoryValuation> valuation,
+    List<QatImportWeight> importWeights = const [],
+  }) async {
+    final fonts = await _loadFonts();
+    final doc = pw.Document();
+    final primary = _primaryColor(agency);
+
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(20),
+        theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
+        build: (ctx) => [
+          _headerBlock(agency, 'تقرير جرد وتقييم المخزون'),
+          pw.SizedBox(height: 8),
+          _infoRow('تاريخ الجرد:', QatDateUtils.formatArabicDateTime12h(DateTime.now().millisecondsSinceEpoch)),
+          pw.SizedBox(height: 10),
+          if (valuation.isNotEmpty) ...[
+            _summaryBox([
+              for (final v in valuation.values) ...[
+                ('عدد الدفعات (${v.currency.code})', '${v.batchCount}'),
+                ('الكمية (${v.currency.code})', QuantityMath.formatMilli(v.totalQtyMilli)),
+                ('القيمة بالتكلفة (${v.currency.code})', Money(v.totalCostMinor, v.currency).format()),
+                ('القيمة البيعية (${v.currency.code})', Money(v.totalRetailMinor, v.currency).format()),
+              ],
+            ]),
+            pw.SizedBox(height: 12),
+          ],
+          if (batches.isNotEmpty)
+            pw.TableHelper.fromTextArray(
+              headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold,
+                fontSize: 9,
+                color: PdfColors.white,
+              ),
+              headerDecoration: pw.BoxDecoration(color: primary),
+              cellStyle: const pw.TextStyle(fontSize: 8.5),
+              cellAlignment: pw.Alignment.centerRight,
+              headers: [
+                _ar('المتبقي'),
+                _ar('سعر البيع'),
+                _ar('سعر الشراء'),
+                _ar('المستلم / المورد'),
+                _ar('الصنف'),
+              ],
+              data: batches
+                  .map(
+                    (b) => [
+                      _ar('${QuantityMath.formatMilli(b.remainingQtyMilli)} ${b.unit}'),
+                      _ar(Money(b.sellPriceMinor, b.currency).format()),
+                      _ar(Money(b.buyPriceMinor, b.currency).format()),
+                      _ar(b.receiverName.isNotEmpty ? b.receiverName : b.supplierName),
+                      _ar(b.qatTypeName),
+                    ],
+                  )
+                  .toList(),
+            ),
+          if (importWeights.isNotEmpty) ...[
+            pw.SizedBox(height: 14),
+            _infoRow(
+              'إجمالي أوزان الوارد:',
+              '${QuantityMath.formatMilli(importWeights.fold<int>(0, (s, w) => s + w.weightMilli))} كجم (${importWeights.length} شحنة)',
+            ),
+          ],
+        ],
+      ),
+    );
+    return doc.save();
+  }
+
+  Future<Uint8List> buildExpensesReportPdf({
+    required AgencySettings agency,
+    required List<Expense> expenses,
+  }) async {
+    final fonts = await _loadFonts();
+    final doc = pw.Document();
+    final primary = _primaryColor(agency);
+
+    final totalsByCur = <CurrencyCode, int>{};
+    for (final e in expenses) {
+      totalsByCur[e.currency] = (totalsByCur[e.currency] ?? 0) + e.amountMinor;
+    }
+
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(20),
+        theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
+        build: (ctx) => [
+          _headerBlock(agency, 'كشف المصروفات التشغيلية'),
+          pw.SizedBox(height: 8),
+          _infoRow('عدد البنود:', '${expenses.length}'),
+          _infoRow('إجمالي المصروفات:', _formatCurrencyMap(totalsByCur)),
+          pw.SizedBox(height: 10),
+          if (expenses.isNotEmpty)
+            pw.TableHelper.fromTextArray(
+              headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold,
+                fontSize: 9.5,
+                color: PdfColors.white,
+              ),
+              headerDecoration: pw.BoxDecoration(color: primary),
+              cellStyle: const pw.TextStyle(fontSize: 8.5),
+              cellAlignment: pw.Alignment.centerRight,
+              headers: [
+                _ar('المبلغ'),
+                _ar('التصنيف'),
+                _ar('البيان'),
+                _ar('التاريخ'),
+              ],
+              data: expenses
+                  .map(
+                    (e) => [
+                      _ar(Money(e.amountMinor, e.currency).format()),
+                      _ar(e.category),
+                      _ar(e.description),
+                      e.dateIso,
+                    ],
+                  )
+                  .toList(),
+            ),
+        ],
       ),
     );
     return doc.save();

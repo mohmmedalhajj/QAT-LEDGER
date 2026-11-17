@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/money.dart';
 import '../../core/theme.dart';
+import '../../data/models.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/erp_components.dart';
@@ -17,14 +18,46 @@ class TaxLedgerView extends StatefulWidget {
 class _TaxLedgerViewState extends State<TaxLedgerView> {
   CurrencyCode? _currencyFilter;
 
-  Future<void> _addTaxDialog(BuildContext context, AppController ctrl) async {
-    final qtyCtrl = TextEditingController(text: '0');
-    final rateCtrl = TextEditingController(text: '0');
-    final amountCtrl = TextEditingController();
-    final stallCtrl = TextEditingController(text: '0');
-    final laborCtrl = TextEditingController(text: '0');
-    final notesCtrl = TextEditingController();
-    CurrencyCode cur = ctrl.currencyPolicy.defaultCurrency;
+  Future<void> _openTaxDialog(
+    BuildContext context,
+    AppController ctrl, {
+    QatTaxEntry? existing,
+  }) async {
+    final qtyCtrl = TextEditingController(
+      text: existing != null
+          ? QuantityMath.formatMilli(existing.totalQtyMilli)
+          : '0',
+    );
+    final rateCtrl = TextEditingController(
+      text: existing != null
+          ? Money.formatMinor(existing.taxRateMinor, showZeroDecimals: false)
+              .replaceAll(',', '')
+          : '0',
+    );
+    final amountCtrl = TextEditingController(
+      text: existing != null
+          ? Money.formatMinor(existing.taxAmountMinor, showZeroDecimals: false)
+              .replaceAll(',', '')
+          : '',
+    );
+    final stallCtrl = TextEditingController(
+      text: existing != null
+          ? Money.formatMinor(
+              existing.stallOutflowMinor,
+              showZeroDecimals: false,
+            ).replaceAll(',', '')
+          : '0',
+    );
+    final laborCtrl = TextEditingController(
+      text: existing != null
+          ? Money.formatMinor(
+              existing.laborOutflowMinor,
+              showZeroDecimals: false,
+            ).replaceAll(',', '')
+          : '0',
+    );
+    final notesCtrl = TextEditingController(text: existing?.notes ?? '');
+    CurrencyCode cur = existing?.currency ?? ctrl.currencyPolicy.defaultCurrency;
 
     await showDialog<void>(
       context: context,
@@ -39,27 +72,33 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
         ],
         child: StatefulBuilder(
           builder: (ctx, setModalState) => AlertDialog(
-            title: const Text('قيد ضريبة ومصاريف السوق اليومية'),
+            title: Text(
+              existing == null
+                  ? 'قيد ضريبة ومصاريف السوق اليومية'
+                  : 'تعديل قيد الضريبة ومصاريف السوق',
+            ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                CurrencySelectorRow(
-                  policy: ctrl.currencyPolicy,
-                  selected: cur,
-                  onChanged: (c) => setModalState(() => cur = c),
-                ),
-                const SizedBox(height: 8),
-                AccountingNumberField(
-                  controller: qtyCtrl,
-                  label: 'الكمية الإجمالية',
-                ),
-                const SizedBox(height: 8),
-                AccountingNumberField(
-                  controller: rateCtrl,
-                  label: 'فئة الضريبة',
-                ),
-                const SizedBox(height: 8),
+                if (existing == null) ...[
+                  CurrencySelectorRow(
+                    policy: ctrl.currencyPolicy,
+                    selected: cur,
+                    onChanged: (c) => setModalState(() => cur = c),
+                  ),
+                  const SizedBox(height: 8),
+                  AccountingNumberField(
+                    controller: qtyCtrl,
+                    label: 'الكمية الإجمالية',
+                  ),
+                  const SizedBox(height: 8),
+                  AccountingNumberField(
+                    controller: rateCtrl,
+                    label: 'فئة الضريبة',
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 AccountingNumberField(
                   controller: amountCtrl,
                   label: 'مبلغ الضريبة (${cur.shortSymbol})',
@@ -101,15 +140,25 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
                 final stallMinor = Money.parseMinorUnits(stallCtrl.text);
                 final laborMinor = Money.parseMinorUnits(laborCtrl.text);
                 if (taxMinor <= 0 && stallMinor <= 0 && laborMinor <= 0) return;
-                await ctrl.repo.addTaxEntry(
-                  totalQtyMilli: QuantityMath.parseMilli(qtyCtrl.text),
-                  taxRateMinor: Money.parseMinorUnits(rateCtrl.text),
-                  taxAmountMinor: taxMinor,
-                  stallOutflowMinor: stallMinor,
-                  laborOutflowMinor: laborMinor,
-                  currency: cur,
-                  notes: notesCtrl.text,
-                );
+                if (existing == null) {
+                  await ctrl.repo.addTaxEntry(
+                    totalQtyMilli: QuantityMath.parseMilli(qtyCtrl.text),
+                    taxRateMinor: Money.parseMinorUnits(rateCtrl.text),
+                    taxAmountMinor: taxMinor,
+                    stallOutflowMinor: stallMinor,
+                    laborOutflowMinor: laborMinor,
+                    currency: cur,
+                    notes: notesCtrl.text,
+                  );
+                } else {
+                  await ctrl.repo.updateTaxEntry(
+                    id: existing.id,
+                    taxAmountMinor: taxMinor,
+                    stallOutflowMinor: stallMinor,
+                    laborOutflowMinor: laborMinor,
+                    notes: notesCtrl.text,
+                  );
+                }
                 await ctrl.reloadAll();
                 if (ctx.mounted) Navigator.pop(ctx);
               },
@@ -152,7 +201,7 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
 
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _addTaxDialog(context, ctrl),
+        onPressed: () => _openTaxDialog(context, ctrl),
         icon: const Icon(Icons.add),
         label: const Text('قيد ضريبة'),
       ),
@@ -227,6 +276,18 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              IconButton(
+                                tooltip: 'تعديل',
+                                onPressed: () => _openTaxDialog(
+                                  context,
+                                  ctrl,
+                                  existing: t,
+                                ),
+                                icon: const Icon(
+                                  Icons.edit_outlined,
+                                  size: 18,
+                                ),
+                              ),
                               IconButton(
                                 tooltip: 'أرشفة',
                                 onPressed: () async {

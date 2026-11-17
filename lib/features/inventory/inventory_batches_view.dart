@@ -1,9 +1,11 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/money.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../services/pdf_export_service.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/erp_components.dart';
@@ -20,20 +22,33 @@ class InventoryBatchesView extends StatefulWidget {
 class _InventoryBatchesViewState extends State<InventoryBatchesView> {
   int _section = 0; // 0 = batches, 1 = import weights
   String _search = '';
+  String _weightSearch = '';
   _StockFilter _stockFilter = _StockFilter.all;
   CurrencyCode? _currencyFilter;
 
-  Future<void> _openImportWeightDialog(AppController ctrl) async {
-    final receiverCtrl = TextEditingController();
-    final weightCtrl = TextEditingController();
-    final notesCtrl = TextEditingController();
+  Future<void> _openImportWeightDialog(
+    AppController ctrl, {
+    QatImportWeight? existing,
+  }) async {
+    final receiverCtrl =
+        TextEditingController(text: existing?.receiverName ?? '');
+    final weightCtrl = TextEditingController(
+      text: existing != null
+          ? QuantityMath.formatMilli(existing.weightMilli)
+          : '',
+    );
+    final notesCtrl = TextEditingController(text: existing?.notes ?? '');
 
     await showDialog<void>(
       context: context,
       builder: (ctx) => ErpDialogControllerScope(
         controllers: [receiverCtrl, weightCtrl, notesCtrl],
         child: AlertDialog(
-          title: const Text('تسجيل وزن الوارد اليومي'),
+          title: Text(
+            existing == null
+                ? 'تسجيل وزن الوارد اليومي'
+                : 'تعديل وزن الوارد',
+          ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -66,11 +81,20 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
               onPressed: () async {
                 final weightMilli = QuantityMath.parseMilli(weightCtrl.text);
                 if (receiverCtrl.text.trim().isEmpty || weightMilli <= 0) return;
-                await ctrl.repo.addImportWeight(
-                  weightMilli: weightMilli,
-                  receiverName: receiverCtrl.text.trim(),
-                  notes: notesCtrl.text,
-                );
+                if (existing == null) {
+                  await ctrl.repo.addImportWeight(
+                    weightMilli: weightMilli,
+                    receiverName: receiverCtrl.text.trim(),
+                    notes: notesCtrl.text,
+                  );
+                } else {
+                  await ctrl.repo.updateImportWeight(
+                    id: existing.id,
+                    weightMilli: weightMilli,
+                    receiverName: receiverCtrl.text.trim(),
+                    notes: notesCtrl.text,
+                  );
+                }
                 await ctrl.reloadAll();
                 if (ctx.mounted) Navigator.pop(ctx);
               },
@@ -105,13 +129,32 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
               .replaceAll(',', '')
           : '',
     );
+    final itemNoCtrl = TextEditingController(text: existing?.itemNumber ?? '');
+    final thresholdCtrl = TextEditingController(
+      text: existing != null && existing.lowStockThresholdMilli > 0
+          ? QuantityMath.formatMilli(existing.lowStockThresholdMilli)
+          : '',
+    );
+    final receiverCtrl =
+        TextEditingController(text: existing?.receiverName ?? '');
+    final notesCtrl = TextEditingController(text: existing?.notes ?? '');
     CurrencyCode currency =
         existing?.currency ?? ctrl.currencyPolicy.defaultCurrency;
 
     await showDialog<void>(
       context: context,
       builder: (ctx) => ErpDialogControllerScope(
-        controllers: [nameCtrl, qtyCtrl, unitCtrl, buyCtrl, sellCtrl],
+        controllers: [
+          nameCtrl,
+          qtyCtrl,
+          unitCtrl,
+          buyCtrl,
+          sellCtrl,
+          itemNoCtrl,
+          thresholdCtrl,
+          receiverCtrl,
+          notesCtrl,
+        ],
         child: StatefulBuilder(
           builder: (ctx, setModalState) => AlertDialog(
             title: Text(
@@ -197,6 +240,39 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: itemNoCtrl,
+                        textDirection: TextDirection.ltr,
+                        decoration: const InputDecoration(
+                          labelText: 'رقم الصنف / الشحنة',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: AccountingNumberField(
+                        controller: thresholdCtrl,
+                        label: 'حد التنبيه المنخفض',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: receiverCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'مستلم المخزون (اختياري)',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: notesCtrl,
+                  decoration: const InputDecoration(labelText: 'ملاحظات'),
+                ),
               ],
             ),
           ),
@@ -211,6 +287,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                 final qtyMilli = QuantityMath.parseMilli(qtyCtrl.text);
                 final buyMinor = Money.parseMinorUnits(buyCtrl.text);
                 final sellMinor = Money.parseMinorUnits(sellCtrl.text);
+                final threshMilli = QuantityMath.parseMilli(thresholdCtrl.text);
                 if (qtyMilli < 0) return;
                 if (existing == null) {
                   await ctrl.repo.addInventoryBatch(
@@ -220,6 +297,10 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                     buyPriceMinor: buyMinor,
                     sellPriceMinor: sellMinor,
                     currency: currency,
+                    itemNumber: itemNoCtrl.text,
+                    lowStockThresholdMilli: threshMilli,
+                    receiverName: receiverCtrl.text,
+                    notes: notesCtrl.text,
                   );
                 } else {
                   await ctrl.repo.updateInventoryBatch(
@@ -230,6 +311,10 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                     buyPriceMinor: buyMinor,
                     sellPriceMinor: sellMinor,
                     currency: currency,
+                    itemNumber: itemNoCtrl.text,
+                    lowStockThresholdMilli: threshMilli,
+                    receiverName: receiverCtrl.text,
+                    notes: notesCtrl.text,
                   );
                 }
                 await ctrl.reloadAll();
@@ -256,8 +341,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
       if (_stockFilter == _StockFilter.available && b.remainingQtyMilli <= 0) {
         return false;
       }
-      if (_stockFilter == _StockFilter.low &&
-          (b.remainingQtyMilli <= 0 || b.remainingQtyMilli > 5000)) {
+      if (_stockFilter == _StockFilter.low && !b.isLowStock) {
         return false;
       }
       if (_stockFilter == _StockFilter.depleted && b.remainingQtyMilli > 0) {
@@ -266,7 +350,17 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
       if (_search.isEmpty) return true;
       final q = _search.toLowerCase();
       return b.qatTypeName.toLowerCase().contains(q) ||
-          b.supplierName.toLowerCase().contains(q);
+          b.supplierName.toLowerCase().contains(q) ||
+          b.receiverName.toLowerCase().contains(q) ||
+          b.itemNumber.toLowerCase().contains(q);
+    }).toList();
+
+    final filteredWeights = ctrl.importWeights.where((w) {
+      if (_weightSearch.isEmpty) return true;
+      final q = _weightSearch.toLowerCase();
+      return w.receiverName.toLowerCase().contains(q) ||
+          w.dateIso.contains(q) ||
+          w.notes.toLowerCase().contains(q);
     }).toList();
 
     return Scaffold(
@@ -299,11 +393,15 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
             ),
           ),
           if (_section == 1) ...[
+            ErpSearchFilterBar(
+              searchHint: 'بحث باسم المستلم أو التاريخ...',
+              onSearchChanged: (v) => setState(() => _weightSearch = v.trim()),
+            ),
             Expanded(
-              child: ctrl.importWeights.isEmpty
+              child: filteredWeights.isEmpty
                   ? EmptyLedgerState(
                       icon: Icons.scale_outlined,
-                      title: 'لا توجد أوزان وارد مسجلة',
+                      title: 'لا توجد أوزان وارد مطابقة',
                       subtitle:
                           'سجل أوزان الشحنات الواردة اليومية ومستلميها بدقة',
                       actionLabel: 'تسجيل وزن وارد',
@@ -316,18 +414,18 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                           metrics: [
                             ErpSummaryMetric(
                               label: 'إجمالي الشحنات',
-                              value: '${ctrl.importWeights.length}',
+                              value: '${filteredWeights.length}',
                             ),
                             ErpSummaryMetric(
                               label: 'إجمالي الوزن المسجل',
                               value:
-                                  '${QuantityMath.formatMilli(ctrl.importWeights.fold<int>(0, (s, w) => s + w.weightMilli))} كجم',
+                                  '${QuantityMath.formatMilli(filteredWeights.fold<int>(0, (s, w) => s + w.weightMilli))} كجم',
                               toneColor: pal.brand,
                             ),
                           ],
                         ),
                         const SizedBox(height: 10),
-                        for (final w in ctrl.importWeights)
+                        for (final w in filteredWeights)
                           Card(
                             margin: const EdgeInsets.only(bottom: 8),
                             child: ListTile(
@@ -349,8 +447,22 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                               subtitle: Text(
                                 '${w.dateIso}${w.notes.isNotEmpty ? ' • ${w.notes}' : ''}',
                               ),
-                              trailing: ctrl.canDeleteCurrent
-                                  ? IconButton(
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'تعديل',
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      size: 18,
+                                    ),
+                                    onPressed: () => _openImportWeightDialog(
+                                      ctrl,
+                                      existing: w,
+                                    ),
+                                  ),
+                                  if (ctrl.canDeleteCurrent)
+                                    IconButton(
                                       tooltip: 'حذف',
                                       icon: Icon(
                                         Icons.delete_outline,
@@ -371,8 +483,9 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                                             .deleteImportWeight(w.id);
                                         await ctrl.reloadAll();
                                       },
-                                    )
-                                  : null,
+                                    ),
+                                ],
+                              ),
                             ),
                           ),
                       ],
@@ -380,7 +493,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
             ),
           ] else ...[
             ErpSearchFilterBar(
-            searchHint: 'بحث باسم الصنف أو المورد...',
+            searchHint: 'بحث باسم الصنف أو المورد أو المستلم...',
             onSearchChanged: (v) => setState(() => _search = v.trim()),
             filters: [
               ChoiceChip(
@@ -438,9 +551,29 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const ErpSectionHeader(
+                                ErpSectionHeader(
                                   title: 'تقييم المخزون الحالي',
                                   icon: Icons.assessment_outlined,
+                                  trailing: TextButton.icon(
+                                    onPressed: () async {
+                                      final bytes = await PdfExportService
+                                          .instance
+                                          .buildInventoryReportPdf(
+                                        agency: ctrl.settings,
+                                        batches: filtered,
+                                        valuation: ctrl.inventoryValuation,
+                                        importWeights: ctrl.importWeights,
+                                      );
+                                      await Printing.layoutPdf(
+                                        onLayout: (_) async => bytes,
+                                      );
+                                    },
+                                    icon: const Icon(
+                                      Icons.picture_as_pdf_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('تصدير PDF'),
+                                  ),
                                 ),
                                 const SizedBox(height: 10),
                                 for (final v in ctrl.inventoryValuation.values)
@@ -482,8 +615,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                       for (final b in filtered) ...[
                         Builder(
                           builder: (context) {
-                            final lowStock = b.remainingQtyMilli > 0 &&
-                                b.remainingQtyMilli <= 5000;
+                            final lowStock = b.isLowStock;
                             final depleted = b.remainingQtyMilli <= 0;
                             final ratio = b.initialQtyMilli > 0
                                 ? (b.remainingQtyMilli / b.initialQtyMilli)
@@ -540,7 +672,10 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                                     ),
                                     const SizedBox(height: 8),
                                     Text(
-                                      'شراء: ${Money(b.buyPriceMinor, b.currency).format()} • بيع: ${Money(b.sellPriceMinor, b.currency).format()}${b.supplierName.isNotEmpty ? ' • المورد: ${b.supplierName}' : ''}',
+                                      'شراء: ${Money(b.buyPriceMinor, b.currency).format()} • بيع: ${Money(b.sellPriceMinor, b.currency).format()}'
+                                      '${b.supplierName.isNotEmpty ? ' • المورد: ${b.supplierName}' : ''}'
+                                      '${b.receiverName.isNotEmpty ? ' • المستلم: ${b.receiverName}' : ''}'
+                                      '${b.itemNumber.isNotEmpty ? ' • رقم: ${b.itemNumber}' : ''}',
                                       style: TextStyle(
                                         fontSize: 12,
                                         color: pal.textSecondary,

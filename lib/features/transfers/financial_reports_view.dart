@@ -10,6 +10,7 @@ import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../licensing/license_models.dart';
 import '../../services/pdf_export_service.dart';
+import '../../services/whatsapp_share_service.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/erp_components.dart';
@@ -158,7 +159,32 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
                   label: const Text('تحديد الفترة'),
                 ),
                 const SizedBox(width: 6),
-                if (data != null)
+                if (data != null) ...[
+                  IconButton.outlined(
+                    tooltip: 'مشاركة التقرير عبر واتساب',
+                    onPressed: () async {
+                      final lines = <String>[
+                        'التقرير المالي الشامل — ${ctrl.settings.agencyName}',
+                        'الفترة: ${_fromIso ?? 'من البداية'} إلى ${_toIso ?? 'حتى اليوم'}',
+                        for (final cur in ctrl.currencyPolicy.allowedCurrencies)
+                          if (data[cur] != null) ...[
+                            '',
+                            '--- ${cur.arabicName} (${cur.code}) ---',
+                            'المبيعات: ${Money(data[cur]!.salesTotalMinor, cur).format()}',
+                            'المصروفات التشغيلية: ${Money(data[cur]!.expensesMinor, cur).format()}',
+                            'الضرائب والمصاريف اليومية: ${Money(data[cur]!.totalTaxAndOutflowsMinor, cur).format()}',
+                            'صافي الربح التقديري: ${Money(data[cur]!.netProfitMinor, cur).format()}',
+                            'رصيد الصندوق: ${Money(data[cur]!.cashBoxBalanceMinor, cur).format()}',
+                            'ديون العملاء: ${Money(data[cur]!.totalCustomerDebtMinor, cur).format()}',
+                            'مستحقات الموردين: ${Money(data[cur]!.totalSupplierPayableMinor, cur).format()}',
+                          ],
+                      ].join('\n');
+                      await WhatsappShareService.instance
+                          .openWhatsApp(text: lines);
+                    },
+                    icon: const Icon(Icons.chat_outlined, size: 18),
+                  ),
+                  const SizedBox(width: 6),
                   IconButton.filled(
                     tooltip: 'تصدير PDF',
                     onPressed: () async {
@@ -173,6 +199,7 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
                     },
                     icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
                   ),
+                ],
               ],
             ),
           ),
@@ -301,7 +328,127 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
               ),
               const SizedBox(height: 16),
             ],
+        if (data != null) ...[
+          const ErpSectionHeader(
+            title: 'سجل العمليات الزمني الموحد',
+            icon: Icons.timeline_outlined,
+          ),
+          const SizedBox(height: 8),
+          ..._buildTimelineWidgets(ctrl, pal),
+        ],
       ],
     );
+  }
+
+  List<Widget> _buildTimelineWidgets(AppController ctrl, QatPalette pal) {
+    bool inRange(String iso) {
+      if (_fromIso != null && iso.compareTo(_fromIso!) < 0) return false;
+      if (_toIso != null && iso.compareTo(_toIso!) > 0) return false;
+      return true;
+    }
+
+    final events = <({
+      int ms,
+      String iso,
+      String kind,
+      String title,
+      String amountLabel,
+      Color color,
+    })>[
+      for (final s in ctrl.sales.where((e) => inRange(e.dateIso)))
+        (
+          ms: s.dateMs,
+          iso: s.dateIso,
+          kind: 'مبيعات',
+          title: '${s.invoiceNumber} — ${s.customerName}',
+          amountLabel: Money(s.totalAmountMinor, s.currency).format(),
+          color: pal.brand,
+        ),
+      for (final p in ctrl.customerPayments.where((e) => inRange(e.dateIso)))
+        (
+          ms: p.dateMs,
+          iso: p.dateIso,
+          kind: 'سند قبض',
+          title: '${p.customerName} (${p.paymentMethod})',
+          amountLabel: Money(p.amountMinor, p.currency).format(),
+          color: pal.success,
+        ),
+      for (final p in ctrl.purchases.where((e) => inRange(e.dateIso)))
+        (
+          ms: p.dateMs,
+          iso: p.dateIso,
+          kind: 'مشتريات',
+          title: '${p.purchaseNumber} — ${p.supplierName}',
+          amountLabel: Money(p.totalAmountMinor, p.currency).format(),
+          color: pal.accent,
+        ),
+      for (final p in ctrl.supplierPayments.where((e) => inRange(e.dateIso)))
+        (
+          ms: p.dateMs,
+          iso: p.dateIso,
+          kind: 'سند صرف',
+          title: '${p.supplierName} (${p.paymentMethod})',
+          amountLabel: Money(p.amountMinor, p.currency).format(),
+          color: pal.warning,
+        ),
+      for (final e in ctrl.expenses.where((e) => inRange(e.dateIso)))
+        (
+          ms: e.dateMs,
+          iso: e.dateIso,
+          kind: 'مصروف',
+          title: '${e.description} (${e.category})',
+          amountLabel: Money(e.amountMinor, e.currency).format(),
+          color: pal.danger,
+        ),
+      for (final t in ctrl.transfers.where((e) => inRange(e.dateIso)))
+        (
+          ms: t.dateMs,
+          iso: t.dateIso,
+          kind: 'حوالة',
+          title:
+              '${t.receiverName.isEmpty ? t.senderName : t.receiverName} (${t.status.arabicLabel})',
+          amountLabel: Money(t.amountMinor, t.currency).format(),
+          color: pal.info,
+        ),
+    ]..sort((a, b) => b.ms.compareTo(a.ms));
+
+    if (events.isEmpty) {
+      return const [
+        Padding(
+          padding: EdgeInsets.symmetric(vertical: 12),
+          child: Text('لا توجد حركات زمنية مسجلة في هذه الفترة'),
+        ),
+      ];
+    }
+
+    return [
+      for (final ev in events.take(40))
+        Card(
+          margin: const EdgeInsets.only(bottom: 6),
+          child: ListTile(
+            dense: true,
+            leading: StatusPill(
+              label: ev.kind,
+              bg: ev.color.withValues(alpha: 0.14),
+              fg: ev.color,
+            ),
+            title: Text(
+              ev.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+            ),
+            subtitle: Text(ev.iso, textDirection: TextDirection.ltr),
+            trailing: Text(
+              ev.amountLabel,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: ev.color,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ),
+    ];
   }
 }

@@ -30,6 +30,41 @@ class WhatsappShareService {
     return sb.toString().trim();
   }
 
+  String formatPurchaseMessage(
+    AgencySettings agency,
+    SupplierPurchase purchase,
+  ) {
+    final sb = StringBuffer()
+      ..writeln(agency.agencyName)
+      ..writeln('فاتورة مشتريات: ${purchase.purchaseNumber}')
+      ..writeln('المورد: ${purchase.supplierName}')
+      ..writeln('التاريخ: ${QatDateUtils.formatArabicDateTime12h(purchase.dateMs)}')
+      ..writeln('----------------');
+    for (final it in purchase.items) {
+      sb.writeln(
+        '• ${it.qatTypeName} (${QuantityMath.formatMilli(it.qtyMilli)} ${it.unit}) = ${Money(it.lineTotalMinor, purchase.currency).format()}',
+      );
+    }
+    sb
+      ..writeln('----------------')
+      ..writeln('الإجمالي: ${Money(purchase.totalAmountMinor, purchase.currency).format()}')
+      ..writeln('المدفوع: ${Money(purchase.paidAmountMinor, purchase.currency).format()}')
+      ..writeln('المتبقي: ${Money(purchase.remainingAmountMinor, purchase.currency).format()}')
+      ..writeln('الدفع: ${purchase.effectivePaymentMethodLabel}');
+    if (purchase.bankName.isNotEmpty || purchase.transferNumber.isNotEmpty) {
+      sb.writeln(
+        'البنك / الحوالة: ${purchase.bankName} ${purchase.transferNumber}'.trim(),
+      );
+    }
+    if (purchase.demarMinor > 0) {
+      sb.writeln(
+        'الديمار (${purchase.demarType}): ${Money(purchase.demarMinor, purchase.currency).format()}',
+      );
+    }
+    if (agency.footerNote.isNotEmpty) sb.writeln(agency.footerNote);
+    return sb.toString().trim();
+  }
+
   String formatCustomerDebtReminder(AgencySettings agency, Customer customer) {
     final sb = StringBuffer()
       ..writeln(agency.agencyName)

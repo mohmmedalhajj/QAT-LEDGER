@@ -2357,7 +2357,11 @@ class QatRepository {
     return points;
   }
 
-  Future<Map<CurrencyCode, List<StatementLine>>> getCustomerStatement(int customerId) async {
+  Future<Map<CurrencyCode, List<StatementLine>>> getCustomerStatement(
+    int customerId, {
+    String? fromIso,
+    String? toIso,
+  }) async {
     final allSales = (await getSales()).where((s) => s.customerId == customerId).toList();
     final payments = await getCustomerPayments(customerId: customerId);
 
@@ -2369,7 +2373,7 @@ class QatRepository {
           ms: s.dateMs,
           iso: s.dateIso,
           ref: s.invoiceNumber,
-          desc: 'فاتورة مبيعات (${s.paymentType.arabicLabel})',
+          desc: 'فاتورة مبيعات (${s.effectivePaymentMethodLabel})',
           debit: s.totalAmountMinor,
           credit: s.paidAmountMinor,
         ));
@@ -2386,10 +2390,30 @@ class QatRepository {
       }
       if (rawEvents.isEmpty) continue;
       rawEvents.sort((a, b) => a.ms.compareTo(b.ms));
-      int running = 0;
+
+      int opening = 0;
       final lines = <StatementLine>[];
       for (final ev in rawEvents) {
-        running += ev.debit - ev.credit;
+        if (fromIso != null && fromIso.isNotEmpty && ev.iso.compareTo(fromIso) < 0) {
+          opening += ev.debit - ev.credit;
+          continue;
+        }
+        if (toIso != null && toIso.isNotEmpty && ev.iso.compareTo(toIso) > 0) {
+          continue;
+        }
+        if (lines.isEmpty && opening != 0 && fromIso != null) {
+          lines.add(StatementLine(
+            dateMs: ev.ms,
+            dateIso: fromIso,
+            reference: 'OPEN',
+            description: 'رصيد سابق مرحّل ما قبل $fromIso',
+            currency: cur,
+            debitMinor: opening > 0 ? opening : 0,
+            creditMinor: opening < 0 ? -opening : 0,
+            runningBalanceMinor: opening,
+          ));
+        }
+        opening += ev.debit - ev.credit;
         lines.add(StatementLine(
           dateMs: ev.ms,
           dateIso: ev.iso,
@@ -2398,15 +2422,31 @@ class QatRepository {
           currency: cur,
           debitMinor: ev.debit,
           creditMinor: ev.credit,
-          runningBalanceMinor: running,
+          runningBalanceMinor: opening,
         ));
       }
-      out[cur] = lines;
+      if (lines.isEmpty && opening != 0 && fromIso != null) {
+        lines.add(StatementLine(
+          dateMs: DateTime.now().millisecondsSinceEpoch,
+          dateIso: fromIso,
+          reference: 'OPEN',
+          description: 'رصيد سابق مرحّل ما قبل $fromIso',
+          currency: cur,
+          debitMinor: opening > 0 ? opening : 0,
+          creditMinor: opening < 0 ? -opening : 0,
+          runningBalanceMinor: opening,
+        ));
+      }
+      if (lines.isNotEmpty) out[cur] = lines;
     }
     return out;
   }
 
-  Future<Map<CurrencyCode, List<StatementLine>>> getSupplierStatement(int supplierId) async {
+  Future<Map<CurrencyCode, List<StatementLine>>> getSupplierStatement(
+    int supplierId, {
+    String? fromIso,
+    String? toIso,
+  }) async {
     final allPurchases = await getSupplierPurchases(supplierId: supplierId);
     final payments = await getSupplierPayments(supplierId: supplierId);
 
@@ -2418,7 +2458,7 @@ class QatRepository {
           ms: p.dateMs,
           iso: p.dateIso,
           ref: p.purchaseNumber,
-          desc: 'فاتورة شراء (${p.paymentType.arabicLabel})',
+          desc: 'فاتورة شراء (${p.effectivePaymentMethodLabel})',
           debit: p.totalAmountMinor,
           credit: p.paidAmountMinor,
         ));
@@ -2435,10 +2475,30 @@ class QatRepository {
       }
       if (rawEvents.isEmpty) continue;
       rawEvents.sort((a, b) => a.ms.compareTo(b.ms));
-      int running = 0;
+
+      int opening = 0;
       final lines = <StatementLine>[];
       for (final ev in rawEvents) {
-        running += ev.debit - ev.credit;
+        if (fromIso != null && fromIso.isNotEmpty && ev.iso.compareTo(fromIso) < 0) {
+          opening += ev.debit - ev.credit;
+          continue;
+        }
+        if (toIso != null && toIso.isNotEmpty && ev.iso.compareTo(toIso) > 0) {
+          continue;
+        }
+        if (lines.isEmpty && opening != 0 && fromIso != null) {
+          lines.add(StatementLine(
+            dateMs: ev.ms,
+            dateIso: fromIso,
+            reference: 'OPEN',
+            description: 'رصيد سابق مرحّل ما قبل $fromIso',
+            currency: cur,
+            debitMinor: opening > 0 ? opening : 0,
+            creditMinor: opening < 0 ? -opening : 0,
+            runningBalanceMinor: opening,
+          ));
+        }
+        opening += ev.debit - ev.credit;
         lines.add(StatementLine(
           dateMs: ev.ms,
           dateIso: ev.iso,
@@ -2447,10 +2507,22 @@ class QatRepository {
           currency: cur,
           debitMinor: ev.debit,
           creditMinor: ev.credit,
-          runningBalanceMinor: running,
+          runningBalanceMinor: opening,
         ));
       }
-      out[cur] = lines;
+      if (lines.isEmpty && opening != 0 && fromIso != null) {
+        lines.add(StatementLine(
+          dateMs: DateTime.now().millisecondsSinceEpoch,
+          dateIso: fromIso,
+          reference: 'OPEN',
+          description: 'رصيد سابق مرحّل ما قبل $fromIso',
+          currency: cur,
+          debitMinor: opening > 0 ? opening : 0,
+          creditMinor: opening < 0 ? -opening : 0,
+          runningBalanceMinor: opening,
+        ));
+      }
+      if (lines.isNotEmpty) out[cur] = lines;
     }
     return out;
   }
@@ -2636,6 +2708,24 @@ class QatRepository {
         );
       }
     });
+  }
+
+  /// Permanently deletes an already-archived row (never re-adjusts balances if archived).
+  Future<void> deletePermanently(String tableName, int id) async {
+    const allowed = {
+      'sales',
+      'customer_payments',
+      'supplier_purchases',
+      'supplier_payments',
+      'expenses',
+      'qat_tax_entries',
+      'money_transfers',
+      'inventory_batches',
+    };
+    if (!allowed.contains(tableName)) throw ArgumentError('جدول غير مدعوم: $tableName');
+    await setArchived(tableName, id, true);
+    final db = await _db;
+    await db.delete(tableName, where: 'id = ?', whereArgs: [id]);
   }
 
   // ---------------------------------------------------------------------------

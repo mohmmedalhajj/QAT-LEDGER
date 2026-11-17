@@ -22,12 +22,91 @@ class DashboardTab extends StatelessWidget {
     final width = MediaQuery.sizeOf(context).width;
     final isWide = width >= 780;
 
-    final lowStockCount = ctrl.batches
-        .where((b) => b.remainingQtyMilli > 0 && b.remainingQtyMilli <= 5000)
-        .length;
+    final lowStockCount = ctrl.batches.where((b) => b.isLowStock).length;
     final pendingTransfersCount = ctrl.transfers
         .where((t) => t.status == TransferStatus.pending)
         .length;
+
+    Future<void> openDailyOutflowsDialog() async {
+      final taxCtrl = TextEditingController(text: '0');
+      final stallCtrl = TextEditingController(text: '0');
+      final laborCtrl = TextEditingController(text: '0');
+      final notesCtrl = TextEditingController();
+      CurrencyCode cur = policy.defaultCurrency;
+
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => ErpDialogControllerScope(
+          controllers: [taxCtrl, stallCtrl, laborCtrl, notesCtrl],
+          child: StatefulBuilder(
+            builder: (ctx, setModalState) => AlertDialog(
+              title: const Text('الرسوم والمصروفات اليومية الثابتة'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CurrencySelectorRow(
+                      policy: policy,
+                      selected: cur,
+                      onChanged: (c) => setModalState(() => cur = c),
+                    ),
+                    const SizedBox(height: 8),
+                    AccountingNumberField(
+                      controller: taxCtrl,
+                      label: 'ضريبة القات اليومية (${cur.shortSymbol})',
+                    ),
+                    const SizedBox(height: 8),
+                    AccountingNumberField(
+                      controller: stallCtrl,
+                      label: 'خرج القعادة / المفرش اليومي (${cur.shortSymbol})',
+                    ),
+                    const SizedBox(height: 8),
+                    AccountingNumberField(
+                      controller: laborCtrl,
+                      label: 'خرج العمال اليومي (${cur.shortSymbol})',
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: notesCtrl,
+                      decoration: const InputDecoration(labelText: 'ملاحظات'),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('إلغاء'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final taxMinor = Money.parseMinorUnits(taxCtrl.text);
+                    final stallMinor = Money.parseMinorUnits(stallCtrl.text);
+                    final laborMinor = Money.parseMinorUnits(laborCtrl.text);
+                    if (taxMinor <= 0 && stallMinor <= 0 && laborMinor <= 0) {
+                      return;
+                    }
+                    await ctrl.repo.addTaxEntry(
+                      totalQtyMilli: 0,
+                      taxRateMinor: 0,
+                      taxAmountMinor: taxMinor,
+                      stallOutflowMinor: stallMinor,
+                      laborOutflowMinor: laborMinor,
+                      currency: cur,
+                      source: 'لوحة التحكم',
+                      notes: notesCtrl.text,
+                    );
+                    await ctrl.reloadAll();
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                  child: const Text('حفظ الرسوم اليومية'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return RefreshIndicator(
       onRefresh: ctrl.reloadAll,
@@ -130,7 +209,7 @@ class DashboardTab extends StatelessWidget {
           Text('إجراءات سريعة', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           GridView.count(
-            crossAxisCount: isWide ? 8 : 4,
+            crossAxisCount: isWide ? 5 : 4,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             mainAxisSpacing: 8,
@@ -184,6 +263,18 @@ class DashboardTab extends StatelessWidget {
                 label: 'نسخ احتياطي',
                 color: pal.accent,
                 onTap: () => ctrl.setSection(4, subTab: 2),
+              ),
+              _QuickActionTile(
+                icon: Icons.account_balance_outlined,
+                label: 'الضريبة والمفرش',
+                color: pal.warning,
+                onTap: openDailyOutflowsDialog,
+              ),
+              _QuickActionTile(
+                icon: Icons.inventory_2_outlined,
+                label: 'جرد المخزون',
+                color: pal.info,
+                onTap: () => ctrl.navigateToRoute(AppScreenRoute.inventory),
               ),
             ],
           ),
