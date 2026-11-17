@@ -1,9 +1,9 @@
 # BUILD AND RELEASE GUIDE — QAT LEDGER (`ميزان القات`)
 
 ## 1. Prerequisites
-- **Flutter SDK:** Stable channel (`>= 3.29`)
-- **Java JDK:** 17
-- **Android SDK:** Compile/Target SDK `35`, Minimum SDK `24`
+- **Flutter SDK:** Stable channel (CI verified on Flutter stable / Dart `3.14.0` ecosystem)
+- **Java JDK:** 17 (Temurin 17; AGP `9.3.1` / Gradle `9.5.0` / KGP `2.4.20`)
+- **Android SDK:** `flutter.compileSdkVersion` / `flutter.targetSdkVersion` (`36` on Flutter stable), Minimum SDK `flutter.minSdkVersion` (`24`)
 - **Linux Test Runtime (for `sqflite_common_ffi` unit tests):** `libsqlite3-0` / `libsqlite3-dev`
 
 ---
@@ -78,6 +78,11 @@ Expected output paths after running on a Flutter + Android SDK host:
 
 ---
 
-## 6. Current Sandbox Build Status
-- **APK Binaries Built Locally:** **NONE** (no Flutter/JDK/Android SDK locally; `dl.google.com` & `pub.dev` blocked; CI skipped per user instruction).
+## 6. Current Sandbox & GitHub Actions Build Status
+- **APK Binaries Built Locally:** **NONE** (sandbox lacks Flutter/JDK/Android SDK).
+- **GitHub Actions Run `44020629330` (`7c3c3f6`):**
+  - Steps `1–14` **PASSED**: `flutter pub get`, `flutter analyze`, `flutter test -r expanded` (all 8 test suites), `Build Customer Release APK`, `Build Developer Release APK`, and `Verify APK manifests, package IDs, signatures, and bundle deliverables` (`aapt2` + `apksigner` + `sha256sum`).
+  - **Step `15` (`Smoke-test Customer & Developer APKs on Android Emulator`) HUNG** for >47 minutes because `adb wait-for-device` lacked a timeout when `/dev/kvm` was present, hitting the 45-minute job timeout (`cancelled` at `2026-11-17T05:51:56Z`) before Step `16` (`Upload release APKs and verification reports`) could run.
+  - **Uploaded Artifacts:** `0` (`{"total_count":0,"artifacts":[]}`).
+  - **Fix Prepared:** Updated `docs/ci/flutter_build.yml` (and `.github/workflows/flutter_build.yml`) so `upload-artifact@v4` runs immediately after Step `14`, and Step `16` (emulator smoke test) is bounded (`timeout-minutes: 10`, `emulator -accel-check`, `EMU_PID` liveness check, bounded 180s ADB/boot wait, clean teardown).
 - **Thermal Printer Note:** ESC/POS `GS v 0` 58mm/80mm raster printing (`EscPosService` + `MainActivity.kt` SPP) has not been executed on a physical Bluetooth printer and requires real device hardware verification.

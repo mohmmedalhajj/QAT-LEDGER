@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Properties
 
 plugins {
@@ -16,10 +17,23 @@ fun escapeBuildConfig(value: String): String =
 
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
-val hasReleaseKeystore = keystorePropertiesFile.exists()
-if (hasReleaseKeystore) {
+var resolvedReleaseKeystoreFile: File? = null
+if (keystorePropertiesFile.exists()) {
     keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+    val sf = keystoreProperties.getProperty("storeFile")
+    if (!sf.isNullOrBlank()) {
+        val appRel = file(sf)
+        val rootRel = rootProject.file(sf)
+        val candidate = if (appRel.exists()) appRel else rootRel
+        if (candidate.exists()) {
+            resolvedReleaseKeystoreFile = candidate
+        }
+    }
 }
+val hasReleaseKeystore = resolvedReleaseKeystoreFile != null &&
+    !keystoreProperties.getProperty("storePassword").isNullOrBlank() &&
+    !keystoreProperties.getProperty("keyAlias").isNullOrBlank() &&
+    !keystoreProperties.getProperty("keyPassword").isNullOrBlank()
 
 android {
     namespace = "com.aistudio.tofanqat.nxzwmb"
@@ -67,11 +81,7 @@ android {
     signingConfigs {
         if (hasReleaseKeystore) {
             create("release") {
-                val sf = keystoreProperties.getProperty("storeFile")
-                if (!sf.isNullOrBlank()) {
-                    val appRel = file(sf)
-                    storeFile = if (appRel.exists()) appRel else rootProject.file(sf)
-                }
+                storeFile = resolvedReleaseKeystoreFile
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
