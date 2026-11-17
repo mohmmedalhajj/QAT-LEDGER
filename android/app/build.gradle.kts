@@ -23,16 +23,12 @@ if (hasReleaseKeystore) {
 
 android {
     namespace = "com.aistudio.tofanqat.nxzwmb"
-    compileSdk = 35
+    compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
     }
 
     buildFeatures {
@@ -41,8 +37,8 @@ android {
 
     defaultConfig {
         applicationId = "com.aistudio.tofanqat.nxzwmb"
-        minSdk = 24
-        targetSdk = 35
+        minSdk = flutter.minSdkVersion
+        targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         buildConfigField("String", "QAT_LICENSE_PUBLIC_KEYS", "\"${escapeBuildConfig(qatLicensePublicKeys)}\"")
@@ -91,6 +87,12 @@ android {
         debug {
             isMinifyEnabled = false
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
