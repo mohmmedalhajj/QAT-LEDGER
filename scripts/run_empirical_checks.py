@@ -274,6 +274,13 @@ def test_assets_and_dart_structure():
         assert "WavingPalestineFlag" not in src
         assert "tofan_backups" not in src
         assert "150.0" not in src
+        assert not re.search(r"\b_{2,}\b", src), f"Unnecessary multiple underscores in {df}"
+
+    with open(os.path.join(ROOT, "lib/data/models.dart"), "r", encoding="utf-8") as mf:
+        models_src = mf.read()
+    assert models_src.count("String get effectivePaymentMethodLabel") >= 2, (
+        "Both Sale and SupplierPurchase must expose effectivePaymentMethodLabel"
+    )
 
     # Verify original pre-change backup archive
     backup_zip = os.path.join(ROOT, "backup/qat_ledger_kotlin_original_516e118.zip")

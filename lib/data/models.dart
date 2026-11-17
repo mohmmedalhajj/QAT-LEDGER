@@ -399,6 +399,11 @@ class SupplierPurchase {
 
   int get overpaymentSurplusMinor =>
       paidAmountMinor > totalAmountMinor ? (paidAmountMinor - totalAmountMinor) : 0;
+
+  String get effectivePaymentMethodLabel {
+    if (paymentMethod.trim().isNotEmpty) return paymentMethod;
+    return paymentType.arabicLabel;
+  }
 }
 
 @immutable

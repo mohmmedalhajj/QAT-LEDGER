@@ -730,7 +730,7 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
               : ListView.separated(
                   padding: const EdgeInsets.all(16),
                   itemCount: filtered.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
                   itemBuilder: (_, idx) {
                     final r = filtered[idx];
                     final exp = (r['expires_at_ms'] as num).toInt();

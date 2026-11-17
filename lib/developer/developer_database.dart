@@ -22,7 +22,7 @@ class DeveloperDatabaseService {
       options: OpenDatabaseOptions(
         version: 2,
         onCreate: (db, _) async => _createSchema(db),
-        onUpgrade: (db, _, __) async => _createSchema(db),
+        onUpgrade: (db, _, _) async => _createSchema(db),
         onOpen: (db) async => _ensureColumns(db),
       ),
     );
