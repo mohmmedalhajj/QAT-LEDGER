@@ -399,9 +399,13 @@ class _CurrencySectionHeader extends StatelessWidget {
       children: [
         CurrencyBadge(currency: currency),
         const SizedBox(width: 8),
-        Text(
-          'ملخص اليوم — ${currency.arabicName}',
-          style: Theme.of(context).textTheme.titleMedium,
+        Expanded(
+          child: Text(
+            'ملخص اليوم — ${currency.arabicName}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
         ),
       ],
     );

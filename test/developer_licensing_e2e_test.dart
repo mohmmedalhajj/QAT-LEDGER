@@ -18,14 +18,11 @@ import 'package:qat_ledger/licensing/trusted_time_guard.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import '_ci_diag_helper.dart';
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
 
   test('Developer signs license -> Customer verifies with public key only; expired license never destroys data', () async {
-    await runWithCiDiag('developer_licensing_e2e_test', () async {
     final tempDir = await Directory.systemTemp.createTemp('qat_dev_e2e_');
     try {
       SharedPreferences.setMockInitialValues({});
@@ -116,6 +113,5 @@ void main() {
     } finally {
       await tempDir.delete(recursive: true);
     }
-    });
   });
 }

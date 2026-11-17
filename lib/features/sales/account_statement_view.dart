@@ -204,9 +204,13 @@ class _AccountStatementViewState extends State<AccountStatementView> {
               children: [
                 CurrencyBadge(currency: entry.key),
                 const SizedBox(width: 8),
-                Text(
-                  'دفتر ${entry.key.arabicName}',
-                  style: Theme.of(context).textTheme.titleMedium,
+                Expanded(
+                  child: Text(
+                    'دفتر ${entry.key.arabicName}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
               ],
             ),

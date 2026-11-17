@@ -9,11 +9,8 @@ import 'package:qat_ledger/licensing/license_verifier.dart';
 import 'package:qat_ledger/licensing/trusted_key_registry.dart';
 import 'package:qat_ledger/licensing/trusted_time_guard.dart';
 
-import '_ci_diag_helper.dart';
-
 void main() {
   test('Ed25519 QL1 and .qlic canonical signing, verification, and security guards', () async {
-    await runWithCiDiag('licensing_ed25519_test', () async {
     final ed = Ed25519();
     final seed = List<int>.generate(32, (i) => i + 1);
     final kp = await ed.newKeyPairFromSeed(seed);
@@ -105,6 +102,5 @@ void main() {
       nowEpochMs: 1710000000000,
     );
     expect(untrusted.kind, LicenseStateKind.untrustedKey);
-    });
   });
 }

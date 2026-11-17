@@ -324,7 +324,14 @@ class CurrencySelectorRow extends StatelessWidget {
     if (!policy.canSwitchCurrency) {
       return Row(
         children: [
-          Text('العملة المعتمدة:', style: Theme.of(context).textTheme.bodySmall),
+          Flexible(
+            child: Text(
+              'العملة المعتمدة:',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
           const SizedBox(width: 8),
           CurrencyBadge(currency: policy.defaultCurrency),
         ],

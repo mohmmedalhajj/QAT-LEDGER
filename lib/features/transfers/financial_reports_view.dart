@@ -188,9 +188,13 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
                 children: [
                   CurrencyBadge(currency: cur),
                   const SizedBox(width: 8),
-                  Text(
-                    'القائمة المالية — ${cur.arabicName}',
-                    style: Theme.of(context).textTheme.titleMedium,
+                  Expanded(
+                    child: Text(
+                      'القائمة المالية — ${cur.arabicName}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                   ),
                 ],
               ),

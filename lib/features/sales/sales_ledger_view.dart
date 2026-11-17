@@ -541,11 +541,15 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
                                     ),
                                   ),
                                   const SizedBox(width: 12),
-                                  Text(
-                                    '${s.items.length} أصناف',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: pal.textSecondary,
+                                  Expanded(
+                                    child: Text(
+                                      '${s.items.length} أصناف',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: pal.textSecondary,
+                                      ),
                                     ),
                                   ),
                                 ],

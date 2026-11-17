@@ -10,14 +10,11 @@ import 'package:qat_ledger/data/qat_repository.dart';
 import 'package:qat_ledger/data/room_migrator.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import '_ci_diag_helper.dart';
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
 
   test('repository full accounting lifecycle: purchase edit, sale stock+debt, recipient report, atomic .qbak backup/restore', () async {
-    await runWithCiDiag('repository_accounting_test', () async {
     final tempDir = await Directory.systemTemp.createTemp('qat_repo_test_');
     try {
       final dbPath = p.join(tempDir.path, 'qat_ledger_v2.db');
@@ -249,6 +246,5 @@ void main() {
     } finally {
       await tempDir.delete(recursive: true);
     }
-    });
   });
 }

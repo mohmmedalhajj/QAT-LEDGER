@@ -293,22 +293,27 @@ class _LoginScreenState extends State<LoginScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: pal.brandSoft,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    'نظام محاسبي مؤسسي',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: pal.brand,
+                Flexible(
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: pal.brandSoft,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      'نظام محاسبي مؤسسي',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: pal.brand,
+                      ),
                     ),
                   ),
                 ),
+                const SizedBox(width: 8),
                 IconButton(
                   tooltip: pal.isDark ? 'المظهر الفاتح' : 'المظهر الداكن',
                   onPressed: () => ctrl.setThemeChoice(
