@@ -138,7 +138,7 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
         controller: _tabs,
         children: [
           _buildIssueTab(pal),
-          _buildIssuedListTab(pal),
+          _buildIssuedListTab(),
           _buildKeysAndAuditTab(pal),
         ],
       ),
@@ -293,7 +293,7 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
     );
   }
 
-  Widget _buildIssuedListTab(QatPalette pal) {
+  Widget _buildIssuedListTab() {
     if (_issued.isEmpty) {
       return const Center(child: Text('لا توجد تراخيص مصدرة بعد.'));
     }

@@ -52,7 +52,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
     super.dispose();
   }
 
-  void _addCartLine(AppController ctrl, CurrencyCode activeCur) {
+  void _addCartLine(AppController ctrl) {
     final qtyMilli = QuantityMath.parseMilli(_qtyCtrl.text);
     final unitPriceMinor = Money.parseMinorUnits(_priceCtrl.text);
     if (qtyMilli <= 0 || unitPriceMinor < 0) {
@@ -512,7 +512,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                   ),
                 const SizedBox(height: 10),
                 FilledButton.tonalIcon(
-                  onPressed: () => _addCartLine(ctrl, activeCur),
+                  onPressed: () => _addCartLine(ctrl),
                   icon: const Icon(Icons.add_circle_outline),
                   label: const Text('إضافة إلى سلة الفاتورة'),
                 ),
