@@ -221,8 +221,9 @@ class DeveloperLicenseSigner {
     final cleanInstall = (installationId ?? '').trim().toUpperCase();
     final effectiveInstall = cleanInstall.isEmpty ? '*' : cleanInstall;
 
-    final int? validDays =
-        licenseType == LicenseType.subscription ? (durationDays ?? 30).clamp(1, 36500) : null;
+    final int? validDays = licenseType == LicenseType.subscription
+        ? (durationDays ?? 30).clamp(1, 36500).toInt()
+        : null;
     final expiresMs =
         validDays == null ? 0 : now + Duration(days: validDays).inMilliseconds;
 
@@ -383,8 +384,10 @@ class DeveloperLicenseSigner {
     final now = DateTime.now().millisecondsSinceEpoch;
     final prevExp = (prev['expires_at_ms'] as num).toInt();
     final baseTime = prevExp > now ? prevExp : now;
-    final newExpires = baseTime + Duration(days: additionalDays.clamp(1, 36500)).inMilliseconds;
-    final effectiveDays = ((newExpires - now) / Duration.millisecondsPerDay).ceil().clamp(1, 36500);
+    final newExpires =
+        baseTime + Duration(days: additionalDays.clamp(1, 36500).toInt()).inMilliseconds;
+    final effectiveDays =
+        ((newExpires - now) / Duration.millisecondsPerDay).ceil().clamp(1, 36500).toInt();
 
     await db.update(
       'issued_licenses',
@@ -486,7 +489,7 @@ class DeveloperLicenseSigner {
     final lType = LicenseType.fromRaw(prev['license_type']?.toString());
     final exp = (prev['expires_at_ms'] as num).toInt();
     final remDays = lType == LicenseType.subscription && exp > 0
-        ? ((exp - now) / Duration.millisecondsPerDay).ceil().clamp(1, 36500)
+        ? ((exp - now) / Duration.millisecondsPerDay).ceil().clamp(1, 36500).toInt()
         : null;
 
     await db.update(
@@ -563,7 +566,7 @@ class DeveloperLicenseSigner {
     final now = DateTime.now().millisecondsSinceEpoch;
     final exp = (cur['expires_at_ms'] as num).toInt();
     final remDays = lType == LicenseType.subscription && exp > 0
-        ? ((exp - now) / Duration.millisecondsPerDay).ceil().clamp(1, 36500)
+        ? ((exp - now) / Duration.millisecondsPerDay).ceil().clamp(1, 36500).toInt()
         : null;
     final reissued = await issueOfficialLicense(
       customerId: (cur['customer_id'] as num?)?.toInt(),

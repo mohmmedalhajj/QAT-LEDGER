@@ -10,6 +10,7 @@ import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../services/esc_pos_service.dart';
 import '../../services/pdf_export_service.dart';
+import '../../services/whatsapp_share_service.dart';
 
 class CurrencyBadge extends StatelessWidget {
   const CurrencyBadge({super.key, required this.currency, this.compact = false});
@@ -262,7 +263,7 @@ class SegmentedStrip extends StatelessWidget {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
-          children: List.generate(tabs.length, (i) {
+          children: List<Widget>.generate(tabs.length, (i) {
             final selected = i == selectedIndex;
             final hasIcon = icons != null && i < icons!.length;
             return Padding(
@@ -506,7 +507,7 @@ class PeriodFilterStrip extends StatelessWidget {
         () async => onChanged(
           filter.copyWith(
             kind: LedgerPeriodKind.weekly,
-            weekOfMonth: filter.weekOfMonth.clamp(1, 5),
+            weekOfMonth: filter.weekOfMonth.clamp(1, 5).toInt(),
           ),
         ),
       ),
@@ -691,6 +692,7 @@ Future<void> showReceiptPreviewPrintSheet(
   required String title,
   required String receiptText,
   Uint8List? a4PdfBytes,
+  String? whatsappPhone,
 }) async {
   await showModalBottomSheet<void>(
     context: context,
@@ -788,6 +790,14 @@ Future<void> showReceiptPreviewPrintSheet(
                     onPressed: () => Share.share(receiptText),
                     icon: const Icon(Icons.share_outlined, size: 18),
                     label: const Text('مشاركة نص'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => WhatsappShareService.instance.openWhatsApp(
+                      phone: whatsappPhone,
+                      text: receiptText,
+                    ),
+                    icon: const Icon(Icons.chat_outlined, size: 18),
+                    label: const Text('واتساب'),
                   ),
                 ],
               ),

@@ -133,7 +133,7 @@ abstract final class QatDateUtils {
     final match = RegExp(r'^(\d{4})-(\d{1,2})-(\d{1,2})').firstMatch(clean);
     if (match == null) return isoDate;
     final y = int.tryParse(match.group(1)!) ?? 2026;
-    final m = (int.tryParse(match.group(2)!) ?? 1).clamp(1, 12);
+    final m = (int.tryParse(match.group(2)!) ?? 1).clamp(1, 12).toInt();
     final d = int.tryParse(match.group(3)!) ?? 1;
     return '$d ${arabicMonths[m - 1]} $y';
   }
@@ -142,7 +142,7 @@ abstract final class QatDateUtils {
     final match = RegExp(r'^(\d{4})-(\d{1,2})').firstMatch(yyyyMm.trim());
     if (match == null) return yyyyMm;
     final y = int.tryParse(match.group(1)!) ?? 2026;
-    final m = (int.tryParse(match.group(2)!) ?? 1).clamp(1, 12);
+    final m = (int.tryParse(match.group(2)!) ?? 1).clamp(1, 12).toInt();
     return '${arabicMonths[m - 1]} $y';
   }
 
@@ -182,15 +182,15 @@ abstract final class QatDateUtils {
             : '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
         final parts = ym.split('-');
         final y = int.tryParse(parts.first) ?? now.year;
-        final m = parts.length > 1 ? (int.tryParse(parts[1]) ?? now.month).clamp(1, 12) : now.month;
+        final m = parts.length > 1 ? (int.tryParse(parts[1]) ?? now.month).clamp(1, 12).toInt() : now.month;
         final daysInMonth = DateTime(y, m + 1, 0).day;
-        final w = filter.weekOfMonth.clamp(1, 5);
+        final w = filter.weekOfMonth.clamp(1, 5).toInt();
         final startDay = (w - 1) * 7 + 1;
         if (startDay > daysInMonth) {
           final last = toIsoDate(DateTime(y, m, daysInMonth));
           return (fromIso: last, toIso: last);
         }
-        final endDay = (w == 5 ? daysInMonth : (w * 7)).clamp(startDay, daysInMonth);
+        final endDay = (w == 5 ? daysInMonth : (w * 7)).clamp(startDay, daysInMonth).toInt();
         return (
           fromIso: toIsoDate(DateTime(y, m, startDay)),
           toIso: toIsoDate(DateTime(y, m, endDay)),
@@ -213,7 +213,7 @@ abstract final class QatDateUtils {
             final ym = raw.length >= 7 ? raw.substring(0, 7) : today.substring(0, 7);
             final parts = ym.split('-');
             final y = int.tryParse(parts.first) ?? now.year;
-            final m = parts.length > 1 ? (int.tryParse(parts[1]) ?? now.month).clamp(1, 12) : now.month;
+            final m = parts.length > 1 ? (int.tryParse(parts[1]) ?? now.month).clamp(1, 12).toInt() : now.month;
             return (
               fromIso: toIsoDate(DateTime(y, m, 1)),
               toIso: toIsoDate(DateTime(y, m + 1, 0)),

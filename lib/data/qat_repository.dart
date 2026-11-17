@@ -521,7 +521,7 @@ class QatRepository {
     if (rows.isEmpty) return const [];
 
     final saleIds = rows.map((r) => (r['id'] as num).toInt()).toList();
-    final placeholders = List.filled(saleIds.length, '?').join(',');
+    final placeholders = List<String>.filled(saleIds.length, '?').join(',');
     final itemRows = await db.query(
       'sales_invoice_items',
       where: 'sale_id IN ($placeholders)',
@@ -1174,7 +1174,7 @@ class QatRepository {
     );
     if (rows.isEmpty) return const [];
     final ids = rows.map((r) => (r['id'] as num).toInt()).toList();
-    final placeholders = List.filled(ids.length, '?').join(',');
+    final placeholders = List<String>.filled(ids.length, '?').join(',');
     final itemRows = await db.query(
       'supplier_purchase_items',
       where: 'purchase_id IN ($placeholders)',

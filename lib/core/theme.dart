@@ -168,18 +168,18 @@ class AppColorPreset {
   }
 
   static String toHex(Color color) {
-    final r = (color.r * 255).round().clamp(0, 255).toRadixString(16).padLeft(2, '0');
-    final g = (color.g * 255).round().clamp(0, 255).toRadixString(16).padLeft(2, '0');
-    final b = (color.b * 255).round().clamp(0, 255).toRadixString(16).padLeft(2, '0');
+    final r = (color.r * 255).round().clamp(0, 255).toInt().toRadixString(16).padLeft(2, '0');
+    final g = (color.g * 255).round().clamp(0, 255).toInt().toRadixString(16).padLeft(2, '0');
+    final b = (color.b * 255).round().clamp(0, 255).toInt().toRadixString(16).padLeft(2, '0');
     return '#${r.toUpperCase()}${g.toUpperCase()}${b.toUpperCase()}';
   }
 
   static Color _scale(Color c, double factor) {
     return Color.from(
       alpha: 1.0,
-      red: (c.r * factor).clamp(0.0, 1.0),
-      green: (c.g * factor).clamp(0.0, 1.0),
-      blue: (c.b * factor).clamp(0.0, 1.0),
+      red: (c.r * factor).clamp(0.0, 1.0).toDouble(),
+      green: (c.g * factor).clamp(0.0, 1.0).toDouble(),
+      blue: (c.b * factor).clamp(0.0, 1.0).toDouble(),
     );
   }
 

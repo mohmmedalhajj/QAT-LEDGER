@@ -694,7 +694,8 @@ class _DailyTrendChartCard extends StatelessWidget {
                                   Flexible(
                                     child: FractionallySizedBox(
                                       heightFactor: (pt.salesMinor / maxVal)
-                                          .clamp(0.05, 1.0),
+                                          .clamp(0.05, 1.0)
+                                          .toDouble(),
                                       child: Container(
                                         width: 10,
                                         decoration: BoxDecoration(
@@ -710,7 +711,8 @@ class _DailyTrendChartCard extends StatelessWidget {
                                     child: FractionallySizedBox(
                                       heightFactor:
                                           (pt.profitMinor.abs() / maxVal)
-                                              .clamp(0.05, 1.0),
+                                              .clamp(0.05, 1.0)
+                                              .toDouble(),
                                       child: Container(
                                         width: 10,
                                         decoration: BoxDecoration(
