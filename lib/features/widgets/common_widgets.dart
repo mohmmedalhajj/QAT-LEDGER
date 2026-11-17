@@ -124,9 +124,13 @@ class StatusPill extends StatelessWidget {
             Icon(icon, size: 12, color: fg),
             const SizedBox(width: 4),
           ],
-          Text(
-            label,
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: fg),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: fg),
+            ),
           ),
         ],
       ),
@@ -621,11 +625,11 @@ class ProFeatureLockedCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final pal = context.pal;
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
         child: Card(
           child: Padding(
-            padding: const EdgeInsets.all(22),
+            padding: const EdgeInsets.all(20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [

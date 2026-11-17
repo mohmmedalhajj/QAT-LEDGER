@@ -380,12 +380,20 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                 const ButtonSegment<int>(
                   value: 0,
                   icon: Icon(Icons.inventory_2_outlined, size: 17),
-                  label: Text('دفعات المخزون'),
+                  label: Text(
+                    'دفعات المخزون',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 ButtonSegment<int>(
                   value: 1,
                   icon: const Icon(Icons.scale_outlined, size: 17),
-                  label: Text('أوزان الوارد (${ctrl.importWeights.length})'),
+                  label: Text(
+                    'أوزان الوارد (${ctrl.importWeights.length})',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
               selected: {_section},

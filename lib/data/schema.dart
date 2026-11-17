@@ -82,6 +82,7 @@ abstract final class QatLedgerSchema {
       name TEXT NOT NULL,
       phone TEXT NOT NULL DEFAULT '',
       address TEXT NOT NULL DEFAULT '',
+      region TEXT NOT NULL DEFAULT '',
       notes TEXT NOT NULL DEFAULT '',
       created_at_ms INTEGER NOT NULL,
       is_archived INTEGER NOT NULL DEFAULT 0
@@ -313,6 +314,9 @@ abstract final class QatLedgerSchema {
   ];
 
   static const Map<String, List<String>> v3ColumnMigrations = {
+    'suppliers': [
+      "region TEXT NOT NULL DEFAULT ''",
+    ],
     'inventory_batches': [
       "item_number TEXT NOT NULL DEFAULT ''",
       'low_stock_threshold_milli INTEGER NOT NULL DEFAULT 0',

@@ -254,14 +254,18 @@ class RoomMigrator {
           final id = (r['id'] as num).toInt();
           final name = (r['name'] ?? '').toString().trim();
           final resolvedName = name.isEmpty ? 'مورد #$id' : name;
-          final regionOrAddr = cols.contains('region')
+          final regionVal = cols.contains('region')
               ? (r['region'] ?? '').toString()
-              : (cols.contains('address') ? (r['address'] ?? '').toString() : '');
+              : '';
+          final addrVal = cols.contains('address')
+              ? (r['address'] ?? '').toString()
+              : '';
           await txn.insert('suppliers', {
             'id': id,
             'name': resolvedName,
             'phone': cols.contains('phone') ? (r['phone'] ?? '').toString() : '',
-            'address': regionOrAddr,
+            'address': addrVal.isNotEmpty ? addrVal : regionVal,
+            'region': regionVal,
             'notes': cols.contains('notes') ? (r['notes'] ?? '').toString() : '',
             'created_at_ms': nowMs,
             'is_archived': 0,

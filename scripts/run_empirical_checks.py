@@ -52,7 +52,7 @@ def test_sqlite_schema_and_room_migration():
             CREATE TABLE sales (id INTEGER PRIMARY KEY, customerName TEXT, customerId INTEGER, date TEXT, totalAmount REAL, paidAmount REAL, remainingAmount REAL, paymentType TEXT, status TEXT, notes TEXT, currency TEXT, discount REAL, taxPercent REAL, isArchived INTEGER);
             CREATE TABLE sales_invoice_items (id INTEGER PRIMARY KEY, saleId INTEGER, qatType TEXT, quantity REAL, unit TEXT, unitPrice REAL, buyPrice REAL, total REAL, currency TEXT);
             CREATE TABLE customer_payments (id INTEGER PRIMARY KEY, customerId INTEGER, customerName TEXT, amount REAL, date TEXT, notes TEXT, currency TEXT, paymentMethod TEXT, isArchived INTEGER);
-            CREATE TABLE suppliers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, address TEXT, notes TEXT, totalBalance REAL);
+            CREATE TABLE suppliers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT, address TEXT, region TEXT, notes TEXT, totalBalance REAL);
             CREATE TABLE supplier_purchases (id INTEGER PRIMARY KEY, supplierId INTEGER, supplierName TEXT, date TEXT, totalAmount REAL, paidAmount REAL, remainingAmount REAL, paymentType TEXT, notes TEXT, currency TEXT, discount REAL, taxPercent REAL, isArchived INTEGER);
             CREATE TABLE supplier_purchase_items (id INTEGER PRIMARY KEY, purchaseId INTEGER, qatType TEXT, quantity REAL, unit TEXT, buyPrice REAL, total REAL, currency TEXT);
             CREATE TABLE supplier_payments (id INTEGER PRIMARY KEY, supplierId INTEGER, supplierName TEXT, amount REAL, date TEXT, notes TEXT, currency TEXT, paymentMethod TEXT, isArchived INTEGER);
@@ -64,7 +64,7 @@ def test_sqlite_schema_and_room_migration():
         )
         src.execute("INSERT INTO qat_types VALUES (1, 'همداني', 3000.0, 4200.0, '', 0)")
         src.execute("INSERT INTO customers VALUES (1, 'علي القحطاني', '777000111', 'صنعاء', '', 15250.5)")
-        src.execute("INSERT INTO suppliers VALUES (1, 'مورد حراز', '771222333', 'حراز', '', 8000.0)")
+        src.execute("INSERT INTO suppliers VALUES (1, 'مورد حراز', '771222333', 'حراز', 'حراز', '', 8000.0)")
         src.execute("INSERT INTO inventory VALUES (1, 'همداني', 'مورد حراز', 12.5, 'ربطة', 3000.0, 4200.0, '2026-10-01', 'YER')")
         src.execute("INSERT INTO sales VALUES (1, 'علي القحطاني', 1, '2026-10-02', 20000.0, 5000.0, 15000.0, 'دفعة جزئية', 'دفعة جزئية', '', 'YER', 0.0, 0.0, 0)")
         src.execute("INSERT INTO sales VALUES (2, 'علي القحطاني', 1, '2026-10-03', 250.5, 0.0, 250.5, 'آجل', 'آجل', '', 'SAR', 0.0, 0.0, 0)")
@@ -89,9 +89,9 @@ def test_sqlite_schema_and_room_migration():
             )
         for row in src.execute("SELECT id, name, phone, address, notes FROM customers"):
             dst.execute("INSERT INTO customers VALUES (?, ?, ?, ?, ?, ?, 0)", (*row, now_ms))
-        for row in src.execute("SELECT id, name, phone, address, notes FROM suppliers"):
+        for row in src.execute("SELECT id, name, phone, address, region, notes FROM suppliers"):
             dst.execute(
-                "INSERT INTO suppliers (id, name, phone, address, notes, created_at_ms, is_archived) VALUES (?, ?, ?, ?, ?, ?, 0)",
+                "INSERT INTO suppliers (id, name, phone, address, region, notes, created_at_ms, is_archived) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
                 (*row, now_ms),
             )
 
