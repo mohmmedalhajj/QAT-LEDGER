@@ -105,7 +105,7 @@ void main() {
     expect(find.text('إدارة النشاط'), findsOneWidget);
     expect(find.text('التقارير والمتابعة'), findsOneWidget);
     expect(find.text('الإعدادات والإدارة'), findsOneWidget);
-    await tester.tapAt(const Offset(10, 10));
+    await tester.tapAt(const Offset(10, 450));
     await tester.pumpAndSettle();
 
     // Tablet wide viewport (1024x768) renders NavigationRail

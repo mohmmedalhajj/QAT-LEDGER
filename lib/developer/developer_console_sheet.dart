@@ -155,7 +155,13 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
   }
 
   void _prefillSuggestedPrice() {
-    final row = _prices.where((p) => p['package_code'] == _packageTier.code).firstOrNull;
+    Map<String, Object?>? row;
+    for (final pRow in _prices) {
+      if (pRow['package_code'] == _packageTier.code) {
+        row = pRow;
+        break;
+      }
+    }
     if (row == null) return;
     _currencyCtrl.text = (row['currency'] ?? 'ريال يمني').toString();
     final d = int.tryParse(normalizeDigits(_daysCtrl.text));
@@ -754,7 +760,7 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                                     ),
                                   ),
                                   Text(licId,
-                                      style: TextStyle(color: pal.primary, fontWeight: FontWeight.bold)),
+                                      style: TextStyle(color: pal.brand, fontWeight: FontWeight.bold)),
                                 ],
                               ),
                               const SizedBox(height: 4),
@@ -999,7 +1005,7 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                   SelectableText(
                     kotlinLine,
                     textDirection: TextDirection.ltr,
-                    style: TextStyle(fontSize: 11, color: pal.primary),
+                    style: TextStyle(fontSize: 11, color: pal.brand),
                   ),
                   const SizedBox(height: 10),
                   Row(

@@ -680,6 +680,9 @@ class DailyChartPoint {
   final String shortLabel;
   final int salesMinor;
   final int expensesMinor;
+
+  int get profitMinor => salesMinor - expensesMinor;
+  String get labelAr => shortLabel;
 }
 
 @immutable

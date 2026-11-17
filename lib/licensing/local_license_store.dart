@@ -28,7 +28,8 @@ class LocalLicenseStore {
     try {
       final legacy = await PlatformBridge.instance.collectLegacySources();
       final installPrefs = legacy.legacyPrefs['qat_license_install_prefs'];
-      final legacyInstallId = installPrefs?['installation_id']?.trim().toUpperCase() ?? '';
+      final legacyInstallId =
+          (installPrefs?['installation_id'] ?? '').toString().trim().toUpperCase();
       if (RegExp(r'^QAT-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$').hasMatch(legacyInstallId)) {
         await _prefs.setString(_prefInstallId, legacyInstallId);
         return legacyInstallId;
@@ -74,16 +75,15 @@ class LocalLicenseStore {
     if (current != null && current.trim().isNotEmpty) return;
     try {
       final legacy = await PlatformBridge.instance.collectLegacySources();
-      if (legacy.legacyActiveLicenseDoc != null &&
-          legacy.legacyActiveLicenseDoc!.trim().isNotEmpty) {
-        await saveRawLicense(legacy.legacyActiveLicenseDoc!);
+      if (legacy.legacyActiveLicenseDoc.trim().isNotEmpty) {
+        await saveRawLicense(legacy.legacyActiveLicenseDoc);
         return;
       }
       for (final storeName in const ['qat_active_license_store', 'qat_ledger_license_store']) {
         final store = legacy.legacyPrefs[storeName];
         if (store == null) continue;
         for (final key in const ['signed_license_doc', 'active_license_doc', 'license_json', 'compact_token']) {
-          final val = store[key]?.trim() ?? '';
+          final val = (store[key] ?? '').toString().trim();
           if (val.isNotEmpty) {
             await saveRawLicense(val);
             return;

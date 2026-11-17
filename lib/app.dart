@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
@@ -29,12 +28,8 @@ class QatLedgerApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: s.effectiveAppTitle,
       locale: const Locale('ar'),
-      supportedLocales: const [Locale('ar')],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
+      supportedLocales: const [Locale('ar'), Locale('en')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       theme: AppTheme.buildLight(
         preset: preset,
         customCanvasHex: s.customCanvasHex,
@@ -66,13 +61,13 @@ class _RootGate extends StatelessWidget {
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
     if (!ctrl.initialized) {
-      return const SplashLoadingScreen();
+      return const SplashLoadingView();
     }
     if (!ctrl.isLoggedIn) {
       return const LoginScreen();
     }
     if (!ctrl.settings.onboardingComplete) {
-      return const OnboardingWizardScreen();
+      return const AgencyOnboardingScreen();
     }
     return const MainShellScreen();
   }

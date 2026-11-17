@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -621,11 +623,13 @@ class _TransfersLedgerViewState extends State<TransfersLedgerView> {
                                         t,
                                         recipient: rec,
                                       );
-                                      showReceiptPreviewPrintSheet(
-                                        context,
-                                        agency: ctrl.settings,
-                                        title: 'سند حوالة مالية',
-                                        receiptText: text,
+                                      unawaited(
+                                        showReceiptPreviewPrintSheet(
+                                          context,
+                                          agency: ctrl.settings,
+                                          title: 'سند حوالة مالية',
+                                          receiptText: text,
+                                        ),
                                       );
                                     },
                                     icon: const Icon(
