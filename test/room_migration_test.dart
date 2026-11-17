@@ -9,6 +9,7 @@ import 'package:qat_ledger/data/room_migrator.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
 
   test('migrates Room v18 SQLite database cleanly, preserves all records, separates currencies, and is idempotent', () async {

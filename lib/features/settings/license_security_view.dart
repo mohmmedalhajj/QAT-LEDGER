@@ -421,9 +421,13 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'المستخدمون والصلاحيات (${ctrl.users.length})',
-                      style: Theme.of(context).textTheme.titleMedium,
+                    Expanded(
+                      child: Text(
+                        'المستخدمون والصلاحيات (${ctrl.users.length})',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                     ),
                     if (ctrl.canManageSettingsCurrent)
                       TextButton.icon(

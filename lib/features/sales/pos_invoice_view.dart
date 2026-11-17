@@ -468,6 +468,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                         child: DropdownButtonFormField<String>(
                           key: ValueKey<String>('pos_unit_$_customUnit'),
                           initialValue: _customUnit,
+                          isExpanded: true,
                           decoration: const InputDecoration(labelText: 'الوحدة'),
                           items: _units
                               .map(

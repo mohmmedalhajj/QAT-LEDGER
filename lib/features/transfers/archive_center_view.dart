@@ -16,6 +16,22 @@ class ArchiveCenterView extends StatefulWidget {
 class _ArchiveCenterViewState extends State<ArchiveCenterView> {
   String _search = '';
   String? _tableFilter;
+  bool _wasArchiveActive = false;
+  Future<
+      List<
+          ({
+            String table,
+            String categoryLabel,
+            int id,
+            String title,
+            String subtitle,
+          })>>? _archivedFuture;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _archivedFuture ??= _loadArchived(context.read<AppController>());
+  }
 
   Future<
       List<
@@ -130,6 +146,11 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
+    final isArchiveActive = ctrl.sectionIndex == 3 && ctrl.transfersSubTab == 4;
+    if (isArchiveActive && !_wasArchiveActive) {
+      _archivedFuture = _loadArchived(ctrl);
+    }
+    _wasArchiveActive = isArchiveActive;
     if (!ctrl.sectionPermissions.archive &&
         ctrl.currentUser?.role.code != 'ADMIN') {
       return const EmptyLedgerState(
@@ -174,7 +195,7 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
                     String title,
                     String subtitle,
                   })>>(
-            future: _loadArchived(ctrl),
+            future: _archivedFuture,
             builder: (context, snap) {
               if (!snap.hasData) {
                 return const Center(child: CircularProgressIndicator());
@@ -229,7 +250,11 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
                             false,
                           );
                           await ctrl.reloadAll();
-                          if (mounted) setState(() {});
+                          if (mounted) {
+                            setState(() {
+                              _archivedFuture = _loadArchived(ctrl);
+                            });
+                          }
                         },
                         icon: const Icon(Icons.unarchive_outlined, size: 16),
                         label: const Text('استعادة'),

@@ -72,6 +72,9 @@ class PlatformBridge {
   static const String _dartDefineKeys =
       String.fromEnvironment('QAT_LICENSE_PUBLIC_KEYS', defaultValue: '');
 
+  static bool _isUninitializedBindingError(FlutterError error) =>
+      error.message.contains('Binding has not yet been initialized');
+
   Future<EditionConfig> getEditionConfig() async {
     try {
       final raw = await _channel.invokeMapMethod<String, dynamic>('getEditionConfig');
@@ -88,6 +91,8 @@ class PlatformBridge {
       }
     } on MissingPluginException {
       // Fallback for unit tests / non-Android desktop hosts
+    } on FlutterError catch (e) {
+      if (!_isUninitializedBindingError(e)) rethrow;
     }
     return const EditionConfig(
       edition: _dartDefineEdition == 'developer' ? 'developer' : 'customer',
@@ -108,6 +113,8 @@ class PlatformBridge {
       }
     } on MissingPluginException {
       // Test/desktop fallback
+    } on FlutterError catch (e) {
+      if (!_isUninitializedBindingError(e)) rethrow;
     }
     return const {'androidId': '', 'brand': 'local', 'model': 'host'};
   }
@@ -137,6 +144,9 @@ class PlatformBridge {
       );
     } on MissingPluginException {
       return LegacyMigrationSources.empty;
+    } on FlutterError catch (e) {
+      if (!_isUninitializedBindingError(e)) rethrow;
+      return LegacyMigrationSources.empty;
     }
   }
 
@@ -147,6 +157,9 @@ class PlatformBridge {
       });
     } on MissingPluginException {
       return null;
+    } on FlutterError catch (e) {
+      if (!_isUninitializedBindingError(e)) rethrow;
+      return null;
     }
   }
 
@@ -156,6 +169,9 @@ class PlatformBridge {
         'sealedPayload': sealedPayload,
       });
     } on MissingPluginException {
+      return null;
+    } on FlutterError catch (e) {
+      if (!_isUninitializedBindingError(e)) rethrow;
       return null;
     }
   }
@@ -175,6 +191,9 @@ class PlatformBridge {
           .where((p) => p.address.isNotEmpty)
           .toList();
     } on MissingPluginException {
+      return const [];
+    } on FlutterError catch (e) {
+      if (!_isUninitializedBindingError(e)) rethrow;
       return const [];
     }
   }
@@ -196,6 +215,9 @@ class PlatformBridge {
       if (name.isEmpty && phone.isEmpty) return null;
       return PickedContact(name: name, phone: phone);
     } on MissingPluginException {
+      return null;
+    } on FlutterError catch (e) {
+      if (!_isUninitializedBindingError(e)) rethrow;
       return null;
     }
   }

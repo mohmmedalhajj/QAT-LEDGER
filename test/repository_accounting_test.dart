@@ -11,6 +11,7 @@ import 'package:qat_ledger/data/room_migrator.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
 
   test('repository full accounting lifecycle: purchase edit, sale stock+debt, recipient report, atomic .qbak backup/restore', () async {

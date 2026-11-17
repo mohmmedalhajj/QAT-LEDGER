@@ -194,18 +194,20 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
                       backgroundImage: logoProvider,
                     ),
                     const SizedBox(width: 12),
-                    OutlinedButton.icon(
-                      onPressed: !canEdit
-                          ? null
-                          : () async {
-                              final picked = await ImagePicker().pickImage(
-                                source: ImageSource.gallery,
-                              );
-                              if (!mounted || picked == null) return;
-                              setState(() => _logoPath = picked.path);
-                            },
-                      icon: const Icon(Icons.image_outlined, size: 18),
-                      label: const Text('تغيير شعار الوكالة'),
+                    Flexible(
+                      child: OutlinedButton.icon(
+                        onPressed: !canEdit
+                            ? null
+                            : () async {
+                                final picked = await ImagePicker().pickImage(
+                                  source: ImageSource.gallery,
+                                );
+                                if (!mounted || picked == null) return;
+                                setState(() => _logoPath = picked.path);
+                              },
+                        icon: const Icon(Icons.image_outlined, size: 18),
+                        label: const Text('تغيير شعار الوكالة'),
+                      ),
                     ),
                   ],
                 ),

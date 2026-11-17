@@ -27,7 +27,10 @@ class RoomMigrator {
     String? explicitSourceDbPath,
     String? snapshotDirectory,
   }) async {
-    final sources = legacySources ?? await PlatformBridge.instance.getLegacyMigrationSources();
+    final sources = legacySources ??
+        (explicitSourceDbPath != null
+            ? LegacyMigrationSources.empty
+            : await PlatformBridge.instance.getLegacyMigrationSources());
     final targetDb = await dbService.database;
 
     // Migrate legacy SharedPreferences values idempotently into app_settings if absent
