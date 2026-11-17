@@ -24,7 +24,7 @@ void main() {
       emitCiAnnotation(
         'error',
         'widget_shell_test FlutterError (${steps.isEmpty ? "start" : steps.last})',
-        '${details.exceptionAsString()}\n${details.stack}',
+        details.toString(),
       );
       prevOnError?.call(details);
     };
