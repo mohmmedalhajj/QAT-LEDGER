@@ -32,7 +32,7 @@ class DeveloperConsoleSheet extends StatefulWidget {
 }
 
 class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin<DeveloperConsoleSheet> {
   late final TabController _tabs;
   late final DeveloperLicenseSigner _signer;
 

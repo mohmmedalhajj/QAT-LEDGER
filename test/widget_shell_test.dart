@@ -18,14 +18,14 @@ void main() {
   testWidgets('App boots in RTL across small & large phone sizes, tests hidden admin gate, multi-user permissions, and themes', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
-    final tempDir = await Directory.systemTemp.createTemp('qat_widget_test_');
+    final tempDir = Directory.systemTemp.createTempSync('qat_widget_test_');
     final dbService = DatabaseService(
-      factory: databaseFactoryFfi,
+      factory: databaseFactoryFfiNoIsolate,
       customPath: p.join(tempDir.path, 'qat_test.db'),
     );
 
     final controller = AppController(dbService: dbService, prefs: prefs);
-    await controller.initialize();
+    await tester.runAsync(controller.initialize);
 
     // Test small phone viewport (360x640) on Login screen + hidden admin 3-tap gate
     tester.view.physicalSize = const Size(360, 640);
@@ -55,9 +55,11 @@ void main() {
     await tester.pumpAndSettle();
 
     // Login & complete onboarding
-    await controller.login('admin', '123456');
-    await controller.updateSettings(
-      controller.settings.copyWith(onboardingComplete: true),
+    await tester.runAsync(() => controller.login('admin', '123456'));
+    await tester.runAsync(
+      () => controller.updateSettings(
+        controller.settings.copyWith(onboardingComplete: true),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -99,23 +101,29 @@ void main() {
     await tester.pumpAndSettle();
 
     // Switch to Pure Black Dark mode
-    await controller.setThemeChoice(AppThemeModeChoice.darkBlack);
+    await tester.runAsync(
+      () => controller.setThemeChoice(AppThemeModeChoice.darkBlack),
+    );
     await tester.pumpAndSettle();
     expect(controller.themeMode, ThemeMode.dark);
 
     // Multi-user permission restriction test
-    await controller.addOrUpdateUser(
-      username: 'cashier1',
-      displayName: 'بائع الصالة',
-      password: 'pass123',
-      role: UserRole.cashier,
-      canDelete: false,
-      canEditPrices: false,
-      canManageSettings: false,
-      canViewReports: false,
+    await tester.runAsync(
+      () => controller.addOrUpdateUser(
+        username: 'cashier1',
+        displayName: 'بائع الصالة',
+        password: 'pass123',
+        role: UserRole.cashier,
+        canDelete: false,
+        canEditPrices: false,
+        canManageSettings: false,
+        canViewReports: false,
+      ),
     );
     controller.logout();
-    final cashierOk = await controller.login('cashier1', 'pass123');
+    final cashierOk = await tester.runAsync<bool>(
+      () => controller.login('cashier1', 'pass123'),
+    );
     expect(cashierOk, true);
     expect(controller.canDeleteCurrent, false);
     expect(controller.canViewReportsCurrent, false);
@@ -125,7 +133,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('وحدة تحكم المطور (Developer Edition)'), findsNothing);
 
-    await dbService.close();
-    await tempDir.delete(recursive: true);
+    await tester.runAsync(dbService.close);
+    tempDir.deleteSync(recursive: true);
   });
 }
