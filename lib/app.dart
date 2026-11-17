@@ -63,12 +63,12 @@ class MainShellScreen extends StatelessWidget {
 
     final bodyStack = IndexedStack(
       index: idx,
-      children: const [
-        DashboardTab(),
-        SalesCustomersTab(),
-        InventorySuppliersTab(),
-        TransfersReportsTab(),
-        ExpensesSettingsTab(),
+      children: [
+        TickerMode(enabled: idx == 0, child: const DashboardTab()),
+        TickerMode(enabled: idx == 1, child: const SalesCustomersTab()),
+        TickerMode(enabled: idx == 2, child: const InventorySuppliersTab()),
+        TickerMode(enabled: idx == 3, child: const TransfersReportsTab()),
+        TickerMode(enabled: idx == 4, child: const ExpensesSettingsTab()),
       ],
     );
 

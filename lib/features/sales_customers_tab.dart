@@ -23,6 +23,7 @@ class _SalesCustomersTabState extends State<SalesCustomersTab> {
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
     final subTab = ctrl.salesSubTab.clamp(0, 3).toInt();
+    final isTabActive = ctrl.sectionIndex == 1;
 
     if (!ctrl.sectionPermissions.sales && ctrl.currentUser?.role.code != 'ADMIN') {
       return const Padding(
@@ -57,15 +58,21 @@ class _SalesCustomersTabState extends State<SalesCustomersTab> {
           child: IndexedStack(
             index: subTab,
             children: [
-              const PosInvoiceBuilderView(),
-              const SalesLedgerView(),
-              CustomersDirectoryView(
-                onOpenStatement: (customerId) {
-                  setState(() => _statementCustomerId = customerId);
-                  ctrl.setSalesSubTab(3);
-                },
+              TickerMode(enabled: isTabActive && subTab == 0, child: const PosInvoiceBuilderView()),
+              TickerMode(enabled: isTabActive && subTab == 1, child: const SalesLedgerView()),
+              TickerMode(
+                enabled: isTabActive && subTab == 2,
+                child: CustomersDirectoryView(
+                  onOpenStatement: (customerId) {
+                    setState(() => _statementCustomerId = customerId);
+                    ctrl.setSalesSubTab(3);
+                  },
+                ),
               ),
-              AccountStatementView(preselectedCustomerId: _statementCustomerId),
+              TickerMode(
+                enabled: isTabActive && subTab == 3,
+                child: AccountStatementView(preselectedCustomerId: _statementCustomerId),
+              ),
             ],
           ),
         ),

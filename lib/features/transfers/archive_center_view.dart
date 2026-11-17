@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
@@ -5,6 +7,14 @@ import '../../core/money.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/erp_components.dart';
+
+typedef _ArchivedRecord = ({
+  String table,
+  String categoryLabel,
+  int id,
+  String title,
+  String subtitle,
+});
 
 class ArchiveCenterView extends StatefulWidget {
   const ArchiveCenterView({super.key});
@@ -17,38 +27,39 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
   String _search = '';
   String? _tableFilter;
   bool _wasArchiveActive = false;
-  Future<
-      List<
-          ({
-            String table,
-            String categoryLabel,
-            int id,
-            String title,
-            String subtitle,
-          })>>? _archivedFuture;
+  bool _loading = false;
+  bool _hasLoaded = false;
+  String? _error;
+  List<_ArchivedRecord> _archivedItems = const [];
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _archivedFuture ??= _loadArchived(context.read<AppController>());
+  Future<void> _refreshArchived(AppController ctrl) async {
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final items = await _loadArchived(ctrl);
+      if (!mounted) return;
+      setState(() {
+        _archivedItems = items;
+        _hasLoaded = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'تعذر تحميل الأرشيف: $e';
+        _hasLoaded = true;
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
   }
 
-  Future<
-      List<
-          ({
-            String table,
-            String categoryLabel,
-            int id,
-            String title,
-            String subtitle,
-          })>> _loadArchived(AppController ctrl) async {
-    final items = <({
-      String table,
-      String categoryLabel,
-      int id,
-      String title,
-      String subtitle,
-    })>[];
+  Future<List<_ArchivedRecord>> _loadArchived(AppController ctrl) async {
+    final items = <_ArchivedRecord>[];
     final sales = await ctrl.repo.getSales(includeArchived: true);
     for (final s in sales.where((e) => e.isArchived)) {
       items.add((
@@ -147,10 +158,10 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
     final isArchiveActive = ctrl.sectionIndex == 3 && ctrl.transfersSubTab == 4;
-    if (isArchiveActive && !_wasArchiveActive) {
-      _archivedFuture = _loadArchived(ctrl);
+    if (!isArchiveActive) {
+      _wasArchiveActive = false;
+      return const SizedBox.shrink();
     }
-    _wasArchiveActive = isArchiveActive;
     if (!ctrl.sectionPermissions.archive &&
         ctrl.currentUser?.role.code != 'ADMIN') {
       return const EmptyLedgerState(
@@ -158,6 +169,14 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
         title: 'الأرشيف مقيد بالصلاحيات',
         subtitle: 'تم إخفاء مركز الأرشيف من إدارة الصلاحيات',
       );
+    }
+    if (!_wasArchiveActive) {
+      _wasArchiveActive = true;
+      if (!_loading) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_refreshArchived(ctrl));
+        });
+      }
     }
 
     const categories = [
@@ -170,6 +189,16 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
       ('inventory_batches', 'مخزون'),
       ('qat_tax_entries', 'ضرائب'),
     ];
+
+    final filteredItems = _archivedItems.where((item) {
+      if (_tableFilter != null && item.table != _tableFilter) {
+        return false;
+      }
+      if (_search.isEmpty) return true;
+      final q = _search.toLowerCase();
+      return item.title.toLowerCase().contains(q) ||
+          item.subtitle.toLowerCase().contains(q);
+    }).toList();
 
     return Column(
       children: [
@@ -186,85 +215,71 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
           ],
         ),
         Expanded(
-          child: FutureBuilder<
-              List<
-                  ({
-                    String table,
-                    String categoryLabel,
-                    int id,
-                    String title,
-                    String subtitle,
-                  })>>(
-            future: _archivedFuture,
-            builder: (context, snap) {
-              if (!snap.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              final all = snap.data!;
-              final items = all.where((item) {
-                if (_tableFilter != null && item.table != _tableFilter) {
-                  return false;
-                }
-                if (_search.isEmpty) return true;
-                final q = _search.toLowerCase();
-                return item.title.toLowerCase().contains(q) ||
-                    item.subtitle.toLowerCase().contains(q);
-              }).toList();
-
-              if (items.isEmpty) {
-                return const EmptyLedgerState(
-                  icon: Icons.archive_outlined,
-                  title: 'لا توجد سجلات مؤرشفة مطابقة',
-                  subtitle:
-                      'تظهر هنا السجلات المؤرشفة لإمكانية استعادتها في أي وقت',
-                );
-              }
-              return ListView.separated(
-                padding: const EdgeInsets.all(16),
-                itemCount: items.length,
-                separatorBuilder: (_, idx) => const SizedBox(height: 8),
-                itemBuilder: (_, idx) {
-                  final item = items[idx];
-                  return Card(
-                    child: ListTile(
-                      title: Text(
-                        item.title,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      subtitle: Text(
-                        '${item.categoryLabel} • ${item.subtitle}',
-                      ),
-                      trailing: FilledButton.tonalIcon(
-                        onPressed: () async {
-                          final ok = await showErpConfirmDialog(
-                            context,
-                            title: 'استعادة من الأرشيف',
-                            message:
-                                'هل تريد استعادة "${item.title}" وإرجاعها للدفاتر النشطة؟',
-                            confirmLabel: 'استعادة',
-                          );
-                          if (!ok) return;
-                          await ctrl.repo.setArchived(
-                            item.table,
-                            item.id,
-                            false,
-                          );
-                          await ctrl.reloadAll();
-                          if (mounted) {
-                            setState(() {
-                              _archivedFuture = _loadArchived(ctrl);
-                            });
-                          }
-                        },
-                        icon: const Icon(Icons.unarchive_outlined, size: 16),
-                        label: const Text('استعادة'),
-                      ),
-                    ),
-                  );
-                },
-              );
-            },
-          ),
+          child: _error != null
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: ErpStatusBanner(
+                    tone: ErpBannerTone.danger,
+                    title: _error!,
+                  ),
+                )
+              : (_loading && !_hasLoaded)
+                  ? const Center(child: CircularProgressIndicator())
+                  : filteredItems.isEmpty
+                      ? const EmptyLedgerState(
+                          icon: Icons.archive_outlined,
+                          title: 'لا توجد سجلات مؤرشفة مطابقة',
+                          subtitle:
+                              'تظهر هنا السجلات المؤرشفة لإمكانية استعادتها في أي وقت',
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: filteredItems.length,
+                          separatorBuilder: (_, idx) =>
+                              const SizedBox(height: 8),
+                          itemBuilder: (_, idx) {
+                            final item = filteredItems[idx];
+                            return Card(
+                              child: ListTile(
+                                title: Text(
+                                  item.title,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '${item.categoryLabel} • ${item.subtitle}',
+                                ),
+                                trailing: FilledButton.tonalIcon(
+                                  onPressed: () async {
+                                    final ok = await showErpConfirmDialog(
+                                      context,
+                                      title: 'استعادة من الأرشيف',
+                                      message:
+                                          'هل تريد استعادة "${item.title}" وإرجاعها للدفاتر النشطة؟',
+                                      confirmLabel: 'استعادة',
+                                    );
+                                    if (!ok) return;
+                                    await ctrl.repo.setArchived(
+                                      item.table,
+                                      item.id,
+                                      false,
+                                    );
+                                    await ctrl.reloadAll();
+                                    if (mounted) {
+                                      await _refreshArchived(ctrl);
+                                    }
+                                  },
+                                  icon: const Icon(
+                                    Icons.unarchive_outlined,
+                                    size: 16,
+                                  ),
+                                  label: const Text('استعادة'),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
         ),
       ],
     );

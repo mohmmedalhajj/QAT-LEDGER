@@ -131,23 +131,25 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
           if (ctrl.currencyPolicy.canSwitchCurrency)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: Row(
-                children: [
-                  ChoiceChip(
-                    label: const Text('الكل'),
-                    selected: _currencyFilter == null,
-                    onSelected: (_) => setState(() => _currencyFilter = null),
-                  ),
-                  const SizedBox(width: 6),
-                  for (final cur in ctrl.currencyPolicy.allowedCurrencies) ...[
+              child: SizedBox(
+                width: double.infinity,
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
                     ChoiceChip(
-                      label: Text(cur.code),
-                      selected: _currencyFilter == cur,
-                      onSelected: (_) => setState(() => _currencyFilter = cur),
+                      label: const Text('الكل'),
+                      selected: _currencyFilter == null,
+                      onSelected: (_) => setState(() => _currencyFilter = null),
                     ),
-                    const SizedBox(width: 6),
+                    for (final cur in ctrl.currencyPolicy.allowedCurrencies)
+                      ChoiceChip(
+                        label: Text(cur.code),
+                        selected: _currencyFilter == cur,
+                        onSelected: (_) => setState(() => _currencyFilter = cur),
+                      ),
                   ],
-                ],
+                ),
               ),
             ),
           if (list.isNotEmpty)

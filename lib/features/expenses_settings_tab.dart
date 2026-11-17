@@ -47,15 +47,16 @@ class _SettingsTabBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final subTab =
-        context.watch<AppController>().settingsSubTab.clamp(0, 3).toInt();
+    final ctrl = context.watch<AppController>();
+    final subTab = ctrl.settingsSubTab.clamp(0, 3).toInt();
+    final isTabActive = ctrl.sectionIndex == 4;
     return IndexedStack(
       index: subTab,
-      children: const [
-        ExpensesAndAccountsView(),
-        BrandingCurrencyThemeView(),
-        BackupAndPrinterView(),
-        LicenseAndSecurityView(),
+      children: [
+        TickerMode(enabled: isTabActive && subTab == 0, child: const ExpensesAndAccountsView()),
+        TickerMode(enabled: isTabActive && subTab == 1, child: const BrandingCurrencyThemeView()),
+        TickerMode(enabled: isTabActive && subTab == 2, child: const BackupAndPrinterView()),
+        TickerMode(enabled: isTabActive && subTab == 3, child: const LicenseAndSecurityView()),
       ],
     );
   }

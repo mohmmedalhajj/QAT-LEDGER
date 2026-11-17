@@ -26,20 +26,31 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
   String? _fromIso;
   String? _toIso;
   Map<CurrencyCode, CurrencyDashboardMetrics>? _metrics;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_load());
-  }
+  bool _loading = false;
+  String? _error;
+  bool _wasActive = false;
 
   Future<void> _load() async {
-    final res = await context.read<AppController>().repo.getDashboardMetrics(
-          fromIso: _fromIso,
-          toIso: _toIso,
-        );
     if (!mounted) return;
-    setState(() => _metrics = res);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final res = await context.read<AppController>().repo.getDashboardMetrics(
+            fromIso: _fromIso,
+            toIso: _toIso,
+          );
+      if (!mounted) return;
+      setState(() => _metrics = res);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = 'تعذر تحميل التقرير المالي: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
   }
 
   Future<void> _selectPreset(ReportPeriodPreset preset) async {
@@ -71,12 +82,25 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
     final pal = context.pal;
+    final isActive = ctrl.sectionIndex == 3 && ctrl.transfersSubTab == 2;
+    if (!isActive) {
+      _wasActive = false;
+      return const SizedBox.shrink();
+    }
     if (!ctrl.canViewReportsCurrent) {
       return const EmptyLedgerState(
         icon: Icons.lock_outline,
         title: 'التقارير مقيدة بالصلاحيات',
         subtitle: 'تم إخفاء التقارير المالية لهذا المستخدم من إدارة الصلاحيات',
       );
+    }
+    if (!_wasActive) {
+      _wasActive = true;
+      if (!_loading) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_load());
+        });
+      }
     }
     final data = _metrics;
 
@@ -145,7 +169,12 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
           ),
         ),
         const SizedBox(height: 12),
-        if (data == null)
+        if (_error != null)
+          ErpStatusBanner(
+            tone: ErpBannerTone.danger,
+            title: _error!,
+          )
+        else if (data == null)
           const Center(
             child: Padding(
               padding: EdgeInsets.all(24),

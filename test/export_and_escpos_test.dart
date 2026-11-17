@@ -159,9 +159,9 @@ void main() {
 
       final pkt58 = EscPosService.encodeImageToEscPosRaster(canvas, targetWidthPx: 384);
       final pkt80 = EscPosService.encodeImageToEscPosRaster(canvas, targetWidthPx: 576);
-      expect(pkt58.sublist(0, 5), [0x1B, 0x40, 0x1D, 0x76, 0x30]); // ESC @ + GS v 0
-      expect(pkt58[5], 48); // 384 / 8 = 48 bytes per line
-      expect(pkt80[5], 72); // 576 / 8 = 72 bytes per line
+      expect(pkt58.sublist(0, 6), [0x1B, 0x40, 0x1D, 0x76, 0x30, 0x00]); // ESC @ + GS v 0 m=0
+      expect(pkt58[6], 48); // xL = 384 / 8 = 48 bytes per line
+      expect(pkt80[6], 72); // xL = 576 / 8 = 72 bytes per line
     } finally {
       await tempDir.delete(recursive: true);
     }

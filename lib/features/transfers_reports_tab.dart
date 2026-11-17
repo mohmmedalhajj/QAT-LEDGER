@@ -64,15 +64,17 @@ class _TransfersTabBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final subTab = context.watch<AppController>().transfersSubTab.clamp(0, 4).toInt();
+    final ctrl = context.watch<AppController>();
+    final subTab = ctrl.transfersSubTab.clamp(0, 4).toInt();
+    final isTabActive = ctrl.sectionIndex == 3;
     return IndexedStack(
       index: subTab,
-      children: const [
-        TransfersLedgerView(),
-        RecipientsAndReportsView(),
-        FinancialReportsView(),
-        TaxLedgerView(),
-        ArchiveCenterView(),
+      children: [
+        TickerMode(enabled: isTabActive && subTab == 0, child: const TransfersLedgerView()),
+        TickerMode(enabled: isTabActive && subTab == 1, child: const RecipientsAndReportsView()),
+        TickerMode(enabled: isTabActive && subTab == 2, child: const FinancialReportsView()),
+        TickerMode(enabled: isTabActive && subTab == 3, child: const TaxLedgerView()),
+        TickerMode(enabled: isTabActive && subTab == 4, child: const ArchiveCenterView()),
       ],
     );
   }

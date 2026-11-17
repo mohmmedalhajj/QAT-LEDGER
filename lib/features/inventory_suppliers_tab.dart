@@ -17,6 +17,7 @@ class InventorySuppliersTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
     final subTab = ctrl.inventorySubTab.clamp(0, 4).toInt();
+    final isTabActive = ctrl.sectionIndex == 2;
 
     if (!ctrl.sectionPermissions.inventory &&
         ctrl.currentUser?.role.code != 'ADMIN') {
@@ -53,12 +54,12 @@ class InventorySuppliersTab extends StatelessWidget {
         Expanded(
           child: IndexedStack(
             index: subTab,
-            children: const [
-              InventoryBatchesView(),
-              QatTypesPricingView(),
-              ReconciliationSettlementView(),
-              SuppliersDirectoryView(),
-              SupplierPurchasesView(),
+            children: [
+              TickerMode(enabled: isTabActive && subTab == 0, child: const InventoryBatchesView()),
+              TickerMode(enabled: isTabActive && subTab == 1, child: const QatTypesPricingView()),
+              TickerMode(enabled: isTabActive && subTab == 2, child: const ReconciliationSettlementView()),
+              TickerMode(enabled: isTabActive && subTab == 3, child: const SuppliersDirectoryView()),
+              TickerMode(enabled: isTabActive && subTab == 4, child: const SupplierPurchasesView()),
             ],
           ),
         ),

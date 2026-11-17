@@ -47,14 +47,17 @@ class _AccountStatementViewState extends State<AccountStatementView> {
       return;
     }
     setState(() => _loading = true);
-    final res = _isCustomer
-        ? await ctrl.repo.getCustomerStatement(_partyId!)
-        : await ctrl.repo.getSupplierStatement(_partyId!);
-    if (!mounted) return;
-    setState(() {
-      _lines = res;
-      _loading = false;
-    });
+    try {
+      final res = _isCustomer
+          ? await ctrl.repo.getCustomerStatement(_partyId!)
+          : await ctrl.repo.getSupplierStatement(_partyId!);
+      if (!mounted) return;
+      setState(() => _lines = res);
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
   }
 
   @override
