@@ -25,29 +25,28 @@ plugins {
 include(":app")
 
 val ciErrTail = java.util.Collections.synchronizedList(mutableListOf<String>())
-val ciOutTail = java.util.Collections.synchronizedList(mutableListOf<String>())
-gradle.beforeProject {
-    logging.addStandardErrorListener(org.gradle.api.logging.StandardOutputListener { seq ->
-        val s = seq.toString()
-        if (s.isNotBlank()) {
+val loggingOut = (gradle as org.gradle.api.internal.GradleInternal).services.get(
+    org.gradle.internal.logging.LoggingOutputInternal::class.java
+)
+val ciEventListener = org.gradle.internal.logging.events.OutputEventListener { event ->
+    val txt = event.toString()
+    if (event is org.gradle.internal.logging.events.RenderableOutputEvent) {
+        if (event.logLevel == org.gradle.api.logging.LogLevel.ERROR ||
+            txt.contains("e: ", ignoreCase = false) ||
+            txt.contains("error:", ignoreCase = true) ||
+            txt.contains("Unresolved", ignoreCase = false)
+        ) {
             synchronized(ciErrTail) {
-                ciErrTail.add(s)
-                while (ciErrTail.size > 40) ciErrTail.removeAt(0)
+                ciErrTail.add(txt)
+                while (ciErrTail.size > 50) ciErrTail.removeAt(0)
             }
         }
-    })
-    logging.addStandardOutputListener(org.gradle.api.logging.StandardOutputListener { seq ->
-        val s = seq.toString()
-        if (s.contains("error", ignoreCase = true) || s.contains("failed", ignoreCase = true) || s.contains("exception", ignoreCase = true)) {
-            synchronized(ciOutTail) {
-                ciOutTail.add(s)
-                while (ciOutTail.size > 30) ciOutTail.removeAt(0)
-            }
-        }
-    })
+    }
 }
+loggingOut.addOutputEventListener(ciEventListener)
 @Suppress("DEPRECATION")
 gradle.buildFinished {
+    loggingOut.removeOutputEventListener(ciEventListener)
     val err = failure
     if (err != null) {
         val sb = StringBuilder()
@@ -58,10 +57,8 @@ gradle.buildFinished {
             cur = cur.cause
             depth++
         }
-        val errText = synchronized(ciErrTail) { ciErrTail.joinToString("") }
-        if (errText.isNotEmpty()) sb.append("--- STDERR ---\n").append(errText)
-        val outText = synchronized(ciOutTail) { ciOutTail.joinToString("") }
-        if (outText.isNotEmpty()) sb.append("--- STDOUT_ERR ---\n").append(outText)
+        val errText = synchronized(ciErrTail) { ciErrTail.joinToString("\n") }
+        if (errText.isNotEmpty()) sb.append("--- EVENTS ---\n").append(errText)
         val escaped = sb.toString().take(3500).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
         println("::error title=Gradle Build Failure::$escaped")
     }
