@@ -29,9 +29,59 @@ class _ReconciliationSettlementViewState
   bool _applyingRecon = false;
 
   CurrencyCode? _settlementCurrency;
+  String _settlementDateIso = QatDateUtils.todayIso();
+  Map<CurrencyCode, CurrencyDashboardMetrics>? _customDateMetrics;
   final _actualCashCtrl = TextEditingController();
   final _settlementNotesCtrl = TextEditingController();
   bool _savingSettlement = false;
+
+  Future<void> _pickSettlementDate(AppController ctrl) async {
+    final init =
+        QatDateUtils.parseLegacyDate(_settlementDateIso)?.date ?? DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: init,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(DateTime.now().year + 1),
+    );
+    if (picked == null || !mounted) return;
+    final iso = QatDateUtils.toIsoDate(picked);
+    final metrics = await ctrl.repo.getDashboardMetrics(
+      fromIso: iso,
+      toIso: iso,
+    );
+    if (!mounted) return;
+    setState(() {
+      _settlementDateIso = iso;
+      _customDateMetrics =
+          iso == QatDateUtils.todayIso() ? null : metrics;
+    });
+  }
+
+  String _buildSettlementReceiptText(
+    AppController ctrl,
+    DailySettlementSnapshot snap,
+  ) {
+    return [
+      ctrl.settings.agencyName,
+      'تقرير التحاسب وإغلاق الصندوق',
+      'التاريخ: ${snap.dateIso}',
+      'المستخدم: ${snap.createdBy}',
+      'العملة: ${snap.currency.arabicName}',
+      '--------------------------------',
+      '+ المبيعات النقدية: ${Money(snap.salesCashMinor, snap.currency).format()}',
+      '+ سندات القبض: ${Money(snap.customerReceiptsMinor, snap.currency).format()}',
+      '- المشتريات المدفوعة: ${Money(snap.purchasesCashMinor, snap.currency).format()}',
+      '- سندات الصرف: ${Money(snap.supplierPaymentsMinor, snap.currency).format()}',
+      '- المصروفات: ${Money(snap.expensesMinor, snap.currency).format()}',
+      '- عمولات الحوالات: ${Money(snap.transferFeesMinor, snap.currency).format()}',
+      '--------------------------------',
+      'المتوقع: ${Money(snap.expectedCashMinor, snap.currency).format()}',
+      'الفعلي: ${Money(snap.actualCountedMinor, snap.currency).format()}',
+      'الفرق: ${Money(snap.varianceMinor, snap.currency).format()}',
+      if (snap.notes.isNotEmpty) 'ملاحظات: ${snap.notes}',
+    ].join('\n');
+  }
 
   @override
   void dispose() {
@@ -135,7 +185,7 @@ class _ReconciliationSettlementViewState
       final nowMs = DateTime.now().millisecondsSinceEpoch;
       final snap = DailySettlementSnapshot(
         id: '${nowMs}_${cur.code}',
-        dateIso: QatDateUtils.todayIso(),
+        dateIso: _settlementDateIso,
         epochMs: nowMs,
         currency: cur,
         expectedCashMinor: expectedCash,
@@ -172,7 +222,8 @@ class _ReconciliationSettlementViewState
         ? _settlementCurrency!
         : policy.defaultCurrency;
 
-    final todayM = ctrl.todayMetrics[activeCur] ??
+    final activeMetricsMap = _customDateMetrics ?? ctrl.todayMetrics;
+    final todayM = activeMetricsMap[activeCur] ??
         CurrencyDashboardMetrics(
           currency: activeCur,
           salesTotalMinor: 0,
@@ -487,7 +538,13 @@ class _ReconciliationSettlementViewState
                   title: 'مطابقة وإغلاق الصندوق اليومي',
                   icon: Icons.account_balance_wallet_outlined,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: () => _pickSettlementDate(ctrl),
+                  icon: const Icon(Icons.calendar_today_outlined, size: 16),
+                  label: Text('تاريخ التحاسب: $_settlementDateIso'),
+                ),
+                const SizedBox(height: 10),
                 CurrencySelectorRow(
                   policy: policy,
                   selected: activeCur,
@@ -495,22 +552,30 @@ class _ReconciliationSettlementViewState
                 ),
                 const Divider(height: 18),
                 ErpDetailRow(
-                  label: '+ المبيعات النقدية اليوم',
+                  label: '+ المبيعات المحصلة (نقد/تحويل/إيداع)',
                   value: Money(m.salesPaidMinor, activeCur).format(),
                   valueColor: pal.success,
                 ),
+                if (m.salesTransferMinor > 0 || m.salesDepositMinor > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      'تفصيل المحصل: نقد ${Money(m.salesCashOnlyMinor, activeCur).format()} • تحويل ${Money(m.salesTransferMinor, activeCur).format()} • إيداع ${Money(m.salesDepositMinor, activeCur).format()}',
+                      style: TextStyle(fontSize: 11.5, color: pal.textSecondary),
+                    ),
+                  ),
                 ErpDetailRow(
-                  label: '+ سندات قبض العملاء اليوم',
+                  label: '+ سندات قبض العملاء',
                   value: Money(m.customerReceiptsMinor, activeCur).format(),
                   valueColor: pal.success,
                 ),
                 ErpDetailRow(
-                  label: '- المشتريات النقدية اليوم',
+                  label: '- المشتريات النقدية',
                   value: Money(m.purchasesPaidMinor, activeCur).format(),
                   valueColor: pal.danger,
                 ),
                 ErpDetailRow(
-                  label: '- سندات صرف الموردين اليوم',
+                  label: '- سندات صرف الموردين',
                   value: Money(m.supplierPaymentsMinor, activeCur).format(),
                   valueColor: pal.danger,
                 ),
@@ -519,6 +584,14 @@ class _ReconciliationSettlementViewState
                   value: Money(m.expensesMinor, activeCur).format(),
                   valueColor: pal.danger,
                 ),
+                if (m.stallOutflowMinor > 0 || m.laborOutflowMinor > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      'ضرائب/التزامات: فرش ${Money(m.stallOutflowMinor, activeCur).format()} • عمال ${Money(m.laborOutflowMinor, activeCur).format()}',
+                      style: TextStyle(fontSize: 11.5, color: pal.textSecondary),
+                    ),
+                  ),
                 ErpDetailRow(
                   label: '- عمولات الحوالات',
                   value: Money(m.transfersFeesMinor, activeCur).format(),
@@ -638,22 +711,39 @@ class _ReconciliationSettlementViewState
                           style: TextStyle(fontSize: 12, color: pal.textSecondary),
                         ),
                       ),
-                    Align(
-                      alignment: AlignmentDirectional.centerEnd,
-                      child: TextButton.icon(
-                        onPressed: () async {
-                          await WhatsappShareService.instance.openWhatsApp(
-                            text:
-                                '${ctrl.settings.agencyName} — تقرير التحاسب اليومي (${snap.dateIso})\n'
-                                'العملة: ${snap.currency.arabicName}\n'
-                                'المتوقع: ${Money(snap.expectedCashMinor, snap.currency).format()}\n'
-                                'الفعلي: ${Money(snap.actualCountedMinor, snap.currency).format()}\n'
-                                'الفرق: ${Money(snap.varianceMinor, snap.currency).format()}',
-                          );
-                        },
-                        icon: const Icon(Icons.chat_outlined, size: 15),
-                        label: const Text('مشاركة واتساب'),
-                      ),
+                    Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 6,
+                      children: [
+                        TextButton.icon(
+                          onPressed: () => showReceiptPreviewPrintSheet(
+                            context,
+                            agency: ctrl.settings,
+                            title: 'تحاسب ${snap.dateIso}',
+                            receiptText: _buildSettlementReceiptText(ctrl, snap),
+                          ),
+                          icon: const Icon(Icons.print_outlined, size: 15),
+                          label: const Text('طباعة'),
+                        ),
+                        TextButton.icon(
+                          onPressed: () async {
+                            await WhatsappShareService.instance.openWhatsApp(
+                              text: _buildSettlementReceiptText(ctrl, snap),
+                            );
+                          },
+                          icon: const Icon(Icons.chat_outlined, size: 15),
+                          label: const Text('واتساب'),
+                        ),
+                        TextButton.icon(
+                          onPressed: () async {
+                            await WhatsappShareService.instance.openSms(
+                              text: _buildSettlementReceiptText(ctrl, snap),
+                            );
+                          },
+                          icon: const Icon(Icons.sms_outlined, size: 15),
+                          label: const Text('SMS'),
+                        ),
+                      ],
                     ),
                   ],
                 ),

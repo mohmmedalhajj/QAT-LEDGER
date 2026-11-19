@@ -8,6 +8,7 @@ import '../../core/date_utils.dart';
 import '../../core/money.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../services/esc_pos_service.dart';
 import '../../services/pdf_export_service.dart';
 import '../../services/whatsapp_share_service.dart';
 import '../../state/app_controller.dart';
@@ -244,7 +245,27 @@ class _AccountStatementViewState extends State<AccountStatementView> {
                         ),
                         label: const Text('تصدير كشف الحساب PDF'),
                       ),
-                      if (selectedPartyPhone.isNotEmpty)
+                      FilledButton.tonalIcon(
+                        onPressed: () async {
+                          final txt =
+                              ThermalReceiptFormatter.buildStatementReceiptText(
+                            ctrl.settings,
+                            partyTitle: _isCustomer ? 'العميل' : 'المورد',
+                            partyName: selectedPartyName,
+                            linesByCurrency: _lines,
+                          );
+                          await showReceiptPreviewPrintSheet(
+                            context,
+                            agency: ctrl.settings,
+                            title: 'كشف حساب $selectedPartyName',
+                            receiptText: txt,
+                            whatsappPhone: selectedPartyPhone,
+                          );
+                        },
+                        icon: const Icon(Icons.print_outlined, size: 18),
+                        label: const Text('طباعة حرارية 58/80mm'),
+                      ),
+                      if (selectedPartyPhone.isNotEmpty) ...[
                         OutlinedButton.icon(
                           onPressed: () async {
                             final summaryLines = _lines.entries.map((e) {
@@ -260,8 +281,26 @@ class _AccountStatementViewState extends State<AccountStatementView> {
                             );
                           },
                           icon: const Icon(Icons.chat_outlined, size: 17),
-                          label: const Text('إرسال ملخص واتساب'),
+                          label: const Text('واتساب'),
                         ),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final summaryLines = _lines.entries.map((e) {
+                              final endBal = e.value.isEmpty
+                                  ? 0
+                                  : e.value.last.runningBalanceMinor;
+                              return '${e.key.arabicName}: ${Money(endBal, e.key).format()}';
+                            }).join(' | ');
+                            await WhatsappShareService.instance.openSms(
+                              phone: selectedPartyPhone,
+                              text:
+                                  'كشف حساب $selectedPartyName لدى ${ctrl.settings.agencyName}: $summaryLines',
+                            );
+                          },
+                          icon: const Icon(Icons.sms_outlined, size: 17),
+                          label: const Text('SMS'),
+                        ),
+                      ],
                     ],
                   ),
                 ],

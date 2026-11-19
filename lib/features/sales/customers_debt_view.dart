@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
@@ -5,6 +7,7 @@ import '../../core/money.dart';
 import '../../core/platform_bridge.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../services/esc_pos_service.dart';
 import '../../services/whatsapp_share_service.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common_widgets.dart';
@@ -159,6 +162,29 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           IconButton(
+                            tooltip: 'معاينة / طباعة السند',
+                            icon: const Icon(Icons.print_outlined, size: 18),
+                            onPressed: () async {
+                              final txt = ThermalReceiptFormatter
+                                  .buildCustomerPaymentReceiptText(
+                                ctrl.settings,
+                                customer: customer,
+                                amountMinor: r.amountMinor,
+                                currency: r.currency,
+                                paymentMethod: r.paymentMethod,
+                                dateMs: r.dateMs,
+                                notes: r.notes,
+                              );
+                              await showReceiptPreviewPrintSheet(
+                                ctx,
+                                agency: ctrl.settings,
+                                title: 'سند قبض #${r.id}',
+                                receiptText: txt,
+                                whatsappPhone: customer.phone,
+                              );
+                            },
+                          ),
+                          IconButton(
                             tooltip: 'تعديل السند',
                             icon: const Icon(Icons.edit_outlined, size: 18),
                             onPressed: () async {
@@ -295,6 +321,7 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
     final refCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
     CurrencyCode selectedCur = ctrl.currencyPolicy.defaultCurrency;
+    int debtDateMs = DateTime.now().millisecondsSinceEpoch;
 
     await showDialog<void>(
       context: context,
@@ -315,6 +342,12 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
                     valueColor: customer.balanceFor(selectedCur) > 0
                         ? ctx.pal.danger
                         : ctx.pal.success,
+                  ),
+                  const SizedBox(height: 8),
+                  ErpDatePickerTile(
+                    label: 'تاريخ الدين',
+                    dateMs: debtDateMs,
+                    onChanged: (ms) => setModalState(() => debtDateMs = ms),
                   ),
                   const SizedBox(height: 8),
                   CurrencySelectorRow(
@@ -371,6 +404,7 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
                     statement: statementCtrl.text,
                     referenceNumber: refCtrl.text,
                     notes: notesCtrl.text,
+                    dateMs: debtDateMs,
                   );
                   await ctrl.reloadAll();
                   if (ctx.mounted) Navigator.pop(ctx);
@@ -463,6 +497,8 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
     final amountCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
     CurrencyCode selectedCur = ctrl.currencyPolicy.defaultCurrency;
+    String paymentMethod = 'نقدي';
+    int payDateMs = DateTime.now().millisecondsSinceEpoch;
 
     await showDialog<void>(
       context: context,
@@ -471,35 +507,56 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
         child: StatefulBuilder(
           builder: (ctx, setModalState) => AlertDialog(
             title: Text('سند قبض — ${customer.name}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              ErpDetailRow(
-                label: 'الرصيد القائم حالياً',
-                value: Money(customer.balanceFor(selectedCur), selectedCur)
-                    .format(),
-                valueColor: customer.balanceFor(selectedCur) > 0
-                    ? ctx.pal.danger
-                    : ctx.pal.success,
-              ),
-              const SizedBox(height: 8),
-              CurrencySelectorRow(
-                policy: ctrl.currencyPolicy,
-                selected: selectedCur,
-                onChanged: (c) => setModalState(() => selectedCur = c),
-              ),
-              const SizedBox(height: 10),
-              AccountingNumberField(
-                controller: amountCtrl,
-                label: 'المبلغ المقبوض (${selectedCur.shortSymbol})',
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: notesCtrl,
-                decoration: const InputDecoration(labelText: 'ملاحظات'),
-              ),
-            ],
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ErpDetailRow(
+                  label: 'الرصيد القائم حالياً',
+                  value: Money(customer.balanceFor(selectedCur), selectedCur)
+                      .format(),
+                  valueColor: customer.balanceFor(selectedCur) > 0
+                      ? ctx.pal.danger
+                      : ctx.pal.success,
+                ),
+                const SizedBox(height: 8),
+                ErpDatePickerTile(
+                  label: 'تاريخ السند',
+                  dateMs: payDateMs,
+                  onChanged: (ms) => setModalState(() => payDateMs = ms),
+                ),
+                const SizedBox(height: 8),
+                CurrencySelectorRow(
+                  policy: ctrl.currencyPolicy,
+                  selected: selectedCur,
+                  onChanged: (c) => setModalState(() => selectedCur = c),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  children: [
+                    for (final m in const ['نقدي', 'تحويل', 'إيداع'])
+                      ChoiceChip(
+                        label: Text(m),
+                        selected: paymentMethod == m,
+                        onSelected: (_) =>
+                            setModalState(() => paymentMethod = m),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                AccountingNumberField(
+                  controller: amountCtrl,
+                  label: 'المبلغ المقبوض (${selectedCur.shortSymbol})',
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: notesCtrl,
+                  decoration: const InputDecoration(labelText: 'ملاحظات'),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -515,15 +572,54 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
                   );
                   return;
                 }
+                final noteSnapshot = notesCtrl.text;
                 await ctrl.repo.addCustomerPayment(
                   customerId: customer.id,
                   customerName: customer.name,
                   amountMinor: minor,
                   currency: selectedCur,
-                  notes: notesCtrl.text,
+                  paymentMethod: paymentMethod,
+                  notes: noteSnapshot,
+                  dateMs: payDateMs,
                 );
                 await ctrl.reloadAll();
-                if (ctx.mounted) Navigator.pop(ctx);
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+                final updated = ctrl.customers.firstWhere(
+                  (e) => e.id == customer.id,
+                  orElse: () => customer,
+                );
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text('تم حفظ سند القبض بنجاح'),
+                    action: SnackBarAction(
+                      label: 'طباعة السند',
+                      onPressed: () {
+                        if (!mounted) return;
+                        final txt = ThermalReceiptFormatter
+                            .buildCustomerPaymentReceiptText(
+                          ctrl.settings,
+                          customer: updated,
+                          amountMinor: minor,
+                          currency: selectedCur,
+                          paymentMethod: paymentMethod,
+                          dateMs: payDateMs,
+                          notes: noteSnapshot,
+                        );
+                        unawaited(
+                          showReceiptPreviewPrintSheet(
+                            context,
+                            agency: ctrl.settings,
+                            title: 'سند قبض — ${updated.name}',
+                            receiptText: txt,
+                            whatsappPhone: updated.phone,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                );
               },
               child: const Text('حفظ السند'),
             ),
@@ -808,7 +904,7 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
                                       ),
                                       label: const Text('كشف الحساب'),
                                     ),
-                                  if (c.phone.isNotEmpty)
+                                  if (c.phone.isNotEmpty) ...[
                                     OutlinedButton.icon(
                                       onPressed: () async =>
                                           WhatsappShareService.instance
@@ -823,8 +919,22 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
                                         Icons.chat_outlined,
                                         size: 16,
                                       ),
-                                      label: const Text('تذكير'),
+                                      label: const Text('واتساب'),
                                     ),
+                                    OutlinedButton.icon(
+                                      onPressed: () async =>
+                                          WhatsappShareService.instance.openSms(
+                                        phone: c.phone,
+                                        text:
+                                            'مرحباً ${c.name}، رصيدكم الحالي لدى ${ctrl.settings.agencyName}: YER ${Money(yerDebt, CurrencyCode.yer).format()}${sarDebt != 0 ? ' | SAR ${Money(sarDebt, CurrencyCode.sar).format()}' : ''}',
+                                      ),
+                                      icon: const Icon(
+                                        Icons.sms_outlined,
+                                        size: 16,
+                                      ),
+                                      label: const Text('SMS'),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ],

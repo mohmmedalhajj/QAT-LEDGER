@@ -334,6 +334,65 @@ void main() {
       await repo.setTransferRecipientActive(recId, false);
       expect((await repo.getTransferRecipients()).single.isActive, false);
 
+      // 8. InventoryReceiver CRUD, DailyInventoryMatching, and custom dateMs persistence
+      final recvId = await repo.upsertInventoryReceiver(
+        name: 'سالم أمين المستودع',
+        phone: '777888999',
+        notes: 'وردية الصباح',
+      );
+      expect((await repo.getInventoryReceivers()).single.name, 'سالم أمين المستودع');
+
+      final customMs = DateTime(2026, 10, 15, 11, 30).millisecondsSinceEpoch;
+      final batchDatedId = await repo.addInventoryBatch(
+        qatTypeName: 'همداني ممتاز',
+        qtyMilli: 5000,
+        unit: 'ربطة',
+        buyPriceMinor: 100000,
+        sellPriceMinor: 150000,
+        currency: CurrencyCode.yer,
+        receiverId: recvId,
+        receiverName: 'سالم أمين المستودع',
+      );
+      await repo.addImportWeight(
+        weightMilli: 12500,
+        receiverName: 'سالم أمين المستودع',
+        dateMs: customMs,
+      );
+      await repo.editSale(
+        saleId: saleId,
+        customerId: custId,
+        customerName: 'عميل عدن',
+        newItems: [
+          NewSaleItemInput(
+            inventoryBatchId: batchDatedId,
+            qatTypeName: 'همداني ممتاز',
+            qtyMilli: 1000,
+            unit: 'ربطة',
+            unitPriceMinor: 150000,
+            buyPriceMinor: 100000,
+          ),
+        ],
+        currency: CurrencyCode.yer,
+        paymentType: PaymentType.paid,
+        paidAmountMinor: 150000,
+        paymentMethod: 'نقداً',
+        dateMs: customMs,
+      );
+      final updatedDatedSale =
+          (await repo.getSales()).firstWhere((s) => s.id == saleId);
+      expect(updatedDatedSale.dateIso, '2026-10-15');
+
+      final matching = await repo.getDailyInventoryMatching(
+        fromIso: '2026-10-15',
+        toIso: '2026-10-15',
+      );
+      expect(matching.importedWeightMilli, 12500);
+      expect(matching.soldQtyMilli, 1000);
+      expect(matching.cashSalesMinorByCurrency[CurrencyCode.yer], 150000);
+
+      await repo.deleteInventoryReceiver(recvId);
+      expect(await repo.getInventoryReceivers(), isEmpty);
+
       await dbService.close();
     } finally {
       await tempDir.delete(recursive: true);

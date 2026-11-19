@@ -32,6 +32,140 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
   String? _error;
   bool _wasActive = false;
 
+  String _buildReportSummaryText(
+    AppController ctrl,
+    Map<CurrencyCode, CurrencyDashboardMetrics> data,
+  ) {
+    return [
+      'التقرير المالي الشامل — ${ctrl.settings.agencyName}',
+      'الفترة: ${_fromIso ?? 'من البداية'} إلى ${_toIso ?? 'حتى اليوم'}',
+      for (final cur in ctrl.currencyPolicy.allowedCurrencies)
+        if (data[cur] != null) ...[
+          '--- ${cur.arabicName} (${cur.code}) ---',
+          'المبيعات: ${Money(data[cur]!.salesTotalMinor, cur).format()}',
+          'نقد: ${Money(data[cur]!.salesCashOnlyMinor, cur).format()} | تحويل: ${Money(data[cur]!.salesTransferMinor, cur).format()} | إيداع: ${Money(data[cur]!.salesDepositMinor, cur).format()}',
+          'المصروفات: ${Money(data[cur]!.expensesMinor, cur).format()}',
+          'الضرائب/الفرش/العمال: ${Money(data[cur]!.totalTaxAndOutflowsMinor, cur).format()}',
+          'صافي الربح التقديري: ${Money(data[cur]!.netProfitMinor, cur).format()}',
+          'رصيد الصندوق: ${Money(data[cur]!.cashBoxBalanceMinor, cur).format()}',
+          'ديون العملاء: ${Money(data[cur]!.totalCustomerDebtMinor, cur).format()}',
+          'مستحقات الموردين: ${Money(data[cur]!.totalSupplierPayableMinor, cur).format()}',
+        ],
+    ].join('\n');
+  }
+
+  Widget _buildReportChartCard(
+    QatPalette pal,
+    CurrencyCode cur,
+    List<DailyChartPoint> points,
+  ) {
+    final maxVal = points.fold<int>(1, (m, p) {
+      final hi =
+          p.salesMinor > p.profitMinor.abs() ? p.salesMinor : p.profitMinor.abs();
+      return hi > m ? hi : m;
+    });
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.bar_chart_rounded, color: pal.brand, size: 18),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'اتجاه المبيعات والأرباح (7 أيام — ${cur.code})',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 104,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  for (final pt in points)
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            Expanded(
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Flexible(
+                                    child: FractionallySizedBox(
+                                      heightFactor: (pt.salesMinor / maxVal)
+                                          .clamp(0.05, 1.0)
+                                          .toDouble(),
+                                      child: Container(
+                                        width: 9,
+                                        decoration: BoxDecoration(
+                                          color: pal.brand,
+                                          borderRadius:
+                                              BorderRadius.circular(4),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Flexible(
+                                    child: FractionallySizedBox(
+                                      heightFactor:
+                                          (pt.profitMinor.abs() / maxVal)
+                                              .clamp(0.05, 1.0)
+                                              .toDouble(),
+                                      child: Container(
+                                        width: 9,
+                                        decoration: BoxDecoration(
+                                          color: pt.profitMinor >= 0
+                                              ? pal.success
+                                              : pal.danger,
+                                          borderRadius:
+                                              BorderRadius.circular(4),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              pt.labelAr.isNotEmpty
+                                  ? pt.labelAr
+                                  : pt.dateIso.substring(5),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: pal.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _load() async {
     if (!mounted) return;
     setState(() {
@@ -161,30 +295,34 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
                 const SizedBox(width: 6),
                 if (data != null) ...[
                   IconButton.outlined(
+                    tooltip: 'طباعة حرارية 58/80mm',
+                    onPressed: () => showReceiptPreviewPrintSheet(
+                      context,
+                      agency: ctrl.settings,
+                      title: 'التقرير المالي الشامل',
+                      receiptText: _buildReportSummaryText(ctrl, data),
+                    ),
+                    icon: const Icon(Icons.print_outlined, size: 18),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton.outlined(
                     tooltip: 'مشاركة التقرير عبر واتساب',
                     onPressed: () async {
-                      final lines = <String>[
-                        'التقرير المالي الشامل — ${ctrl.settings.agencyName}',
-                        'الفترة: ${_fromIso ?? 'من البداية'} إلى ${_toIso ?? 'حتى اليوم'}',
-                        for (final cur in ctrl.currencyPolicy.allowedCurrencies)
-                          if (data[cur] != null) ...[
-                            '',
-                            '--- ${cur.arabicName} (${cur.code}) ---',
-                            'المبيعات: ${Money(data[cur]!.salesTotalMinor, cur).format()}',
-                            'المصروفات التشغيلية: ${Money(data[cur]!.expensesMinor, cur).format()}',
-                            'الضرائب والمصاريف اليومية: ${Money(data[cur]!.totalTaxAndOutflowsMinor, cur).format()}',
-                            'صافي الربح التقديري: ${Money(data[cur]!.netProfitMinor, cur).format()}',
-                            'رصيد الصندوق: ${Money(data[cur]!.cashBoxBalanceMinor, cur).format()}',
-                            'ديون العملاء: ${Money(data[cur]!.totalCustomerDebtMinor, cur).format()}',
-                            'مستحقات الموردين: ${Money(data[cur]!.totalSupplierPayableMinor, cur).format()}',
-                          ],
-                      ].join('\n');
                       await WhatsappShareService.instance
-                          .openWhatsApp(text: lines);
+                          .openWhatsApp(text: _buildReportSummaryText(ctrl, data));
                     },
                     icon: const Icon(Icons.chat_outlined, size: 18),
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 4),
+                  IconButton.outlined(
+                    tooltip: 'مشاركة SMS',
+                    onPressed: () async {
+                      await WhatsappShareService.instance
+                          .openSms(text: _buildReportSummaryText(ctrl, data));
+                    },
+                    icon: const Icon(Icons.sms_outlined, size: 18),
+                  ),
+                  const SizedBox(width: 4),
                   IconButton.filled(
                     tooltip: 'تصدير PDF',
                     onPressed: () async {
@@ -265,6 +403,12 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
                     ),
                   ],
                   [
+                    const ErpTableCell('تفصيل طرق قبض المبيعات (نقد / تحويل / إيداع)'),
+                    ErpTableCell(
+                      '${Money(data[cur]!.salesCashOnlyMinor, cur).format()} / ${Money(data[cur]!.salesTransferMinor, cur).format()} / ${Money(data[cur]!.salesDepositMinor, cur).format()}',
+                    ),
+                  ],
+                  [
                     const ErpTableCell('إجمالي المشتريات'),
                     ErpTableCell(
                       Money(data[cur]!.purchasesTotalMinor, cur).format(),
@@ -290,6 +434,15 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
                       color: pal.warning,
                     ),
                   ],
+                  if (data[cur]!.stallOutflowMinor > 0 ||
+                      data[cur]!.laborOutflowMinor > 0)
+                    [
+                      const ErpTableCell('مصروفات الفرش والعمال اليومية'),
+                      ErpTableCell(
+                        '${Money(data[cur]!.stallOutflowMinor, cur).format()} / ${Money(data[cur]!.laborOutflowMinor, cur).format()}',
+                        color: pal.warning,
+                      ),
+                    ],
                   [
                     const ErpTableCell('صافي الربح التقديري', bold: true),
                     ErpTableCell(
@@ -326,7 +479,10 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
                   ],
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 10),
+              if ((ctrl.dailyCharts[cur] ?? const []).isNotEmpty)
+                _buildReportChartCard(pal, cur, ctrl.dailyCharts[cur]!),
+              const SizedBox(height: 8),
             ],
         if (data != null) ...[
           const ErpSectionHeader(

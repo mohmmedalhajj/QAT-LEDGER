@@ -58,6 +58,7 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
     );
     final notesCtrl = TextEditingController(text: existing?.notes ?? '');
     CurrencyCode cur = existing?.currency ?? ctrl.currencyPolicy.defaultCurrency;
+    int taxDateMs = existing?.dateMs ?? DateTime.now().millisecondsSinceEpoch;
 
     await showDialog<void>(
       context: context,
@@ -80,8 +81,15 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (existing == null) ...[
+                  ErpDatePickerTile(
+                    label: 'تاريخ القيد',
+                    dateMs: taxDateMs,
+                    onChanged: (ms) => setModalState(() => taxDateMs = ms),
+                  ),
+                  const SizedBox(height: 8),
                   CurrencySelectorRow(
                     policy: ctrl.currencyPolicy,
                     selected: cur,
@@ -149,6 +157,7 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
                     laborOutflowMinor: laborMinor,
                     currency: cur,
                     notes: notesCtrl.text,
+                    dateMs: taxDateMs,
                   );
                 } else {
                   await ctrl.repo.updateTaxEntry(

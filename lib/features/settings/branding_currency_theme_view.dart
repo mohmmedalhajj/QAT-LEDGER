@@ -332,21 +332,120 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
                     ),
                     const SizedBox(width: 12),
                     Flexible(
-                      child: OutlinedButton.icon(
-                        onPressed: !canEdit
-                            ? null
-                            : () async {
-                                final picked = await ImagePicker().pickImage(
-                                  source: ImageSource.gallery,
-                                );
-                                if (!mounted || picked == null) return;
-                                setState(() => _logoPath = picked.path);
-                              },
-                        icon: const Icon(Icons.image_outlined, size: 18),
-                        label: const Text('تغيير شعار الوكالة'),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: !canEdit
+                                ? null
+                                : () async {
+                                    final picked = await ImagePicker()
+                                        .pickImage(source: ImageSource.gallery);
+                                    if (!mounted || picked == null) return;
+                                    setState(() => _logoPath = picked.path);
+                                  },
+                            icon: const Icon(Icons.image_outlined, size: 18),
+                            label: const Text('تغيير شعار الوكالة'),
+                          ),
+                          if (_logoPath.isNotEmpty)
+                            TextButton.icon(
+                              onPressed: !canEdit
+                                  ? null
+                                  : () => setState(() => _logoPath = ''),
+                              icon: const Icon(
+                                Icons.delete_outline,
+                                size: 17,
+                              ),
+                              label: const Text('إزالة الشعار'),
+                            ),
+                        ],
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                ListenableBuilder(
+                  listenable: Listenable.merge([
+                    _nameCtrl,
+                    _taglineCtrl,
+                    _headerTextCtrl,
+                    _footerCtrl,
+                  ]),
+                  builder: (context, child) => Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: pal.cardElevated,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: pal.brand.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 16,
+                              backgroundImage: logoProvider,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _nameCtrl.text.trim().isEmpty
+                                        ? 'اسم الوكالة'
+                                        : _nameCtrl.text.trim(),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      color: pal.brand,
+                                    ),
+                                  ),
+                                  if (_taglineCtrl.text.trim().isNotEmpty)
+                                    Text(
+                                      _taglineCtrl.text.trim(),
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: pal.textSecondary,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            StatusPill(
+                              label: 'معاينة الترويسة',
+                              bg: pal.brandSoft,
+                              fg: pal.brand,
+                            ),
+                          ],
+                        ),
+                        if (_headerEnabled &&
+                            _headerTextCtrl.text.trim().isNotEmpty) ...[
+                          const Divider(height: 12),
+                          Text(
+                            _headerTextCtrl.text.trim(),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 11.5),
+                          ),
+                        ],
+                        if (_footerEnabled &&
+                            _footerCtrl.text.trim().isNotEmpty) ...[
+                          const Divider(height: 12),
+                          Text(
+                            _footerCtrl.text.trim(),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: pal.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 10),
                 TextField(

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
@@ -12,6 +13,8 @@ import 'features/inventory_suppliers_tab.dart';
 import 'features/sales_customers_tab.dart';
 import 'features/splash_login_onboarding.dart';
 import 'features/transfers_reports_tab.dart';
+import 'features/widgets/common_widgets.dart';
+import 'features/widgets/erp_components.dart';
 import 'licensing/license_models.dart';
 import 'state/app_controller.dart';
 
@@ -479,13 +482,45 @@ class _ErpCategorizedDrawer extends StatelessWidget {
               route: AppScreenRoute.reports,
               selected: ctrl.activeRoute == AppScreenRoute.reports,
               proLocked: !ctrl.hasLicenseFeature(LicenseFeature.reports),
-              onTap: () => go(AppScreenRoute.reports),
+              onTap: () {
+                if (!ctrl.hasLicenseFeature(LicenseFeature.reports)) {
+                  onClose();
+                  unawaited(
+                    showProUpgradeRequiredDialog(
+                      context,
+                      featureTitle: 'التقارير المالية والأرباح المتقدمة',
+                      featureDescription:
+                          'تتيح لك الباقة الاحترافية (PRO) تحليل المبيعات، الأرباح الصافية، وتصدير التقارير المعتمدة PDF وExcel.',
+                      onActivatePressed: () => ctrl.setSection(4, subTab: 3),
+                      onPreviewLockedScreen: () => go(AppScreenRoute.reports),
+                    ),
+                  );
+                } else {
+                  go(AppScreenRoute.reports);
+                }
+              },
             ),
             _DrawerRouteTile(
               route: AppScreenRoute.archive,
               selected: ctrl.activeRoute == AppScreenRoute.archive,
               proLocked: !ctrl.hasLicenseFeature(LicenseFeature.archive),
-              onTap: () => go(AppScreenRoute.archive),
+              onTap: () {
+                if (!ctrl.hasLicenseFeature(LicenseFeature.archive)) {
+                  onClose();
+                  unawaited(
+                    showProUpgradeRequiredDialog(
+                      context,
+                      featureTitle: 'مركز الأرشيف الشامل واستعادة القيود',
+                      featureDescription:
+                          'يتيح لك الأرشيف الشامل في الباقة الاحترافية (PRO) استعراض واستعادة السجلات المؤرشفة بضغطة واحدة.',
+                      onActivatePressed: () => ctrl.setSection(4, subTab: 3),
+                      onPreviewLockedScreen: () => go(AppScreenRoute.archive),
+                    ),
+                  );
+                } else {
+                  go(AppScreenRoute.archive);
+                }
+              },
             ),
             const Divider(height: 14),
             const _DrawerGroupHeader('الإعدادات والإدارة'),
@@ -519,9 +554,15 @@ class _ErpCategorizedDrawer extends StatelessWidget {
                 'قفل وتسجيل الخروج',
                 style: TextStyle(color: pal.danger),
               ),
-              onTap: () {
+              onTap: () async {
                 onClose();
-                ctrl.logout();
+                final ok = await showErpConfirmDialog(
+                  context,
+                  title: 'قفل النظام وتسجيل الخروج',
+                  message: 'هل تريد قفل الجلسة والعودة إلى شاشة تسجيل الدخول؟',
+                  confirmLabel: 'قفل وخروج',
+                );
+                if (ok) ctrl.logout();
               },
             ),
           ],

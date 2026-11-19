@@ -3,15 +3,18 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../core/platform_bridge.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../developer/developer_console_sheet.dart';
 import '../../licensing/license_models.dart';
+import '../../services/whatsapp_share_service.dart';
 import '../../state/app_controller.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/erp_components.dart';
@@ -49,6 +52,37 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
       ),
     );
     if (res.isValid) _tokenCtrl.clear();
+  }
+
+  Future<void> _scanQrAndActivate(
+    AppController ctrl,
+    ImageSource source,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final picked = await ImagePicker().pickImage(source: source);
+      if (picked == null) return;
+      final decoded =
+          await PlatformBridge.instance.decodeQrFromImagePath(picked.path);
+      if (!mounted) return;
+      if (decoded == null || decoded.trim().isEmpty) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'تعذر قراءة باركود QR صالح من الصورة. تأكد من وضوح الكود أو ألصق النص مباشرة.',
+            ),
+          ),
+        );
+        return;
+      }
+      _tokenCtrl.text = decoded.trim();
+      await _activateRaw(ctrl, decoded);
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('تعذر تشغيل الماسح: $e')),
+      );
+    }
   }
 
   Future<void> _addOrEditUserDialog(
@@ -231,6 +265,17 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        if (ctrl.editionConfig.isCustomer &&
+            ctrl.editionConfig.publicKeysCsv.trim().isEmpty) ...[
+          const ErpStatusBanner(
+            tone: ErpBannerTone.warning,
+            icon: Icons.key_off_outlined,
+            title: 'تنبيه بناء نسخة العميل (QAT_LICENSE_PUBLIC_KEYS فارغ)',
+            subtitle:
+                'هذه النسخة مبنية بدون مفتاح عام مدمج للمطور. أدخل QAT_LICENSE_PUBLIC_KEYS عند البناء أو في gradle.properties لتفعيل التراخيص الموقّعة.',
+          ),
+          const SizedBox(height: 12),
+        ],
         Card(
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -387,6 +432,42 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () =>
+                          _scanQrAndActivate(ctrl, ImageSource.camera),
+                      icon: const Icon(Icons.qr_code_scanner, size: 17),
+                      label: const Text('مسح QR بالكاميرا'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () =>
+                          _scanQrAndActivate(ctrl, ImageSource.gallery),
+                      icon: const Icon(Icons.qr_code_2_outlined, size: 17),
+                      label: const Text('استيراد صورة QR'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final clip = await Clipboard.getData('text/plain');
+                        final txt = clip?.text?.trim() ?? '';
+                        if (txt.isEmpty) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('الحافظة فارغة')),
+                          );
+                          return;
+                        }
+                        _tokenCtrl.text = txt;
+                        await _activateRaw(ctrl, txt);
+                      },
+                      icon: const Icon(Icons.content_paste_go, size: 17),
+                      label: const Text('لصق وتفعيل'),
+                    ),
+                  ],
+                ),
                 if (lic.payload != null) ...[
                   const SizedBox(height: 8),
                   Align(
@@ -481,7 +562,16 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                     ),
                     const SizedBox(width: 8),
                     OutlinedButton.icon(
-                      onPressed: ctrl.logout,
+                      onPressed: () async {
+                        final ok = await showErpConfirmDialog(
+                          context,
+                          title: 'قفل النظام وتسجيل الخروج',
+                          message:
+                              'هل تريد قفل التطبيق والعودة إلى شاشة الدخول؟',
+                          confirmLabel: 'قفل الآن',
+                        );
+                        if (ok) ctrl.logout();
+                      },
                       icon: const Icon(Icons.logout, size: 16),
                       label: const Text('قفل'),
                     ),
@@ -648,6 +738,56 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
             ),
           ),
         ],
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'طلب الترخيص والدعم الفني',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'للحصول على كود التفعيل للباقة الاحترافية (PRO) أو الدعم الفني، أرسل معرّف تثبيت الجهاز عبر واتساب أو مشاركة الطلب.',
+                  style: TextStyle(fontSize: 12, color: pal.textSecondary),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton.tonalIcon(
+                      onPressed: () async {
+                        await WhatsappShareService.instance.openWhatsApp(
+                          text:
+                              'مرحباً، أرغب في تفعيل ترخيص ميزان القات (PRO):\n'
+                              'الوكالة: ${ctrl.settings.agencyName}\n'
+                              'معرّف التثبيت: ${ctrl.installationId}',
+                        );
+                      },
+                      icon: const Icon(Icons.chat_outlined, size: 17),
+                      label: const Text('طلب التفعيل عبر واتساب'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        await Share.share(
+                          'طلب ترخيص ميزان القات\n'
+                          'الوكالة: ${ctrl.settings.agencyName}\n'
+                          'معرّف التثبيت: ${ctrl.installationId}',
+                        );
+                      },
+                      icon: const Icon(Icons.share_outlined, size: 17),
+                      label: const Text('مشاركة طلب الترخيص'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }

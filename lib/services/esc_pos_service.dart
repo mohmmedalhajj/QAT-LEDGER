@@ -217,4 +217,60 @@ abstract final class ThermalReceiptFormatter {
     if (purchase.notes.isNotEmpty) sb.writeln('ملاحظات: ${purchase.notes}');
     return sb.toString().trim();
   }
+
+  static String buildCustomerPaymentReceiptText(
+    AgencySettings agency, {
+    required Customer customer,
+    required int amountMinor,
+    required CurrencyCode currency,
+    required String paymentMethod,
+    required int dateMs,
+    String notes = '',
+  }) {
+    final sb = StringBuffer()
+      ..writeln(agency.agencyName)
+      ..writeln('سند قبض مالي من عميل')
+      ..writeln('التاريخ: ${QatDateUtils.formatArabicDateTime12h(dateMs)}')
+      ..writeln('العميل: ${customer.name}')
+      ..writeln('العملة: ${currency.arabicName}')
+      ..writeln('طريقة القبض: $paymentMethod')
+      ..writeln('--------------------------------')
+      ..writeln('المبلغ المقبوض: ${Money(amountMinor, currency).format()}')
+      ..writeln('الرصيد المتبقي: ${Money(customer.balanceFor(currency), currency).format()}');
+    if (notes.trim().isNotEmpty) sb.writeln('ملاحظات: ${notes.trim()}');
+    if (agency.footerEnabled && agency.footerNote.isNotEmpty) {
+      sb.writeln('--------------------------------');
+      sb.writeln(agency.footerNote);
+    }
+    return sb.toString().trim();
+  }
+
+  static String buildStatementReceiptText(
+    AgencySettings agency, {
+    required String partyTitle,
+    required String partyName,
+    required Map<CurrencyCode, List<StatementLine>> linesByCurrency,
+  }) {
+    final sb = StringBuffer()
+      ..writeln(agency.agencyName)
+      ..writeln('كشف حساب $partyTitle: $partyName')
+      ..writeln('التاريخ: ${QatDateUtils.formatArabicDateTime12h(DateTime.now().millisecondsSinceEpoch)}');
+    for (final entry in linesByCurrency.entries) {
+      final cur = entry.key;
+      final debit = entry.value.fold<int>(0, (s, l) => s + l.debitMinor);
+      final credit = entry.value.fold<int>(0, (s, l) => s + l.creditMinor);
+      final bal = entry.value.isEmpty ? 0 : entry.value.last.runningBalanceMinor;
+      sb
+        ..writeln('--------------------------------')
+        ..writeln('العملة: ${cur.arabicName}')
+        ..writeln('عليه/مدين: ${Money(debit, cur).format()}')
+        ..writeln('له/دائن: ${Money(credit, cur).format()}')
+        ..writeln('الرصيد: ${Money(bal, cur).format()}');
+    }
+    if (agency.footerEnabled && agency.footerNote.isNotEmpty) {
+      sb.writeln('--------------------------------');
+      sb.writeln(agency.footerNote);
+    }
+    return sb.toString().trim();
+  }
 }

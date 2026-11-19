@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
@@ -21,8 +24,33 @@ class BackupAndPrinterView extends StatefulWidget {
 
 class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
   List<BondedPrinter> _printers = [];
+  List<File> _localBackups = [];
+  bool _searchedPrinters = false;
   bool _busy = false;
   String? _lastBackupInfo;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_refreshLocalBackups());
+  }
+
+  Future<void> _refreshLocalBackups() async {
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      final dir = Directory('${docs.path}/qat_ledger_backups');
+      if (!dir.existsSync()) return;
+      final files = dir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.qbak'))
+          .toList()
+        ..sort(
+          (a, b) => b.statSync().modified.compareTo(a.statSync().modified),
+        );
+      if (mounted) setState(() => _localBackups = files);
+    } catch (_) {}
+  }
 
   Future<void> _createBackup(AppController ctrl) async {
     setState(() => _busy = true);
@@ -33,6 +61,7 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
         appEdition: ctrl.editionConfig.edition,
         agencyLogoPath: ctrl.settings.logoPath,
       );
+      await _refreshLocalBackups();
       if (!mounted) return;
       setState(() {
         _lastBackupInfo =
@@ -52,12 +81,10 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
     }
   }
 
-  Future<void> _restoreBackup(AppController ctrl) async {
-    final picked = await FilePicker.platform.pickFiles(type: FileType.any);
-    final path = picked?.files.single.path;
-    if (path == null) return;
-    if (!mounted) return;
-
+  Future<void> _restoreFromSpecificPath(
+    AppController ctrl,
+    String path,
+  ) async {
     final confirm = await showErpConfirmDialog(
       context,
       title: 'تأكيد استعادة البيانات',
@@ -89,6 +116,13 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _restoreBackup(AppController ctrl) async {
+    final picked = await FilePicker.platform.pickFiles(type: FileType.any);
+    final path = picked?.files.single.path;
+    if (path == null || !mounted) return;
+    await _restoreFromSpecificPath(ctrl, path);
   }
 
   @override
@@ -138,6 +172,53 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
                     subtitle: _lastBackupInfo!,
                   ),
                 ],
+                if (_localBackups.isNotEmpty) ...[
+                  const Divider(height: 20),
+                  Text(
+                    'النسخ المحفوظة محلياً (${_localBackups.length}):',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  for (final f in _localBackups.take(5))
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.inventory_2_outlined, color: pal.brand),
+                      title: Text(
+                        f.path.split('/').last,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textDirection: TextDirection.ltr,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      subtitle: Text(
+                        '${(f.lengthSync() / 1024).toStringAsFixed(1)} KB',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: 'مشاركة',
+                            icon: const Icon(Icons.share_outlined, size: 18),
+                            onPressed: () => Share.shareXFiles(
+                              [XFile(f.path)],
+                              text: 'نسخة احتياطية ميزان القات (.qbak)',
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _busy
+                                ? null
+                                : () => _restoreFromSpecificPath(ctrl, f.path),
+                            child: const Text('استعادة'),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
               ],
             ),
           ),
@@ -180,11 +261,23 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
                     final list =
                         await PlatformBridge.instance.getBondedPrinters();
                     if (!mounted) return;
-                    setState(() => _printers = list);
+                    setState(() {
+                      _printers = list;
+                      _searchedPrinters = true;
+                    });
                   },
                   icon: const Icon(Icons.bluetooth_searching),
                   label: const Text('جلب الطابعات المقترنة'),
                 ),
+                if (_searchedPrinters && _printers.isEmpty) ...[
+                  const SizedBox(height: 8),
+                  const ErpStatusBanner(
+                    tone: ErpBannerTone.warning,
+                    title: 'لم يتم العثور على طابعات مقترنة',
+                    subtitle:
+                        'تأكد من تشغيل البلوتوث ومنح صلاحية الأجهزة القريبة ثم اقترن بالطابعة من إعدادات Android أولاً.',
+                  ),
+                ],
                 if (ctrl.settings.savedPrinterAddress.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   FilledButton.tonalIcon(

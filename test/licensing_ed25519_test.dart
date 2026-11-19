@@ -192,4 +192,53 @@ void main() {
     expect(proRes.hasFeature(LicenseFeature.archive), true);
     expect(proRes.remainingDays, isNull);
   });
+
+  test('TrustedPublicKeyRegistry strips env prefixes/PEMs and LicenseCanonical extracts QL1/.qlic from WhatsApp prose', () async {
+    final ed = Ed25519();
+    final kp = await ed.newKeyPairFromSeed(List<int>.generate(32, (i) => i + 21));
+    final pub = await kp.extractPublicKey();
+    final spkiB64 = TrustedPublicKeyRegistry.encodeSpkiBase64(pub.bytes);
+    final pem = '-----BEGIN PUBLIC KEY-----\n$spkiB64\n-----END PUBLIC KEY-----';
+
+    final prefixedCsv = 'QAT_LICENSE_PUBLIC_KEYS="$pem"';
+    final reg = TrustedPublicKeyRegistry.fromCsv(prefixedCsv);
+    expect(reg.isEmpty, false);
+    expect(reg.trustedKeyIds.length, 1);
+
+    const payload = LicensePayload(
+      format: LicenseCanonical.canonicalPayloadFormat,
+      licenseId: 'QAT-PROSE-1',
+      product: 'QAT_LEDGER',
+      edition: 'CUSTOMER',
+      customerName: 'عميل واتساب',
+      businessName: 'وكالة سبأ',
+      planCode: 'PRO_PERPETUAL',
+      packageTier: PackageTier.pro,
+      licenseType: LicenseType.perpetual,
+      issuedAtEpochMs: 1700000000000,
+      expiresAtEpochMs: 0,
+      installationId: 'QAT-1234-5678-9012',
+      maxDevices: 1,
+      features: ['REPORTS', 'ARCHIVE', 'BACKUP'],
+    );
+    final sig = await ed.sign(
+      Uint8List.fromList(utf8.encode(LicenseCanonical.serializePayloadCanonical(payload))),
+      keyPair: kp,
+    );
+    final ql1 = LicenseCanonical.encodeCompactToken(payload: payload, signatureBytes: sig.bytes);
+    final wrappedSms = 'مرحباً بك في ميزان القات\nرمز التفعيل الخاص بك:\n$ql1\nشكراً لتعاملكم معنا';
+
+    final parsed = LicenseCanonical.parseInput(wrappedSms);
+    expect(parsed.compactToken, ql1);
+    expect(parsed.payload.licenseId, 'QAT-PROSE-1');
+
+    final verifier = OfflineLicenseVerifier(registry: reg, timeGuard: TrustedTimeGuard());
+    final res = await verifier.verify(
+      rawLicenseInput: wrappedSms,
+      currentInstallationId: 'QAT-1234-5678-9012',
+      nowEpochMs: 1710000000000,
+    );
+    expect(res.isValid, true);
+    expect(res.isProActive, true);
+  });
 }

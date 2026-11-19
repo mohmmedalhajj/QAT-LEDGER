@@ -379,6 +379,88 @@ class QatRepository {
     await db.delete('qat_import_weights', where: 'id = ?', whereArgs: [id]);
   }
 
+  Future<List<InventoryReceiver>> getInventoryReceivers({
+    bool onlyActive = false,
+  }) async {
+    final db = await _db;
+    final rows = await db.query(
+      'inventory_receivers',
+      where: onlyActive ? 'is_active = 1' : null,
+      orderBy: 'name ASC',
+    );
+    return rows.map(_mapInventoryReceiver).toList();
+  }
+
+  Future<int> upsertInventoryReceiver({
+    int? id,
+    required String name,
+    String phone = '',
+    String notes = '',
+    bool isActive = true,
+  }) async {
+    final cleanName = name.trim();
+    if (cleanName.isEmpty) {
+      throw ArgumentError('اسم المستلم مطلوب.');
+    }
+    final db = await _db;
+    final data = {
+      'name': cleanName,
+      'phone': phone.trim(),
+      'notes': notes.trim(),
+      'is_active': isActive ? 1 : 0,
+    };
+    if (id != null && id > 0) {
+      await db.transaction<void>((txn) async {
+        await txn.update(
+          'inventory_receivers',
+          data,
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        await txn.update(
+          'inventory_batches',
+          {'receiver_name': cleanName},
+          where: 'receiver_id = ?',
+          whereArgs: [id],
+        );
+      });
+      return id;
+    }
+    final existing = await db.query(
+      'inventory_receivers',
+      where: 'LOWER(name) = LOWER(?)',
+      whereArgs: [cleanName],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) {
+      final existingId = (existing.first['id'] as num).toInt();
+      await db.update(
+        'inventory_receivers',
+        data,
+        where: 'id = ?',
+        whereArgs: [existingId],
+      );
+      return existingId;
+    }
+    return db.insert('inventory_receivers', {
+      ...data,
+      'created_at_ms': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  Future<void> deleteInventoryReceiver(int id) async {
+    final db = await _db;
+    await db.transaction<void>((txn) async {
+      await txn.update(
+        'inventory_batches',
+        {'receiver_id': null},
+        where: 'receiver_id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete('inventory_receivers', where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
   Future<void> deleteInventoryBatch(int id) async {
     final db = await _db;
     await db.delete('inventory_batches', where: 'id = ?', whereArgs: [id]);
@@ -749,6 +831,7 @@ class QatRepository {
     int paidAmountMinor = 0,
     String paymentMethod = '',
     String notes = '',
+    int? dateMs,
   }) async {
     if (newItems.isEmpty) {
       throw ArgumentError('يجب وجود صنف واحد على الأقل في الفاتورة.');
@@ -856,11 +939,17 @@ class QatRepository {
       }
 
       // 4. Update sale header and replace line items
+      final updatedDateMs = dateMs ?? (old['date_ms'] as num).toInt();
+      final updatedDateIso = dateMs != null
+          ? QatDateUtils.toIsoDate(DateTime.fromMillisecondsSinceEpoch(dateMs))
+          : (old['date_iso'] ?? '').toString();
       await txn.update(
         'sales',
         {
           'customer_id': customerId,
           'customer_name': customerName.trim().isEmpty ? 'عميل نقدي' : customerName.trim(),
+          'date_ms': updatedDateMs,
+          'date_iso': updatedDateIso,
           'currency_code': currency.code,
           'subtotal_minor': totals.subtotalMinor,
           'discount_minor': totals.discountMinor,
@@ -1405,6 +1494,7 @@ class QatRepository {
     String demarType = '',
     String demarNumber = '',
     String notes = '',
+    int? dateMs,
   }) async {
     if (newItems.isEmpty) throw ArgumentError('يجب وجود صنف واحد على الأقل.');
     final db = await _db;
@@ -1466,9 +1556,16 @@ class QatRepository {
           ? paymentMethod.trim()
           : normType.arabicLabel;
 
+      final nextDateMs = dateMs ?? oldDateMs;
+      final nextDateIso = dateMs != null
+          ? QatDateUtils.toIsoDate(DateTime.fromMillisecondsSinceEpoch(dateMs))
+          : oldIso;
+
       await txn.update(
         'supplier_purchases',
         {
+          'date_ms': nextDateMs,
+          'date_iso': nextDateIso,
           'currency_code': currency.code,
           'subtotal_minor': totals.subtotalMinor,
           'discount_minor': totals.discountMinor,
@@ -1529,6 +1626,8 @@ class QatRepository {
               'initial_qty_milli': it.qtyMilli,
               'buy_price_minor': it.buyPriceMinor,
               'currency_code': currency.code,
+              'purchase_date_ms': nextDateMs,
+              'purchase_date_iso': nextDateIso,
               if (it.sellPriceMinor > 0) 'sell_price_minor': it.sellPriceMinor,
             },
             where: 'id = ?',
@@ -1546,8 +1645,8 @@ class QatRepository {
             'buy_price_minor': it.buyPriceMinor,
             'sell_price_minor': it.sellPriceMinor > 0 ? it.sellPriceMinor : it.buyPriceMinor,
             'currency_code': currency.code,
-            'purchase_date_ms': oldDateMs,
-            'purchase_date_iso': oldIso,
+            'purchase_date_ms': nextDateMs,
+            'purchase_date_iso': nextDateIso,
             'is_archived': 0,
           });
         }
@@ -2048,6 +2147,7 @@ class QatRepository {
     String transferNumber = '',
     required TransferStatus status,
     String notes = '',
+    int? dateMs,
   }) async {
     final db = await _db;
     final int? safeRecId = (recipientId != null && recipientId > 0) ? recipientId : null;
@@ -2065,6 +2165,11 @@ class QatRepository {
         'status_code': status.code,
         'status_label': status.arabicLabel,
         'notes': notes.trim(),
+        if (dateMs != null) 'date_ms': dateMs,
+        if (dateMs != null)
+          'date_iso': QatDateUtils.toIsoDate(
+            DateTime.fromMillisecondsSinceEpoch(dateMs),
+          ),
       },
       where: 'id = ?',
       whereArgs: [id],
@@ -2313,6 +2418,80 @@ class QatRepository {
       );
     }
     return result;
+  }
+
+  Future<DailyInventoryMatching> getDailyInventoryMatching({
+    String? fromIso,
+    String? toIso,
+  }) async {
+    final startIso = (fromIso == null || fromIso.isEmpty) ? QatDateUtils.todayIso() : fromIso;
+    final endIso = (toIso == null || toIso.isEmpty) ? QatDateUtils.todayIso() : toIso;
+
+    bool inRange(String iso) =>
+        iso.compareTo(startIso) >= 0 && iso.compareTo(endIso) <= 0;
+
+    final weights = await getImportWeights();
+    final batches = await getInventoryBatches();
+    final sales = await getSales(fromIso: startIso, toIso: endIso);
+    final purchases = await getSupplierPurchases();
+
+    final importedMilli = weights
+        .where((w) => inRange(w.dateIso))
+        .fold<int>(0, (sum, w) => sum + w.weightMilli);
+
+    final periodPurchases = purchases.where((p) => inRange(p.dateIso)).toList();
+    int purchasedMilli = 0;
+    final purTotalByCur = <CurrencyCode, int>{};
+    for (final p in periodPurchases) {
+      purTotalByCur[p.currency] = (purTotalByCur[p.currency] ?? 0) + p.totalAmountMinor;
+      for (final it in p.items) {
+        purchasedMilli += it.qtyMilli;
+      }
+    }
+
+    int soldMilli = 0;
+    final cashByCur = <CurrencyCode, int>{};
+    final transferByCur = <CurrencyCode, int>{};
+    final depositByCur = <CurrencyCode, int>{};
+    final creditByCur = <CurrencyCode, int>{};
+    final salesTotalByCur = <CurrencyCode, int>{};
+    final costSoldByCur = <CurrencyCode, int>{};
+
+    for (final s in sales) {
+      salesTotalByCur[s.currency] = (salesTotalByCur[s.currency] ?? 0) + s.totalAmountMinor;
+      creditByCur[s.currency] = (creditByCur[s.currency] ?? 0) + s.remainingAmountMinor;
+      final pm = s.effectivePaymentMethodLabel;
+      if (pm.contains('تحويل')) {
+        transferByCur[s.currency] = (transferByCur[s.currency] ?? 0) + s.paidAmountMinor;
+      } else if (pm.contains('إيداع') || pm.contains('ايداع')) {
+        depositByCur[s.currency] = (depositByCur[s.currency] ?? 0) + s.paidAmountMinor;
+      } else {
+        cashByCur[s.currency] = (cashByCur[s.currency] ?? 0) + s.paidAmountMinor;
+      }
+      for (final it in s.items) {
+        soldMilli += it.qtyMilli;
+        costSoldByCur[s.currency] =
+            (costSoldByCur[s.currency] ?? 0) + it.estimatedCostMinor;
+      }
+    }
+
+    final remainingMilli = batches.fold<int>(0, (sum, b) => sum + b.remainingQtyMilli);
+
+    return DailyInventoryMatching(
+      fromIso: startIso,
+      toIso: endIso,
+      importedWeightMilli: importedMilli,
+      purchasedQtyMilli: purchasedMilli,
+      soldQtyMilli: soldMilli,
+      remainingQtyMilli: remainingMilli,
+      cashSalesMinorByCurrency: cashByCur,
+      transferSalesMinorByCurrency: transferByCur,
+      depositSalesMinorByCurrency: depositByCur,
+      creditSalesMinorByCurrency: creditByCur,
+      totalSalesMinorByCurrency: salesTotalByCur,
+      totalPurchasesMinorByCurrency: purTotalByCur,
+      estimatedCostSoldMinorByCurrency: costSoldByCur,
+    );
   }
 
   /// 7-day sales & expenses chart series per currency (matching original Android HomeScreen chart).
@@ -2825,6 +3004,16 @@ class QatRepository {
         receiverName: (r['receiver_name'] ?? '').toString(),
         notes: (r['notes'] ?? '').toString(),
         isArchived: (r['is_archived'] as num).toInt() == 1,
+      );
+
+  InventoryReceiver _mapInventoryReceiver(Map<String, Object?> r) =>
+      InventoryReceiver(
+        id: (r['id'] as num).toInt(),
+        name: (r['name'] ?? '').toString(),
+        phone: (r['phone'] ?? '').toString(),
+        notes: (r['notes'] ?? '').toString(),
+        isActive: ((r['is_active'] as num?) ?? 1).toInt() == 1,
+        createdAtMs: ((r['created_at_ms'] as num?) ?? 0).toInt(),
       );
 
   Customer _mapCustomer(Map<String, Object?> r, Map<CurrencyCode, int> bals) => Customer(

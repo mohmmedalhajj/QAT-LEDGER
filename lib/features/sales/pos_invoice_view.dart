@@ -28,6 +28,9 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
   String _customUnit = 'ربطة';
   PaymentType _paymentType = PaymentType.paid;
   String _paymentMethod = 'نقداً';
+  int _saleDateMs = DateTime.now().millisecondsSinceEpoch;
+  String _custSearch = '';
+  String _batchSearch = '';
 
   final _newCustNameCtrl = TextEditingController();
   final _newCustPhoneCtrl = TextEditingController();
@@ -233,6 +236,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
         paidAmountMinor: paidInput,
         paymentMethod: _paymentType == PaymentType.credit ? 'آجل' : _paymentMethod,
         notes: _notesCtrl.text,
+        dateMs: _saleDateMs,
       );
 
       await ctrl.reloadAll();
@@ -377,9 +381,21 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
             ? _currency!
             : policy.defaultCurrency;
 
-    final availableBatches = ctrl.batches
-        .where((b) => b.remainingQtyMilli > 0 && b.currency == activeCur)
+    final filteredBatches = ctrl.batches
+        .where((b) {
+          if (b.remainingQtyMilli <= 0 || b.currency != activeCur) return false;
+          if (_batchSearch.isEmpty) return true;
+          final q = _batchSearch.toLowerCase();
+          return b.qatTypeName.toLowerCase().contains(q) ||
+              b.supplierName.toLowerCase().contains(q) ||
+              b.itemNumber.toLowerCase().contains(q);
+        })
         .toList();
+    final filteredCustomers = ctrl.customers.where((c) {
+      if (_custSearch.isEmpty) return true;
+      final q = _custSearch.toLowerCase();
+      return c.name.toLowerCase().contains(q) || c.phone.contains(q);
+    }).toList();
 
     final lineTotals = _cart
         .map(
@@ -425,7 +441,13 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                     _cart.clear();
                   }),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                ErpDatePickerTile(
+                  label: 'تاريخ الفاتورة',
+                  dateMs: _saleDateMs,
+                  onChanged: (ms) => setState(() => _saleDateMs = ms),
+                ),
+                const SizedBox(height: 8),
                 SwitchListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
@@ -469,12 +491,23 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                     controller: _newCustNotesCtrl,
                     decoration: const InputDecoration(labelText: 'ملاحظات العميل'),
                   ),
-                ] else
+                ] else ...[
+                  if (ctrl.customers.length > 5) ...[
+                    TextField(
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        prefixIcon: Icon(Icons.search, size: 18),
+                        hintText: 'بحث سريع عن عميل...',
+                      ),
+                      onChanged: (v) => setState(() => _custSearch = v.trim()),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                   DropdownButtonFormField<int?>(
                     key: ValueKey<String>(
-                      'pos_cust_${ctrl.customers.any((c) => c.id == _customerId) ? _customerId : 'none'}',
+                      'pos_cust_${filteredCustomers.any((c) => c.id == _customerId) ? _customerId : 'none'}',
                     ),
-                    initialValue: ctrl.customers.any((c) => c.id == _customerId)
+                    initialValue: filteredCustomers.any((c) => c.id == _customerId)
                         ? _customerId
                         : null,
                     isExpanded: true,
@@ -487,7 +520,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                         value: null,
                         child: Text('عميل نقدي (مباشر)'),
                       ),
-                      ...ctrl.customers.map(
+                      ...filteredCustomers.map(
                         (c) => DropdownMenuItem<int?>(
                           value: c.id,
                           child: Text(
@@ -498,6 +531,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                     ],
                     onChanged: (v) => setState(() => _customerId = v),
                   ),
+                ],
               ],
             ),
           ),
@@ -513,13 +547,24 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                   title: 'إضافة أصناف الفاتورة',
                   icon: Icons.add_shopping_cart,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                if (ctrl.batches.length > 4) ...[
+                  TextField(
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      prefixIcon: Icon(Icons.search, size: 18),
+                      hintText: 'بحث في دفعات المخزون...',
+                    ),
+                    onChanged: (v) => setState(() => _batchSearch = v.trim()),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 DropdownButtonFormField<int?>(
                   key: ValueKey<String>(
-                    'pos_batch_${activeCur.code}_${availableBatches.any((b) => b.id == _selectedBatchId) ? _selectedBatchId : 'none'}',
+                    'pos_batch_${activeCur.code}_${filteredBatches.any((b) => b.id == _selectedBatchId) ? _selectedBatchId : 'none'}',
                   ),
                   initialValue:
-                      availableBatches.any((b) => b.id == _selectedBatchId)
+                      filteredBatches.any((b) => b.id == _selectedBatchId)
                           ? _selectedBatchId
                           : null,
                   isExpanded: true,
@@ -529,7 +574,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                       value: null,
                       child: Text('إدخال يدوي بدون خصم مخزون'),
                     ),
-                    ...availableBatches.map(
+                    ...filteredBatches.map(
                       (b) => DropdownMenuItem<int?>(
                         value: b.id,
                         child: Text(
@@ -543,7 +588,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                       _selectedBatchId = v;
                       if (v != null) {
                         final b =
-                            availableBatches.firstWhere((e) => e.id == v);
+                            filteredBatches.firstWhere((e) => e.id == v);
                         _priceCtrl.text = Money.formatMinor(
                           b.sellPriceMinor,
                           showZeroDecimals: false,

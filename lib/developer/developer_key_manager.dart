@@ -60,25 +60,72 @@ class DeveloperKeyManager {
     return _ed25519.newKeyPairFromSeed(seed);
   }
 
-  Future<SimpleKeyPair?> loadSigningKeyPair() async {
+  /// Exports the 32-byte Ed25519 private seed as Base64 for secure offline backup by the developer.
+  Future<String?> exportSigningSeedB64() async {
+    final seed = await _loadSeedBytes();
+    if (seed == null || seed.length != 32) return null;
+    return base64.encode(seed);
+  }
+
+  /// Imports a 32-byte Ed25519 seed (Base64, Base64Url, or 64-char Hex) so the developer
+  /// can restore or synchronize their signing identity across builds/devices.
+  Future<DeveloperKeyInfo> importSigningSeedB64(String rawSeedInput) async {
+    var clean = rawSeedInput.trim().replaceAll(RegExp(r'\s+'), '');
+    if (clean.isEmpty) {
+      throw const FormatException('البذرة فارغة');
+    }
+    List<int> seed;
+    if (RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(clean)) {
+      seed = [
+        for (int i = 0; i < 64; i += 2)
+          int.parse(clean.substring(i, i + 2), radix: 16),
+      ];
+    } else {
+      var norm = clean.replaceAll('+', '-').replaceAll('/', '_');
+      final rem = norm.length % 4;
+      if (rem == 2) {
+        norm += '==';
+      } else if (rem == 3) {
+        norm += '=';
+      } else if (rem == 1) {
+        throw const FormatException('صيغة Base64 غير صالحة لبذرة Ed25519');
+      }
+      seed = base64Url.decode(norm);
+    }
+    if (seed.length != 32) {
+      throw FormatException(
+        'طول بذرة Ed25519 يجب أن يكون 32 بايت (تم استلام ${seed.length})',
+      );
+    }
+    await _persistSeed(seed);
+    final info = await getPublicKeyInfo();
+    if (info == null) {
+      throw StateError('تعذر استخراج معلومات المفتاح العام بعد الاستيراد');
+    }
+    return info;
+  }
+
+  Future<List<int>?> _loadSeedBytes() async {
     final sealed = _prefs.getString(_prefSealedSeed);
     if (sealed != null && sealed.isNotEmpty) {
       final unsealedB64 = await PlatformBridge.instance.keystoreUnseal(sealed);
       if (unsealedB64 != null && unsealedB64.isNotEmpty) {
         final seed = base64.decode(unsealedB64);
-        if (seed.length == 32) {
-          return _ed25519.newKeyPairFromSeed(seed);
-        }
+        if (seed.length == 32) return seed;
       }
     }
     final fallback = _prefs.getString(_prefFallbackSeed);
     if (fallback != null && fallback.isNotEmpty) {
       final seed = base64.decode(fallback);
-      if (seed.length == 32) {
-        return _ed25519.newKeyPairFromSeed(seed);
-      }
+      if (seed.length == 32) return seed;
     }
     return null;
+  }
+
+  Future<SimpleKeyPair?> loadSigningKeyPair() async {
+    final seed = await _loadSeedBytes();
+    if (seed == null) return null;
+    return _ed25519.newKeyPairFromSeed(seed);
   }
 
   Future<void> _persistSeed(List<int> seed32) async {

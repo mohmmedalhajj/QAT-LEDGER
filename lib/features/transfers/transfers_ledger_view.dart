@@ -69,6 +69,8 @@ class _TransfersLedgerViewState extends State<TransfersLedgerView> {
     CurrencyCode currency =
         existing?.currency ?? ctrl.currencyPolicy.defaultCurrency;
     TransferStatus status = existing?.status ?? TransferStatus.pending;
+    int transferDateMs =
+        existing?.dateMs ?? DateTime.now().millisecondsSinceEpoch;
 
     await showDialog<void>(
       context: context,
@@ -92,6 +94,12 @@ class _TransfersLedgerViewState extends State<TransfersLedgerView> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                ErpDatePickerTile(
+                  label: 'تاريخ الحوالة',
+                  dateMs: transferDateMs,
+                  onChanged: (ms) => setModalState(() => transferDateMs = ms),
+                ),
+                const SizedBox(height: 8),
                 CurrencySelectorRow(
                   policy: ctrl.currencyPolicy,
                   selected: currency,
@@ -243,6 +251,7 @@ class _TransfersLedgerViewState extends State<TransfersLedgerView> {
                     transferNumber: numberCtrl.text,
                     status: status,
                     notes: notesCtrl.text,
+                    dateMs: transferDateMs,
                   );
                 } else {
                   await ctrl.repo.updateTransfer(
@@ -257,6 +266,7 @@ class _TransfersLedgerViewState extends State<TransfersLedgerView> {
                     transferNumber: numberCtrl.text,
                     status: status,
                     notes: notesCtrl.text,
+                    dateMs: transferDateMs,
                   );
                 }
                 await ctrl.reloadAll();

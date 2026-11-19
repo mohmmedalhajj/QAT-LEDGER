@@ -336,16 +336,66 @@ class _RecipientsAndReportsViewState extends State<RecipientsAndReportsView> {
                                 ],
                               ),
                               const SizedBox(height: 10),
-                              FilledButton.tonalIcon(
-                                onPressed: () =>
-                                    _openRecipientReportSheet(context, r.id),
-                                icon: const Icon(
-                                  Icons.assessment_outlined,
-                                  size: 18,
-                                ),
-                                label: const Text(
-                                  'فتح تقرير المستلم الكامل (PDF / Excel / الحالة)',
-                                ),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  FilledButton.tonalIcon(
+                                    onPressed: () => _openRecipientReportSheet(
+                                      context,
+                                      r.id,
+                                    ),
+                                    icon: const Icon(
+                                      Icons.assessment_outlined,
+                                      size: 18,
+                                    ),
+                                    label: const Text(
+                                      'تقرير المستلم (PDF / Excel / الحالة)',
+                                    ),
+                                  ),
+                                  if (r.phone.isNotEmpty) ...[
+                                    OutlinedButton.icon(
+                                      onPressed: () async {
+                                        final msg = WhatsappShareService
+                                            .instance
+                                            .formatRecipientSummaryMessage(
+                                          ctrl.settings,
+                                          rep,
+                                        );
+                                        await WhatsappShareService.instance
+                                            .openWhatsApp(
+                                          phone: r.phone,
+                                          text: msg,
+                                        );
+                                      },
+                                      icon: const Icon(
+                                        Icons.chat_outlined,
+                                        size: 16,
+                                      ),
+                                      label: const Text('واتساب'),
+                                    ),
+                                    OutlinedButton.icon(
+                                      onPressed: () async {
+                                        final msg = WhatsappShareService
+                                            .instance
+                                            .formatRecipientSummaryMessage(
+                                          ctrl.settings,
+                                          rep,
+                                        );
+                                        await WhatsappShareService.instance
+                                            .openSms(
+                                          phone: r.phone,
+                                          text: msg,
+                                        );
+                                      },
+                                      icon: const Icon(
+                                        Icons.sms_outlined,
+                                        size: 16,
+                                      ),
+                                      label: const Text('SMS'),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ],
                           ),
@@ -554,6 +604,27 @@ class _RecipientStatusReportPageState
                                   ctrl.settings,
                                   s,
                                 );
+                                await showReceiptPreviewPrintSheet(
+                                  context,
+                                  agency: ctrl.settings,
+                                  title: 'تقرير ${s.recipient.name}',
+                                  receiptText: msg,
+                                  whatsappPhone: s.recipient.phone,
+                                );
+                              },
+                              icon: const Icon(
+                                Icons.print_outlined,
+                                size: 16,
+                              ),
+                              label: const Text('حراري'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                final msg = WhatsappShareService.instance
+                                    .formatRecipientSummaryMessage(
+                                  ctrl.settings,
+                                  s,
+                                );
                                 await WhatsappShareService.instance
                                     .openWhatsApp(
                                   phone: s.recipient.phone,
@@ -563,6 +634,22 @@ class _RecipientStatusReportPageState
                               icon: const Icon(Icons.chat_outlined, size: 16),
                               label: const Text('واتساب'),
                             ),
+                            if (s.recipient.phone.isNotEmpty)
+                              OutlinedButton.icon(
+                                onPressed: () async {
+                                  final msg = WhatsappShareService.instance
+                                      .formatRecipientSummaryMessage(
+                                    ctrl.settings,
+                                    s,
+                                  );
+                                  await WhatsappShareService.instance.openSms(
+                                    phone: s.recipient.phone,
+                                    text: msg,
+                                  );
+                                },
+                                icon: const Icon(Icons.sms_outlined, size: 16),
+                                label: const Text('SMS'),
+                              ),
                           ],
                         ),
                       ],

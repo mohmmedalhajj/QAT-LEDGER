@@ -156,17 +156,40 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
   }
 
   Future<void> _editSaleDialog(AppController ctrl, Sale sale) async {
-    final first = sale.items.isEmpty ? null : sale.items.first;
-    final itemCtrl = TextEditingController(text: first?.qatTypeName ?? '');
-    final qtyCtrl = TextEditingController(
-      text: first != null ? QuantityMath.formatMilli(first.qtyMilli) : '1',
-    );
-    final priceCtrl = TextEditingController(
-      text: first != null
-          ? Money.formatMinor(first.unitPriceMinor, showZeroDecimals: false)
-              .replaceAll(',', '')
-          : '0',
-    );
+    final lineDrafts = <({
+      int? batchId,
+      String unit,
+      int buyPriceMinor,
+      TextEditingController nameCtrl,
+      TextEditingController qtyCtrl,
+      TextEditingController priceCtrl,
+    })>[
+      for (final it in sale.items)
+        (
+          batchId: it.inventoryBatchId,
+          unit: it.unit,
+          buyPriceMinor: it.buyPriceMinor,
+          nameCtrl: TextEditingController(text: it.qatTypeName),
+          qtyCtrl: TextEditingController(
+            text: QuantityMath.formatMilli(it.qtyMilli),
+          ),
+          priceCtrl: TextEditingController(
+            text: Money.formatMinor(it.unitPriceMinor, showZeroDecimals: false)
+                .replaceAll(',', ''),
+          ),
+        ),
+    ];
+    if (lineDrafts.isEmpty) {
+      lineDrafts.add((
+        batchId: null,
+        unit: 'ربطة',
+        buyPriceMinor: 0,
+        nameCtrl: TextEditingController(),
+        qtyCtrl: TextEditingController(text: '1'),
+        priceCtrl: TextEditingController(text: '0'),
+      ));
+    }
+
     final discCtrl = TextEditingController(
       text: Money.formatMinor(sale.discountMinor, showZeroDecimals: false)
           .replaceAll(',', ''),
@@ -184,138 +207,211 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
     String paymentMethod =
         sale.paymentMethod.isNotEmpty ? sale.paymentMethod : 'نقداً';
     int? custId = sale.customerId;
+    int saleDateMs = sale.dateMs;
 
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => ErpDialogControllerScope(
-        controllers: [
-          itemCtrl,
-          qtyCtrl,
-          priceCtrl,
+    List<TextEditingController> allControllers() => [
           discCtrl,
           taxCtrl,
           paidCtrl,
           notesCtrl,
-        ],
-        child: StatefulBuilder(
-          builder: (ctx, setModalState) => AlertDialog(
-            title: Text('تعديل الفاتورة ${sale.invoiceNumber}'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<int?>(
-                  key: ValueKey<String>(
-                    'edit_sale_cust_${ctrl.customers.any((c) => c.id == custId) ? custId : 'none'}',
+          for (final d in lineDrafts) ...[d.nameCtrl, d.qtyCtrl, d.priceCtrl],
+        ];
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => AlertDialog(
+          title: Text('تعديل الفاتورة ${sale.invoiceNumber}'),
+          content: SizedBox(
+            width: 440,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ErpDatePickerTile(
+                    label: 'تاريخ الفاتورة',
+                    dateMs: saleDateMs,
+                    onChanged: (ms) => setModalState(() => saleDateMs = ms),
                   ),
-                  initialValue: ctrl.customers.any((c) => c.id == custId)
-                      ? custId
-                      : null,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'العميل'),
-                  items: [
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('عميل نقدي'),
-                    ),
-                    ...ctrl.customers.map(
-                      (c) => DropdownMenuItem<int?>(
-                        value: c.id,
-                        child: Text(c.name),
-                      ),
-                    ),
-                  ],
-                  onChanged: (v) => setModalState(() => custId = v),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: itemCtrl,
-                  decoration: const InputDecoration(labelText: 'الصنف'),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: AccountingNumberField(
-                        controller: qtyCtrl,
-                        label: 'الكمية',
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: AccountingNumberField(
-                        controller: priceCtrl,
-                        label: 'السعر',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: AccountingNumberField(
-                        controller: discCtrl,
-                        label: 'الخصم',
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: AccountingNumberField(
-                        controller: taxCtrl,
-                        label: 'الضريبة %',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                SegmentedButton<PaymentType>(
-                  segments: const [
-                    ButtonSegment<PaymentType>(
-                      value: PaymentType.paid,
-                      label: Text('نقداً'),
-                    ),
-                    ButtonSegment<PaymentType>(
-                      value: PaymentType.partial,
-                      label: Text('جزئي'),
-                    ),
-                    ButtonSegment<PaymentType>(
-                      value: PaymentType.credit,
-                      label: Text('آجل'),
-                    ),
-                  ],
-                  selected: {pType},
-                  onSelectionChanged: (s) =>
-                      setModalState(() => pType = s.first),
-                ),
-                if (pType == PaymentType.partial) ...[
                   const SizedBox(height: 8),
-                  AccountingNumberField(
-                    controller: paidCtrl,
-                    label: 'المدفوع',
-                  ),
-                ],
-                if (pType != PaymentType.credit) ...[
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    children: [
-                      for (final m in const ['نقداً', 'تحويل', 'إيداع'])
-                        ChoiceChip(
-                          label: Text(m),
-                          selected: paymentMethod == m,
-                          onSelected: (_) =>
-                              setModalState(() => paymentMethod = m),
+                  DropdownButtonFormField<int?>(
+                    key: ValueKey<String>(
+                      'edit_sale_cust_${ctrl.customers.any((c) => c.id == custId) ? custId : 'none'}',
+                    ),
+                    initialValue: ctrl.customers.any((c) => c.id == custId)
+                        ? custId
+                        : null,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'العميل'),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('عميل نقدي'),
+                      ),
+                      ...ctrl.customers.map(
+                        (c) => DropdownMenuItem<int?>(
+                          value: c.id,
+                          child: Text(c.name),
                         ),
+                      ),
+                    ],
+                    onChanged: (v) => setModalState(() => custId = v),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'بنود الفاتورة (${lineDrafts.length})',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () {
+                          setModalState(() {
+                            lineDrafts.add((
+                              batchId: null,
+                              unit: 'ربطة',
+                              buyPriceMinor: 0,
+                              nameCtrl: TextEditingController(),
+                              qtyCtrl: TextEditingController(text: '1'),
+                              priceCtrl: TextEditingController(text: '0'),
+                            ));
+                          });
+                        },
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('إضافة بند'),
+                      ),
                     ],
                   ),
+                  for (int idx = 0; idx < lineDrafts.length; idx++)
+                    Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: lineDrafts[idx].nameCtrl,
+                                    decoration: InputDecoration(
+                                      isDense: true,
+                                      labelText: 'الصنف #${idx + 1}',
+                                    ),
+                                  ),
+                                ),
+                                if (lineDrafts.length > 1)
+                                  IconButton(
+                                    tooltip: 'حذف البند',
+                                    icon: Icon(
+                                      Icons.delete_outline,
+                                      size: 18,
+                                      color: ctx.pal.danger,
+                                    ),
+                                    onPressed: () {
+                                      setModalState(() {
+                                        final removed = lineDrafts.removeAt(idx);
+                                        removed.nameCtrl.dispose();
+                                        removed.qtyCtrl.dispose();
+                                        removed.priceCtrl.dispose();
+                                      });
+                                    },
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: AccountingNumberField(
+                                    controller: lineDrafts[idx].qtyCtrl,
+                                    label: 'الكمية (${lineDrafts[idx].unit})',
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: AccountingNumberField(
+                                    controller: lineDrafts[idx].priceCtrl,
+                                    label: 'السعر',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: AccountingNumberField(
+                          controller: discCtrl,
+                          label: 'الخصم',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: AccountingNumberField(
+                          controller: taxCtrl,
+                          label: 'الضريبة %',
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  SegmentedButton<PaymentType>(
+                    segments: const [
+                      ButtonSegment<PaymentType>(
+                        value: PaymentType.paid,
+                        label: Text('نقداً'),
+                      ),
+                      ButtonSegment<PaymentType>(
+                        value: PaymentType.partial,
+                        label: Text('جزئي'),
+                      ),
+                      ButtonSegment<PaymentType>(
+                        value: PaymentType.credit,
+                        label: Text('آجل'),
+                      ),
+                    ],
+                    selected: {pType},
+                    onSelectionChanged: (s) =>
+                        setModalState(() => pType = s.first),
+                  ),
+                  if (pType == PaymentType.partial) ...[
+                    const SizedBox(height: 8),
+                    AccountingNumberField(
+                      controller: paidCtrl,
+                      label: 'المدفوع',
+                    ),
+                  ],
+                  if (pType != PaymentType.credit) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        for (final m in const ['نقداً', 'تحويل', 'إيداع'])
+                          ChoiceChip(
+                            label: Text(m),
+                            selected: paymentMethod == m,
+                            onSelected: (_) =>
+                                setModalState(() => paymentMethod = m),
+                          ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: notesCtrl,
+                    decoration: const InputDecoration(labelText: 'ملاحظات'),
+                  ),
                 ],
-                const SizedBox(height: 8),
-                TextField(
-                  controller: notesCtrl,
-                  decoration: const InputDecoration(labelText: 'ملاحظات'),
-                ),
-              ],
+              ),
             ),
           ),
           actions: [
@@ -325,9 +421,29 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
             ),
             FilledButton(
               onPressed: () async {
-                final qty = QuantityMath.parseMilli(qtyCtrl.text);
-                final price = Money.parseMinorUnits(priceCtrl.text);
-                if (itemCtrl.text.trim().isEmpty || qty <= 0) return;
+                final editedItems = <NewSaleItemInput>[];
+                for (final d in lineDrafts) {
+                  final qty = QuantityMath.parseMilli(d.qtyCtrl.text);
+                  final price = Money.parseMinorUnits(d.priceCtrl.text);
+                  if (d.nameCtrl.text.trim().isEmpty || qty <= 0) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      const SnackBar(
+                        content: Text('تأكد من اسم الصنف والكمية لكل بند'),
+                      ),
+                    );
+                    return;
+                  }
+                  editedItems.add(
+                    NewSaleItemInput(
+                      inventoryBatchId: d.batchId,
+                      qatTypeName: d.nameCtrl.text.trim(),
+                      qtyMilli: qty,
+                      unit: d.unit,
+                      unitPriceMinor: price,
+                      buyPriceMinor: d.buyPriceMinor,
+                    ),
+                  );
+                }
                 if (pType != PaymentType.paid && custId == null) {
                   ScaffoldMessenger.of(ctx).showSnackBar(
                     const SnackBar(
@@ -339,37 +455,12 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
                 final custName = custId == null
                     ? 'عميل نقدي'
                     : ctrl.customers.firstWhere((c) => c.id == custId).name;
-                final extraItems = sale.items.length > 1
-                    ? sale.items
-                        .skip(1)
-                        .map(
-                          (e) => NewSaleItemInput(
-                            inventoryBatchId: e.inventoryBatchId,
-                            qatTypeName: e.qatTypeName,
-                            qtyMilli: e.qtyMilli,
-                            unit: e.unit,
-                            unitPriceMinor: e.unitPriceMinor,
-                            buyPriceMinor: e.buyPriceMinor,
-                          ),
-                        )
-                        .toList()
-                    : const <NewSaleItemInput>[];
                 try {
                   await ctrl.repo.editSale(
                     saleId: sale.id,
                     customerId: custId,
                     customerName: custName,
-                    newItems: [
-                      NewSaleItemInput(
-                        inventoryBatchId: first?.inventoryBatchId,
-                        qatTypeName: itemCtrl.text.trim(),
-                        qtyMilli: qty,
-                        unit: first?.unit ?? 'ربطة',
-                        unitPriceMinor: price,
-                        buyPriceMinor: first?.buyPriceMinor ?? 0,
-                      ),
-                      ...extraItems,
-                    ],
+                    newItems: editedItems,
                     currency: sale.currency,
                     discountMinor: Money.parseMinorUnits(discCtrl.text),
                     taxBps: InvoiceMath.parsePercentBps(taxCtrl.text),
@@ -378,6 +469,7 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
                     paymentMethod:
                         pType == PaymentType.credit ? 'آجل' : paymentMethod,
                     notes: notesCtrl.text,
+                    dateMs: saleDateMs,
                   );
                   await ctrl.reloadAll();
                   if (ctx.mounted) Navigator.pop(ctx);
@@ -391,9 +483,11 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
             ),
           ],
         ),
-        ),
       ),
     );
+    for (final c in allControllers()) {
+      c.dispose();
+    }
   }
 
   @override

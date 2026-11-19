@@ -227,4 +227,57 @@ void main() {
       await tempDir.delete(recursive: true);
     }
   });
+
+  test('DeveloperKeyManager exports and re-imports Ed25519 private signing seed preserving keyId and signatures', () async {
+    final tempDir = await Directory.systemTemp.createTemp('qat_dev_seed_');
+    try {
+      SharedPreferences.setMockInitialValues({});
+      final prefsA = await SharedPreferences.getInstance();
+      final dbA = DeveloperDatabaseService(
+        factory: databaseFactoryFfi,
+        customPath: p.join(tempDir.path, 'dev_a.db'),
+      );
+      final mgrA = DeveloperKeyManager(prefsA);
+      final infoA = await mgrA.getOrCreateKeyPair();
+      final seedB64 = await mgrA.exportSigningSeedB64();
+      expect(seedB64, isNotNull);
+
+      SharedPreferences.setMockInitialValues({});
+      final prefsB = await SharedPreferences.getInstance();
+      final dbB = DeveloperDatabaseService(
+        factory: databaseFactoryFfi,
+        customPath: p.join(tempDir.path, 'dev_b.db'),
+      );
+      final mgrB = DeveloperKeyManager(prefsB);
+      final infoB = await mgrB.importSigningSeedB64(seedB64!);
+      expect(infoB.keyId, infoA.keyId);
+      expect(infoB.spkiBase64, infoA.spkiBase64);
+
+      final signerB = DeveloperLicenseSigner(keyManager: mgrB, devDb: dbB);
+      final artifact = await signerB.issueLicense(
+        customerName: 'عميل البذرة',
+        businessName: 'وكالة البذرة',
+        planCode: 'PRO_PERPETUAL',
+        installationId: 'QAT-SEED-1111-2222',
+        durationDays: 0,
+      );
+
+      final verifierA = OfflineLicenseVerifier(
+        registry: TrustedPublicKeyRegistry.fromCsv(infoA.spkiBase64),
+        timeGuard: TrustedTimeGuard(),
+      );
+      final verified = await verifierA.verify(
+        rawLicenseInput: artifact.compactToken,
+        currentInstallationId: 'QAT-SEED-1111-2222',
+        nowEpochMs: artifact.payload.issuedAtEpochMs + 1000,
+      );
+      expect(verified.isValid, true);
+      expect(verified.keyId, infoA.keyId);
+
+      await (await dbA.database).close();
+      await (await dbB.database).close();
+    } finally {
+      await tempDir.delete(recursive: true);
+    }
+  });
 }

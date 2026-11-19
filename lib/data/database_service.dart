@@ -49,6 +49,7 @@ class DatabaseService {
           await _ensureV3Columns(db);
         },
         onOpen: (db) async {
+          await _createSchema(db);
           await _ensureV3Columns(db);
         },
       ),

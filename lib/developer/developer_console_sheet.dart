@@ -1057,6 +1057,104 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('تصدير بذرة المفتاح الخاص'),
+                                content: const Text(
+                                  'تحذير أمني: هذا الرمز يمثل المفتاح الخاص (Ed25519 Private Seed). احتفظ به في مكان سري ولا تشاركه مع أي عميل.',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx, false),
+                                    child: const Text('إلغاء'),
+                                  ),
+                                  FilledButton(
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    child: const Text('نسخ البذرة السرية'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirmed != true) return;
+                            final seedB64 = await widget.keyManager.exportSigningSeedB64();
+                            if (!mounted) return;
+                            if (seedB64 == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('لا يوجد مفتاح لتصديره')),
+                              );
+                              return;
+                            }
+                            unawaited(Clipboard.setData(ClipboardData(text: seedB64)));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('تم نسخ بذرة المفتاح الخاص بأمان')),
+                            );
+                          },
+                          icon: const Icon(Icons.key_outlined, size: 18),
+                          label: const Text('نسخ المفتاح الخاص'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final seedCtrl = TextEditingController();
+                            final imported = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('استيراد مفتاح توقيع سابق'),
+                                content: TextField(
+                                  controller: seedCtrl,
+                                  textDirection: TextDirection.ltr,
+                                  maxLines: 2,
+                                  decoration: const InputDecoration(
+                                    labelText: 'بذرة Ed25519 (32 بايت Base64 أو Hex)',
+                                  ),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx, false),
+                                    child: const Text('إلغاء'),
+                                  ),
+                                  FilledButton(
+                                    onPressed: () async {
+                                      final messenger = ScaffoldMessenger.of(ctx);
+                                      try {
+                                        await widget.keyManager.importSigningSeedB64(seedCtrl.text);
+                                        if (ctx.mounted) Navigator.pop(ctx, true);
+                                      } catch (e) {
+                                        messenger.showSnackBar(
+                                          SnackBar(content: Text(e.toString())),
+                                        );
+                                      }
+                                    },
+                                    child: const Text('استيراد وتفعيل'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            seedCtrl.dispose();
+                            if (imported == true) {
+                              widget.onKeysUpdated();
+                              await _loadAll();
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('تم استيراد ومزامنة مفتاح التوقيع بنجاح')),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.vpn_key_outlined, size: 18),
+                          label: const Text('استيراد مفتاح'),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),

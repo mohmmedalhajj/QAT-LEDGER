@@ -183,6 +183,8 @@ class PlatformBridge {
       });
     } on MissingPluginException {
       return null;
+    } on PlatformException {
+      return null;
     } on FlutterError catch (e) {
       if (!_isUninitializedBindingError(e)) rethrow;
       return null;
@@ -195,6 +197,23 @@ class PlatformBridge {
         'sealedPayload': sealedPayload,
       });
     } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    } on FlutterError catch (e) {
+      if (!_isUninitializedBindingError(e)) rethrow;
+      return null;
+    }
+  }
+
+  Future<String?> decodeQrFromImagePath(String imagePath) async {
+    try {
+      return await _channel.invokeMethod<String>('decodeQrFromImagePath', {
+        'path': imagePath,
+      });
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
       return null;
     } on FlutterError catch (e) {
       if (!_isUninitializedBindingError(e)) rethrow;

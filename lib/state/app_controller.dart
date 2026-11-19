@@ -99,6 +99,7 @@ class AppController extends ChangeNotifier {
   Map<CurrencyCode, InventoryValuation> _inventoryValuation = {};
   List<QatType> _qatTypes = [];
   List<InventoryBatch> _batches = [];
+  List<InventoryReceiver> _inventoryReceivers = [];
   List<QatImportWeight> _importWeights = [];
   List<Customer> _customers = [];
   List<Sale> _sales = [];
@@ -149,6 +150,7 @@ class AppController extends ChangeNotifier {
   Map<CurrencyCode, InventoryValuation> get inventoryValuation => _inventoryValuation;
   List<QatType> get qatTypes => _qatTypes;
   List<InventoryBatch> get batches => _batches;
+  List<InventoryReceiver> get inventoryReceivers => _inventoryReceivers;
   List<QatImportWeight> get importWeights => _importWeights;
   List<Customer> get customers => _customers;
   List<Sale> get sales => _sales;
@@ -502,6 +504,7 @@ class AppController extends ChangeNotifier {
     _inventoryValuation = await _repo.getInventoryValuation();
     _qatTypes = await _repo.getQatTypes();
     _batches = await _repo.getInventoryBatches();
+    _inventoryReceivers = await _repo.getInventoryReceivers();
     _importWeights = await _repo.getImportWeights();
     _customers = await _repo.getCustomers();
     _sales = await _repo.getSales();

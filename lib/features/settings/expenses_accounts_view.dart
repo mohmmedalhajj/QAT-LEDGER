@@ -48,6 +48,7 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
       }
     }
     selectedAcc ??= activeAccounts.isEmpty ? null : activeAccounts.first;
+    int expDateMs = existing?.dateMs ?? DateTime.now().millisecondsSinceEpoch;
 
     await showDialog<void>(
       context: context,
@@ -61,7 +62,16 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (existing == null) ...[
+                  ErpDatePickerTile(
+                    label: 'تاريخ المصروف',
+                    dateMs: expDateMs,
+                    onChanged: (ms) => setModalState(() => expDateMs = ms),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 CurrencySelectorRow(
                   policy: ctrl.currencyPolicy,
                   selected: cur,
@@ -136,6 +146,7 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
                     amountMinor: minor,
                     currency: cur,
                     notes: notesCtrl.text,
+                    dateMs: expDateMs,
                   );
                 } else {
                   await ctrl.repo.updateExpense(

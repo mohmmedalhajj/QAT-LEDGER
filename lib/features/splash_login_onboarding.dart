@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../core/money.dart';
 import '../core/theme.dart';
 import '../data/models.dart';
+import '../developer/developer_console_sheet.dart';
 import '../state/app_controller.dart';
 import 'widgets/common_widgets.dart';
 import 'widgets/erp_components.dart';
@@ -126,6 +127,48 @@ class _LoginScreenState extends State<LoginScreen> {
     _secretTapCount = 0;
 
     final ctrl = context.read<AppController>();
+    if (ctrl.isDeveloperEdition && ctrl.developerKeyManager != null) {
+      final action = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('أدوات إصدار المطور'),
+          content: const Text(
+            'اختر الإجراء المطلوب من بوابة المطور السرية:',
+            style: TextStyle(fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
+            OutlinedButton(
+              onPressed: () => Navigator.pop(ctx, 'admin'),
+              child: const Text('بوابة الصلاحيات'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(ctx, 'dev'),
+              icon: const Icon(Icons.developer_mode, size: 17),
+              label: const Text('لوحة المطور (Ed25519)'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (action == 'dev') {
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => DeveloperConsoleSheet(
+              keyManager: ctrl.developerKeyManager!,
+              devDb: ctrl.developerDb,
+              onKeysUpdated: ctrl.refreshLicense,
+            ),
+          ),
+        );
+        return;
+      }
+      if (action != 'admin') return;
+    }
+
     final passCtrl = TextEditingController();
     final verified = await showDialog<bool>(
       context: context,

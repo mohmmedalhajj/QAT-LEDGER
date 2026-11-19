@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/date_utils.dart';
 import '../../core/money.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
@@ -20,11 +23,112 @@ class InventoryBatchesView extends StatefulWidget {
 }
 
 class _InventoryBatchesViewState extends State<InventoryBatchesView> {
-  int _section = 0; // 0 = batches, 1 = import weights
+  int _section = 0; // 0 = batches, 1 = import weights, 2 = receivers & daily matching
   String _search = '';
   String _weightSearch = '';
   _StockFilter _stockFilter = _StockFilter.all;
   CurrencyCode? _currencyFilter;
+  String _matchFromIso = QatDateUtils.todayIso();
+  String _matchToIso = QatDateUtils.todayIso();
+  DailyInventoryMatching? _matching;
+  bool _loadingMatching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_loadMatching(context.read<AppController>()));
+    });
+  }
+
+  Future<void> _loadMatching(AppController ctrl) async {
+    setState(() => _loadingMatching = true);
+    try {
+      final m = await ctrl.repo.getDailyInventoryMatching(
+        fromIso: _matchFromIso,
+        toIso: _matchToIso,
+      );
+      if (mounted) setState(() => _matching = m);
+    } finally {
+      if (mounted) setState(() => _loadingMatching = false);
+    }
+  }
+
+  Future<void> _openReceiverDialog(
+    AppController ctrl, {
+    InventoryReceiver? existing,
+  }) async {
+    final nameCtrl = TextEditingController(text: existing?.name ?? '');
+    final phoneCtrl = TextEditingController(text: existing?.phone ?? '');
+    final notesCtrl = TextEditingController(text: existing?.notes ?? '');
+    bool isActive = existing?.isActive ?? true;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [nameCtrl, phoneCtrl, notesCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text(
+              existing == null ? 'إضافة مستلم مخزون' : 'تعديل مستلم مخزون',
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(labelText: 'اسم المستلم *'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: phoneCtrl,
+                    textDirection: TextDirection.ltr,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(labelText: 'رقم الهاتف'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: notesCtrl,
+                    decoration: const InputDecoration(labelText: 'ملاحظات'),
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('نشط حالياً'),
+                    value: isActive,
+                    onChanged: (v) => setModalState(() => isActive = v),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  if (nameCtrl.text.trim().isEmpty) return;
+                  await ctrl.repo.upsertInventoryReceiver(
+                    id: existing?.id,
+                    name: nameCtrl.text,
+                    phone: phoneCtrl.text,
+                    notes: notesCtrl.text,
+                    isActive: isActive,
+                  );
+                  await ctrl.reloadAll();
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                child: const Text('حفظ'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Future<void> _openImportWeightDialog(
     AppController ctrl, {
@@ -38,69 +142,108 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
           : '',
     );
     final notesCtrl = TextEditingController(text: existing?.notes ?? '');
+    int weightDateMs = existing?.dateMs ?? DateTime.now().millisecondsSinceEpoch;
 
     await showDialog<void>(
       context: context,
       builder: (ctx) => ErpDialogControllerScope(
         controllers: [receiverCtrl, weightCtrl, notesCtrl],
-        child: AlertDialog(
-          title: Text(
-            existing == null
-                ? 'تسجيل وزن الوارد اليومي'
-                : 'تعديل وزن الوارد',
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: receiverCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'اسم المستلم / المورد *',
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text(
+              existing == null
+                  ? 'تسجيل وزن الوارد اليومي'
+                  : 'تعديل وزن الوارد',
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ErpDatePickerTile(
+                    label: 'التاريخ',
+                    dateMs: weightDateMs,
+                    onChanged: (ms) => setModalState(() => weightDateMs = ms),
                   ),
-                ),
-                const SizedBox(height: 8),
-                AccountingNumberField(
-                  controller: weightCtrl,
-                  label: 'الوزن الإجمالي (كجم) *',
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: notesCtrl,
-                  decoration: const InputDecoration(labelText: 'ملاحظات'),
-                ),
-              ],
+                  const SizedBox(height: 8),
+                  if (ctrl.inventoryReceivers.isNotEmpty) ...[
+                    DropdownButtonFormField<String>(
+                      initialValue: null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'اختيار من قائمة المستلمين',
+                      ),
+                      items: ctrl.inventoryReceivers
+                          .where((r) => r.isActive)
+                          .map(
+                            (r) => DropdownMenuItem<String>(
+                              value: r.name,
+                              child: Text(r.name),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) {
+                        if (v != null) receiverCtrl.text = v;
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  TextField(
+                    controller: receiverCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'اسم المستلم / المورد *',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  AccountingNumberField(
+                    controller: weightCtrl,
+                    label: 'الوزن الإجمالي (كجم) *',
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: notesCtrl,
+                    decoration: const InputDecoration(labelText: 'ملاحظات'),
+                  ),
+                ],
+              ),
             ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final weightMilli = QuantityMath.parseMilli(weightCtrl.text);
+                  if (receiverCtrl.text.trim().isEmpty || weightMilli <= 0) {
+                    return;
+                  }
+                  if (existing == null) {
+                    await ctrl.repo.addImportWeight(
+                      weightMilli: weightMilli,
+                      receiverName: receiverCtrl.text.trim(),
+                      notes: notesCtrl.text,
+                      dateMs: weightDateMs,
+                    );
+                  } else {
+                    await ctrl.repo.updateImportWeight(
+                      id: existing.id,
+                      weightMilli: weightMilli,
+                      receiverName: receiverCtrl.text.trim(),
+                      notes: notesCtrl.text,
+                      dateIso: QatDateUtils.toIsoDate(
+                        DateTime.fromMillisecondsSinceEpoch(weightDateMs),
+                      ),
+                    );
+                  }
+                  await ctrl.reloadAll();
+                  await _loadMatching(ctrl);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                child: const Text('حفظ الوزن'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                final weightMilli = QuantityMath.parseMilli(weightCtrl.text);
-                if (receiverCtrl.text.trim().isEmpty || weightMilli <= 0) return;
-                if (existing == null) {
-                  await ctrl.repo.addImportWeight(
-                    weightMilli: weightMilli,
-                    receiverName: receiverCtrl.text.trim(),
-                    notes: notesCtrl.text,
-                  );
-                } else {
-                  await ctrl.repo.updateImportWeight(
-                    id: existing.id,
-                    weightMilli: weightMilli,
-                    receiverName: receiverCtrl.text.trim(),
-                    notes: notesCtrl.text,
-                  );
-                }
-                await ctrl.reloadAll();
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              child: const Text('حفظ الوزن'),
-            ),
-          ],
         ),
       ),
     );
@@ -140,6 +283,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
     final notesCtrl = TextEditingController(text: existing?.notes ?? '');
     CurrencyCode currency =
         existing?.currency ?? ctrl.currencyPolicy.defaultCurrency;
+    int? receiverId = existing?.receiverId;
 
     await showDialog<void>(
       context: context,
@@ -262,6 +406,42 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                   ],
                 ),
                 const SizedBox(height: 8),
+                if (ctrl.inventoryReceivers.isNotEmpty) ...[
+                  DropdownButtonFormField<int?>(
+                    key: ValueKey<String>(
+                      'batch_recv_${ctrl.inventoryReceivers.any((r) => r.id == receiverId) ? receiverId : 'none'}',
+                    ),
+                    initialValue: ctrl.inventoryReceivers
+                            .any((r) => r.id == receiverId)
+                        ? receiverId
+                        : null,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'اختيار من قائمة المستلمين',
+                    ),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('إدخال اسم مستلم يدوياً'),
+                      ),
+                      ...ctrl.inventoryReceivers.map(
+                        (r) => DropdownMenuItem<int?>(
+                          value: r.id,
+                          child: Text(r.name),
+                        ),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      setModalState(() => receiverId = v);
+                      if (v != null) {
+                        receiverCtrl.text = ctrl.inventoryReceivers
+                            .firstWhere((r) => r.id == v)
+                            .name;
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 TextField(
                   controller: receiverCtrl,
                   decoration: const InputDecoration(
@@ -299,6 +479,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                     currency: currency,
                     itemNumber: itemNoCtrl.text,
                     lowStockThresholdMilli: threshMilli,
+                    receiverId: receiverId,
                     receiverName: receiverCtrl.text,
                     notes: notesCtrl.text,
                   );
@@ -313,6 +494,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                     currency: currency,
                     itemNumber: itemNoCtrl.text,
                     lowStockThresholdMilli: threshMilli,
+                    receiverId: receiverId,
                     receiverName: receiverCtrl.text,
                     notes: notesCtrl.text,
                   );
@@ -365,11 +547,21 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
 
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _section == 0
-            ? _openBatchDialog(ctrl)
-            : _openImportWeightDialog(ctrl),
+        onPressed: () {
+          if (_section == 0) {
+            unawaited(_openBatchDialog(ctrl));
+          } else if (_section == 1) {
+            unawaited(_openImportWeightDialog(ctrl));
+          } else {
+            unawaited(_openReceiverDialog(ctrl));
+          }
+        },
         icon: const Icon(Icons.add_box_outlined),
-        label: Text(_section == 0 ? 'إضافة دفعة' : 'تسجيل وزن وارد'),
+        label: Text(
+          _section == 0
+              ? 'إضافة دفعة'
+              : (_section == 1 ? 'تسجيل وزن وارد' : 'إضافة مستلم'),
+        ),
       ),
       body: Column(
         children: [
@@ -381,7 +573,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                   value: 0,
                   icon: Icon(Icons.inventory_2_outlined, size: 17),
                   label: Text(
-                    'دفعات المخزون',
+                    'الدفعات',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -395,12 +587,279 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                ButtonSegment<int>(
+                  value: 2,
+                  icon: const Icon(Icons.people_alt_outlined, size: 17),
+                  label: Text(
+                    'المستلمون والمطابقة (${ctrl.inventoryReceivers.length})',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
               selected: {_section},
-              onSelectionChanged: (s) => setState(() => _section = s.first),
+              onSelectionChanged: (s) {
+                setState(() => _section = s.first);
+                if (s.first == 2) unawaited(_loadMatching(ctrl));
+              },
             ),
           ),
-          if (_section == 1) ...[
+          if (_section == 2) ...[
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 84),
+                children: [
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          ErpSectionHeader(
+                            title: 'المطابقة اليومية الشاملة للكميات والمبيعات',
+                            icon: Icons.compare_arrows_outlined,
+                            trailing: IconButton(
+                              tooltip: 'تحديث',
+                              onPressed: () => _loadMatching(ctrl),
+                              icon: const Icon(Icons.refresh, size: 18),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: () async {
+                                  final init =
+                                      QatDateUtils.parseLegacyDate(_matchFromIso)
+                                              ?.date ??
+                                          DateTime.now();
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: init,
+                                    firstDate: DateTime(2020),
+                                    lastDate: DateTime(DateTime.now().year + 1),
+                                  );
+                                  if (picked != null && mounted) {
+                                    setState(() {
+                                      _matchFromIso =
+                                          QatDateUtils.toIsoDate(picked);
+                                      if (_matchToIso.compareTo(_matchFromIso) <
+                                          0) {
+                                        _matchToIso = _matchFromIso;
+                                      }
+                                    });
+                                    await _loadMatching(ctrl);
+                                  }
+                                },
+                                icon: const Icon(
+                                  Icons.calendar_today_outlined,
+                                  size: 16,
+                                ),
+                                label: Text('من: $_matchFromIso'),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: () async {
+                                  final init =
+                                      QatDateUtils.parseLegacyDate(_matchToIso)
+                                              ?.date ??
+                                          DateTime.now();
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: init,
+                                    firstDate: DateTime(2020),
+                                    lastDate: DateTime(DateTime.now().year + 1),
+                                  );
+                                  if (picked != null && mounted) {
+                                    setState(() {
+                                      _matchToIso =
+                                          QatDateUtils.toIsoDate(picked);
+                                    });
+                                    await _loadMatching(ctrl);
+                                  }
+                                },
+                                icon: const Icon(
+                                  Icons.event_available_outlined,
+                                  size: 16,
+                                ),
+                                label: Text('إلى: $_matchToIso'),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          if (_loadingMatching)
+                            const Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Center(child: CircularProgressIndicator()),
+                            )
+                          else if (_matching != null) ...[
+                            ErpSummaryBar(
+                              metrics: [
+                                ErpSummaryMetric(
+                                  label: 'وزن الوارد (كجم)',
+                                  value: QuantityMath.formatMilli(
+                                    _matching!.importedWeightMilli,
+                                  ),
+                                  toneColor: pal.brand,
+                                ),
+                                ErpSummaryMetric(
+                                  label: 'كمية التوريدات',
+                                  value: QuantityMath.formatMilli(
+                                    _matching!.purchasedQtyMilli,
+                                  ),
+                                ),
+                                ErpSummaryMetric(
+                                  label: 'المباع',
+                                  value: QuantityMath.formatMilli(
+                                    _matching!.soldQtyMilli,
+                                  ),
+                                  toneColor: pal.success,
+                                ),
+                                ErpSummaryMetric(
+                                  label: 'المتبقي بالمخزون',
+                                  value: QuantityMath.formatMilli(
+                                    _matching!.remainingQtyMilli,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            for (final cur
+                                in ctrl.currencyPolicy.allowedCurrencies)
+                              if ((_matching!.totalSalesMinorByCurrency[cur] ??
+                                          0) >
+                                      0 ||
+                                  (_matching!.totalPurchasesMinorByCurrency[
+                                              cur] ??
+                                          0) >
+                                      0)
+                                Card(
+                                  color: pal.cardElevated,
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(10),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        CurrencyBadge(currency: cur),
+                                        const SizedBox(height: 6),
+                                        ErpDetailRow(
+                                          label: 'مبيعات نقدية / تحويل / إيداع',
+                                          value:
+                                              '${Money(_matching!.cashSalesMinorByCurrency[cur] ?? 0, cur).format()} • ${Money(_matching!.transferSalesMinorByCurrency[cur] ?? 0, cur).format()} • ${Money(_matching!.depositSalesMinorByCurrency[cur] ?? 0, cur).format()}',
+                                        ),
+                                        ErpDetailRow(
+                                          label: 'مبيعات آجلة',
+                                          value: Money(
+                                            _matching!.creditSalesMinorByCurrency[
+                                                    cur] ??
+                                                0,
+                                            cur,
+                                          ).format(),
+                                          valueColor: pal.warning,
+                                        ),
+                                        ErpDetailRow(
+                                          label: 'المشتريات / تكلفة المباع',
+                                          value:
+                                              '${Money(_matching!.totalPurchasesMinorByCurrency[cur] ?? 0, cur).format()} / ${Money(_matching!.estimatedCostSoldMinorByCurrency[cur] ?? 0, cur).format()}',
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ErpSectionHeader(
+                    title: 'دليل مستلمي المخزون (${ctrl.inventoryReceivers.length})',
+                    icon: Icons.badge_outlined,
+                    trailing: TextButton.icon(
+                      onPressed: () => _openReceiverDialog(ctrl),
+                      icon: const Icon(Icons.person_add_outlined, size: 17),
+                      label: const Text('إضافة مستلم'),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  if (ctrl.inventoryReceivers.isEmpty)
+                    EmptyLedgerState(
+                      icon: Icons.people_outline,
+                      title: 'لا يوجد مستلمون مسجلون',
+                      subtitle:
+                          'أضف أسماء مستلمي المخزون لربط أوزان الوارد والدفعات بهم بدقة',
+                      actionLabel: 'إضافة مستلم',
+                      onAction: () => _openReceiverDialog(ctrl),
+                    )
+                  else
+                    for (final rec in ctrl.inventoryReceivers)
+                      Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: rec.isActive
+                                ? pal.brandSoft
+                                : pal.cardElevated,
+                            child: Icon(
+                              Icons.person_outline,
+                              color:
+                                  rec.isActive ? pal.brand : pal.textSecondary,
+                            ),
+                          ),
+                          title: Text(
+                            rec.name,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          subtitle: Text(
+                            [
+                              if (rec.phone.isNotEmpty) rec.phone,
+                              if (rec.notes.isNotEmpty) rec.notes,
+                              if (!rec.isActive) 'غير نشط',
+                            ].join(' • '),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'تعديل',
+                                icon: const Icon(Icons.edit_outlined, size: 18),
+                                onPressed: () =>
+                                    _openReceiverDialog(ctrl, existing: rec),
+                              ),
+                              if (ctrl.canDeleteCurrent)
+                                IconButton(
+                                  tooltip: 'حذف',
+                                  icon: Icon(
+                                    Icons.delete_outline,
+                                    color: pal.danger,
+                                    size: 18,
+                                  ),
+                                  onPressed: () async {
+                                    final ok = await showErpConfirmDialog(
+                                      context,
+                                      title: 'حذف مستلم المخزون',
+                                      message:
+                                          'هل تريد حذف المستلم ${rec.name}؟ (ستبقى الدفعات المسجلة باسمه محفوظة).',
+                                      confirmLabel: 'حذف',
+                                      destructive: true,
+                                    );
+                                    if (!ok) return;
+                                    await ctrl.repo
+                                        .deleteInventoryReceiver(rec.id);
+                                    await ctrl.reloadAll();
+                                  },
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                ],
+              ),
+            ),
+          ] else if (_section == 1) ...[
             ErpSearchFilterBar(
               searchHint: 'بحث باسم المستلم أو التاريخ...',
               onSearchChanged: (v) => setState(() => _weightSearch = v.trim()),

@@ -30,8 +30,9 @@ def extract_schema_statements():
         text = f.read()
     create_sqls = re.findall(r"'''(.*?)'''", text, flags=re.DOTALL)
     idx_sqls = re.findall(r"'(CREATE INDEX IF NOT EXISTS [^']+)'", text)
-    assert len(create_sqls) == 21, f"Expected 21 CREATE TABLE blocks, got {len(create_sqls)}"
+    assert len(create_sqls) == 22, f"Expected 22 CREATE TABLE blocks, got {len(create_sqls)}"
     assert len(idx_sqls) == 13, f"Expected 13 CREATE INDEX blocks, got {len(idx_sqls)}"
+    assert "CREATE TABLE IF NOT EXISTS inventory_receivers" in text
     return create_sqls, idx_sqls
 
 
@@ -138,9 +139,15 @@ def test_sqlite_schema_and_room_migration():
         unlinked = dst.execute("SELECT recipient_id FROM money_transfers WHERE id=2").fetchone()[0]
         assert unlinked is None
 
+        tbls = {
+            r[0]
+            for r in dst.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        assert "inventory_receivers" in tbls, f"inventory_receivers missing in schema tables: {tbls}"
+
         src.close()
         dst.close()
-    print("[PASS] SQLite v3 DDL (21 tables, 13 indices) + Room v18 migration + FK & currency separation verified")
+    print("[PASS] SQLite v4 DDL (22 tables, 13 indices) + Room v18 migration + FK & currency separation verified")
 
 
 def test_ed25519_canonical_compatibility():
@@ -284,6 +291,8 @@ def test_assets_and_dart_structure():
     assert models_src.count("String get effectivePaymentMethodLabel") >= 2, (
         "Both Sale and SupplierPurchase must expose effectivePaymentMethodLabel"
     )
+    assert "class InventoryReceiver" in models_src, "InventoryReceiver missing in models.dart"
+    assert "class DailyInventoryMatching" in models_src, "DailyInventoryMatching missing in models.dart"
 
     # Verify original pre-change backup archive
     backup_zip = os.path.join(ROOT, "backup/qat_ledger_kotlin_original_516e118.zip")

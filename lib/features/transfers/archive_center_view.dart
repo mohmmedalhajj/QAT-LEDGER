@@ -196,6 +196,7 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
       ('sales', 'مبيعات'),
       ('customer_payments', 'سندات قبض'),
       ('supplier_purchases', 'مشتريات'),
+      ('supplier_payments', 'سندات صرف'),
       ('expenses', 'مصاريف'),
       ('money_transfers', 'حوالات'),
       ('inventory_batches', 'مخزون'),
@@ -219,18 +220,37 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
           onSearchChanged: (v) => setState(() => _search = v.trim()),
           trailingAction: filteredItems.isEmpty
               ? null
-              : IconButton.outlined(
-                  tooltip: 'مشاركة ملخص الأرشيف',
-                  onPressed: () async {
-                    final summary = [
-                      'أرشيف ${ctrl.settings.agencyName} (${filteredItems.length} سجل):',
-                      for (final it in filteredItems.take(40))
-                        '• [${it.categoryLabel}] ${it.title} (${it.subtitle})',
-                    ].join('\n');
-                    await WhatsappShareService.instance
-                        .openWhatsApp(text: summary);
-                  },
-                  icon: const Icon(Icons.chat_outlined, size: 18),
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton.outlined(
+                      tooltip: 'مشاركة ملخص الأرشيف واتساب',
+                      onPressed: () async {
+                        final summary = [
+                          'أرشيف ${ctrl.settings.agencyName} (${filteredItems.length} سجل):',
+                          for (final it in filteredItems.take(40))
+                            '• [${it.categoryLabel}] ${it.title} (${it.subtitle})',
+                        ].join('\n');
+                        await WhatsappShareService.instance
+                            .openWhatsApp(text: summary);
+                      },
+                      icon: const Icon(Icons.chat_outlined, size: 18),
+                    ),
+                    const SizedBox(width: 4),
+                    IconButton.outlined(
+                      tooltip: 'مشاركة SMS',
+                      onPressed: () async {
+                        final summary = [
+                          'أرشيف ${ctrl.settings.agencyName} (${filteredItems.length} سجل):',
+                          for (final it in filteredItems.take(20))
+                            '• [${it.categoryLabel}] ${it.title}',
+                        ].join(' | ');
+                        await WhatsappShareService.instance
+                            .openSms(text: summary);
+                      },
+                      icon: const Icon(Icons.sms_outlined, size: 18),
+                    ),
+                  ],
                 ),
           filters: [
             for (final cat in categories)

@@ -1,7 +1,7 @@
 /// Normalized SQLite v3 DDL for `qat_ledger_v2.db`.
 /// Every financial column uses INTEGER minor units (1/100) and quantities use INTEGER milli units (1/1000).
 abstract final class QatLedgerSchema {
-  static const int currentVersion = 3;
+  static const int currentVersion = 4;
   static const String databaseFileName = 'qat_ledger_v2.db';
 
   static const List<String> createStatements = [
@@ -293,6 +293,16 @@ abstract final class QatLedgerSchema {
       receiver_name TEXT NOT NULL DEFAULT '',
       notes TEXT NOT NULL DEFAULT '',
       is_archived INTEGER NOT NULL DEFAULT 0
+    )
+    ''',
+    '''
+    CREATE TABLE IF NOT EXISTS inventory_receivers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      phone TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at_ms INTEGER NOT NULL
     )
     ''',
   ];

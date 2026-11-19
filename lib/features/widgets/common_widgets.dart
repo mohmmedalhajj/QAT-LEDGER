@@ -608,6 +608,120 @@ class PeriodFilterStrip extends StatelessWidget {
   }
 }
 
+/// Customer PRO-tier feature upgrade popup modal (matches Kotlin ProUpgradeRequiredDialog).
+Future<void> showProUpgradeRequiredDialog(
+  BuildContext context, {
+  required String featureTitle,
+  required String featureDescription,
+  required VoidCallback onActivatePressed,
+  VoidCallback? onPreviewLockedScreen,
+}) async {
+  final pal = context.pal;
+  await showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.workspace_premium, color: pal.warning),
+          const SizedBox(width: 8),
+          const Expanded(child: Text('ترقية الباقة الاحترافية (PRO)')),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            featureTitle,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            featureDescription,
+            style: TextStyle(fontSize: 12.5, color: pal.textSecondary),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: pal.warningSoft,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Text(
+              'جميع دفاترك وبياناتك محفوظة بأمان كامل. فعّل ترخيص PRO لفتح التقارير المالية والأرشيف الشامل فوراً دون اتصال بالإنترنت.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        if (onPreviewLockedScreen != null)
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              onPreviewLockedScreen();
+            },
+            child: const Text('عرض البطاقة'),
+          ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('لاحقاً'),
+        ),
+        FilledButton.icon(
+          onPressed: () {
+            Navigator.pop(ctx);
+            onActivatePressed();
+          },
+          icon: const Icon(Icons.vpn_key_outlined, size: 17),
+          label: const Text('تفعيل الآن'),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Reusable date selector button returning chosen epoch milliseconds.
+class ErpDatePickerTile extends StatelessWidget {
+  const ErpDatePickerTile({
+    super.key,
+    required this.dateMs,
+    required this.onChanged,
+    this.label = 'التاريخ',
+  });
+
+  final int dateMs;
+  final ValueChanged<int> onChanged;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final dt = DateTime.fromMillisecondsSinceEpoch(dateMs);
+    final iso = QatDateUtils.toIsoDate(dt);
+    return OutlinedButton.icon(
+      onPressed: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: dt,
+          firstDate: DateTime(2020),
+          lastDate: DateTime(DateTime.now().year + 1),
+        );
+        if (picked == null) return;
+        final merged = DateTime(
+          picked.year,
+          picked.month,
+          picked.day,
+          dt.hour,
+          dt.minute,
+          dt.second,
+        );
+        onChanged(merged.millisecondsSinceEpoch);
+      },
+      icon: const Icon(Icons.calendar_today_outlined, size: 16),
+      label: Text('$label: $iso'),
+    );
+  }
+}
+
 /// Customer PRO-tier feature gate shown ONLY for PRO-exclusive modules (Reports & Archive).
 class ProFeatureLockedCard extends StatelessWidget {
   const ProFeatureLockedCard({

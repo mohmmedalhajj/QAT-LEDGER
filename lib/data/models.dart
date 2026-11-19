@@ -100,6 +100,58 @@ class QatImportWeight {
 }
 
 @immutable
+class InventoryReceiver {
+  const InventoryReceiver({
+    required this.id,
+    required this.name,
+    this.phone = '',
+    this.notes = '',
+    this.isActive = true,
+    this.createdAtMs = 0,
+  });
+
+  final int id;
+  final String name;
+  final String phone;
+  final String notes;
+  final bool isActive;
+  final int createdAtMs;
+}
+
+@immutable
+class DailyInventoryMatching {
+  const DailyInventoryMatching({
+    required this.fromIso,
+    required this.toIso,
+    required this.importedWeightMilli,
+    required this.purchasedQtyMilli,
+    required this.soldQtyMilli,
+    required this.remainingQtyMilli,
+    required this.cashSalesMinorByCurrency,
+    required this.transferSalesMinorByCurrency,
+    required this.depositSalesMinorByCurrency,
+    required this.creditSalesMinorByCurrency,
+    required this.totalSalesMinorByCurrency,
+    required this.totalPurchasesMinorByCurrency,
+    required this.estimatedCostSoldMinorByCurrency,
+  });
+
+  final String fromIso;
+  final String toIso;
+  final int importedWeightMilli;
+  final int purchasedQtyMilli;
+  final int soldQtyMilli;
+  final int remainingQtyMilli;
+  final Map<CurrencyCode, int> cashSalesMinorByCurrency;
+  final Map<CurrencyCode, int> transferSalesMinorByCurrency;
+  final Map<CurrencyCode, int> depositSalesMinorByCurrency;
+  final Map<CurrencyCode, int> creditSalesMinorByCurrency;
+  final Map<CurrencyCode, int> totalSalesMinorByCurrency;
+  final Map<CurrencyCode, int> totalPurchasesMinorByCurrency;
+  final Map<CurrencyCode, int> estimatedCostSoldMinorByCurrency;
+}
+
+@immutable
 class InventoryBatch {
   const InventoryBatch({
     required this.id,

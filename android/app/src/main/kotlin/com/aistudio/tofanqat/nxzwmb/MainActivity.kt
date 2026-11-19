@@ -28,6 +28,13 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.DecodeHintType
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.common.GlobalHistogramBinarizer
+import com.google.zxing.common.HybridBinarizer
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -131,6 +138,17 @@ class MainActivity : FlutterActivity() {
                         val appName = call.argument<String>("appName") ?: "ميزان القات"
                         val logoPath = call.argument<String>("logoPath") ?: ""
                         result.success(applyLauncherIdentity(appName, logoPath))
+                    }
+                    "decodeQrFromImagePath" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrBlank()) {
+                            result.success(null)
+                        } else {
+                            Thread {
+                                val decoded = decodeQrFromFile(path)
+                                runOnUiThread { result.success(decoded) }
+                            }.start()
+                        }
                     }
                     else -> result.notImplemented()
                 }
@@ -444,6 +462,50 @@ class MainActivity : FlutterActivity() {
                     res.success(null)
                 }
             } ?: res.success(null)
+        }
+    }
+
+    private fun decodeQrFromFile(path: String): String? {
+        var bmp: Bitmap? = null
+        return try {
+            val file = File(path)
+            if (!file.exists()) return null
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(path, bounds)
+            var sampleSize = 1
+            val maxDim = maxOf(bounds.outWidth, bounds.outHeight)
+            while (maxDim / sampleSize > 1600) {
+                sampleSize *= 2
+            }
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            bmp = BitmapFactory.decodeFile(path, opts) ?: return null
+            val width = bmp.width
+            val height = bmp.height
+            val pixels = IntArray(width * height)
+            bmp.getPixels(pixels, 0, width, 0, 0, width, height)
+            val source = RGBLuminanceSource(width, height, pixels)
+            val hints = mapOf(
+                DecodeHintType.TRY_HARDER to true,
+                DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE),
+                DecodeHintType.CHARACTER_SET to "UTF-8"
+            )
+            val reader = MultiFormatReader().apply { setHints(hints) }
+            try {
+                reader.decodeWithState(BinaryBitmap(HybridBinarizer(source))).text
+            } catch (_: Exception) {
+                reader.reset()
+                reader.decodeWithState(BinaryBitmap(GlobalHistogramBinarizer(source))).text
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            try {
+                bmp?.recycle()
+            } catch (_: Exception) {
+            }
         }
     }
 }

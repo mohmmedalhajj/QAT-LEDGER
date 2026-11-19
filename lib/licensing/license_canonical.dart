@@ -11,6 +11,9 @@ abstract final class LicenseCanonical {
   static const String licenseEnvelopeFormat = 'QAT_LEDGER_LICENSE_V1';
   static const String compactPrefix = 'QL1.';
   static const String algorithmEd25519 = 'Ed25519';
+  static final RegExp _ql1Regex = RegExp(
+    'QL1\\.[A-Za-z0-9_+/=-]+(?:\\r?\\n[A-Za-z0-9_+/=-]+)*\\.[A-Za-z0-9_+/=-]+(?:\\r?\\n[A-Za-z0-9_+/=-]+)*',
+  );
 
   static List<String> normalizeFeatures(Iterable<String> features) {
     final set = <String>{};
@@ -153,15 +156,29 @@ abstract final class LicenseCanonical {
     return const JsonEncoder.withIndent('  ').convert(obj);
   }
 
-  /// Parses either `QL1.<payload>.<sig>` compact token (whitespace-tolerant) OR `.qlic` JSON envelope,
-  /// supporting BOTH Kotlin `licensing-core` payloads and Flutter v2 payloads.
+  /// Parses either `QL1.<payload>.<sig>` compact token (even wrapped inside WhatsApp/SMS prose
+  /// or split across lines) OR `.qlic` JSON envelope, supporting BOTH Kotlin `licensing-core`
+  /// payloads and Flutter v2 payloads.
   static DecodedLicenseInput parseInput(String rawInput) {
     final trimmed = rawInput.trim();
     if (trimmed.isEmpty) {
       throw const FormatException('نص الترخيص فارغ');
     }
+
+    String? jsonCandidate;
     if (trimmed.startsWith('{')) {
-      final root = jsonDecode(trimmed) as Map<String, dynamic>;
+      jsonCandidate = trimmed;
+    } else if (trimmed.contains('"$licenseEnvelopeFormat"') ||
+        (trimmed.contains('{') && trimmed.contains('"signature"'))) {
+      final firstBrace = trimmed.indexOf('{');
+      final lastBrace = trimmed.lastIndexOf('}');
+      if (firstBrace >= 0 && lastBrace > firstBrace) {
+        jsonCandidate = trimmed.substring(firstBrace, lastBrace + 1);
+      }
+    }
+
+    if (jsonCandidate != null) {
+      final root = jsonDecode(jsonCandidate) as Map<String, dynamic>;
       final format = (root['format'] ?? '').toString();
       if (format != licenseEnvelopeFormat) {
         throw FormatException('صيغة .qlic غير مدعومة: $format');
@@ -188,8 +205,9 @@ abstract final class LicenseCanonical {
       );
     }
 
-    // Remove accidental whitespace from WhatsApp / SMS copy-paste
-    final normalized = trimmed.replaceAll(RegExp(r'\s+'), '');
+    // Extract QL1.<payload>.<sig> even when wrapped inside WhatsApp/SMS prose or line-wrapped.
+    final ql1Match = _ql1Regex.firstMatch(trimmed);
+    final normalized = (ql1Match?.group(0) ?? trimmed).replaceAll(RegExp(r'\s+'), '');
     if (normalized.startsWith(compactPrefix)) {
       final body = normalized.substring(compactPrefix.length);
       final parts = body.split('.');

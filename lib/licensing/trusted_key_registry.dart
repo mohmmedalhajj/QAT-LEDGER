@@ -27,10 +27,39 @@ class TrustedPublicKeyRegistry {
 
   static TrustedPublicKeyRegistry fromCsv(String csv) {
     final map = <String, SimplePublicKey>{};
-    final entries = csv.split(RegExp(r'[,;\n]+'));
-    for (final raw in entries) {
-      final clean = raw.trim();
+    var remaining = csv.trim();
+    if (remaining.isEmpty) return TrustedPublicKeyRegistry._(map);
+
+    // Strip accidental env-var prefixes (`QAT_LICENSE_PUBLIC_KEYS=...`) & surrounding quotes
+    remaining = remaining.replaceFirst(
+      RegExp(r'^(export\s+)?(QAT_LICENSE_PUBLIC_KEYS|LICENSE_PUBLIC_KEYS)\s*=\s*'),
+      '',
+    ).trim();
+    if ((remaining.startsWith('"') && remaining.endsWith('"')) ||
+        (remaining.startsWith("'") && remaining.endsWith("'"))) {
+      remaining = remaining.substring(1, remaining.length - 1).trim();
+    }
+
+    // Extract multiline PEM blocks BEFORE splitting by commas/newlines
+    final pemPattern = RegExp(
+      r'-----BEGIN PUBLIC KEY-----[\s\S]*?-----END PUBLIC KEY-----',
+    );
+    final extractedEntries = <String>[];
+    remaining = remaining.replaceAllMapped(pemPattern, (m) {
+      extractedEntries.add(m.group(0)!);
+      return ',';
+    });
+    for (final raw in remaining.split(RegExp(r'[,;\s]+'))) {
+      var clean = raw.trim();
       if (clean.isEmpty) continue;
+      if ((clean.startsWith('"') && clean.endsWith('"')) ||
+          (clean.startsWith("'") && clean.endsWith("'"))) {
+        clean = clean.substring(1, clean.length - 1).trim();
+      }
+      if (clean.isNotEmpty) extractedEntries.add(clean);
+    }
+
+    for (final clean in extractedEntries) {
       try {
         // Kotlin `QAT_LICENSE_PUBLIC_KEYS` format: `QLK-XXXXXXXX:<base64UrlRaw32>`
         final colonIdx = clean.indexOf(':');

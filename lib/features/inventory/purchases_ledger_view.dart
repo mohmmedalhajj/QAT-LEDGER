@@ -169,18 +169,36 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
     AppController ctrl,
     SupplierPurchase p,
   ) async {
-    final first = p.items.isEmpty ? null : p.items.first;
-    final qatCtrl = TextEditingController(text: first?.qatTypeName ?? '');
-    final qtyCtrl = TextEditingController(
-      text: first != null ? QuantityMath.formatMilli(first.qtyMilli) : '1',
-    );
-    final buyCtrl = TextEditingController(
-      text: first != null
-          ? Money.formatMinor(first.buyPriceMinor, showZeroDecimals: false)
-              .replaceAll(',', '')
-          : '0',
-    );
-    final sellCtrl = TextEditingController();
+    final lineDrafts = <({
+      String unit,
+      TextEditingController qatCtrl,
+      TextEditingController qtyCtrl,
+      TextEditingController buyCtrl,
+      TextEditingController sellCtrl,
+    })>[
+      for (final it in p.items)
+        (
+          unit: it.unit,
+          qatCtrl: TextEditingController(text: it.qatTypeName),
+          qtyCtrl: TextEditingController(
+            text: QuantityMath.formatMilli(it.qtyMilli),
+          ),
+          buyCtrl: TextEditingController(
+            text: Money.formatMinor(it.buyPriceMinor, showZeroDecimals: false)
+                .replaceAll(',', ''),
+          ),
+          sellCtrl: TextEditingController(),
+        ),
+    ];
+    if (lineDrafts.isEmpty) {
+      lineDrafts.add((
+        unit: 'ربطة',
+        qatCtrl: TextEditingController(),
+        qtyCtrl: TextEditingController(text: '1'),
+        buyCtrl: TextEditingController(text: '0'),
+        sellCtrl: TextEditingController(),
+      ));
+    }
     final discCtrl = TextEditingController(
       text: Money.formatMinor(p.discountMinor, showZeroDecimals: false)
           .replaceAll(',', ''),
@@ -203,15 +221,9 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
     PaymentType pType = p.paymentType;
     String paymentMethod =
         p.paymentMethod.isNotEmpty ? p.paymentMethod : 'نقداً';
+    int purchaseDateMs = p.dateMs;
 
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => ErpDialogControllerScope(
-        controllers: [
-          qatCtrl,
-          qtyCtrl,
-          buyCtrl,
-          sellCtrl,
+    List<TextEditingController> allControllers() => [
           discCtrl,
           paidCtrl,
           bankCtrl,
@@ -220,153 +232,232 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
           demarTypeCtrl,
           demarNoCtrl,
           notesCtrl,
-        ],
-        child: StatefulBuilder(
-          builder: (ctx, setModalState) => AlertDialog(
-            title: Text('تعديل فاتورة شراء ${p.purchaseNumber}'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: qatCtrl,
-                  decoration: const InputDecoration(labelText: 'الصنف'),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: AccountingNumberField(
-                        controller: qtyCtrl,
-                        label: 'الكمية',
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: AccountingNumberField(
-                        controller: buyCtrl,
-                        label: 'سعر الشراء',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: AccountingNumberField(
-                        controller: sellCtrl,
-                        label: 'سعر البيع (اختياري)',
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: AccountingNumberField(
-                        controller: discCtrl,
-                        label: 'الخصم',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                SegmentedButton<PaymentType>(
-                  segments: const [
-                    ButtonSegment<PaymentType>(
-                      value: PaymentType.paid,
-                      label: Text('نقداً'),
-                    ),
-                    ButtonSegment<PaymentType>(
-                      value: PaymentType.partial,
-                      label: Text('جزئي'),
-                    ),
-                    ButtonSegment<PaymentType>(
-                      value: PaymentType.credit,
-                      label: Text('آجل'),
-                    ),
-                  ],
-                  selected: {pType},
-                  onSelectionChanged: (s) =>
-                      setModalState(() => pType = s.first),
-                ),
-                if (pType != PaymentType.credit) ...[
+          for (final d in lineDrafts) ...[
+            d.qatCtrl,
+            d.qtyCtrl,
+            d.buyCtrl,
+            d.sellCtrl,
+          ],
+        ];
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => AlertDialog(
+          title: Text('تعديل فاتورة شراء ${p.purchaseNumber}'),
+          content: SizedBox(
+            width: 440,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ErpDatePickerTile(
+                    label: 'تاريخ الشراء',
+                    dateMs: purchaseDateMs,
+                    onChanged: (ms) =>
+                        setModalState(() => purchaseDateMs = ms),
+                  ),
                   const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      for (final m in const ['نقداً', 'تحويل', 'إيداع'])
-                        ChoiceChip(
-                          label: Text(m),
-                          selected: paymentMethod == m,
-                          onSelected: (_) =>
-                              setModalState(() => paymentMethod = m),
+                      Text(
+                        'الأصناف (${lineDrafts.length})',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
                         ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () {
+                          setModalState(() {
+                            lineDrafts.add((
+                              unit: 'ربطة',
+                              qatCtrl: TextEditingController(),
+                              qtyCtrl: TextEditingController(text: '1'),
+                              buyCtrl: TextEditingController(text: '0'),
+                              sellCtrl: TextEditingController(),
+                            ));
+                          });
+                        },
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('إضافة صنف'),
+                      ),
                     ],
                   ),
-                ],
-                if (pType == PaymentType.partial || pType == PaymentType.paid) ...[
+                  for (int idx = 0; idx < lineDrafts.length; idx++)
+                    Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: lineDrafts[idx].qatCtrl,
+                                    decoration: InputDecoration(
+                                      isDense: true,
+                                      labelText: 'الصنف #${idx + 1}',
+                                    ),
+                                  ),
+                                ),
+                                if (lineDrafts.length > 1)
+                                  IconButton(
+                                    icon: Icon(
+                                      Icons.delete_outline,
+                                      size: 18,
+                                      color: ctx.pal.danger,
+                                    ),
+                                    onPressed: () {
+                                      setModalState(() {
+                                        final rem = lineDrafts.removeAt(idx);
+                                        rem.qatCtrl.dispose();
+                                        rem.qtyCtrl.dispose();
+                                        rem.buyCtrl.dispose();
+                                        rem.sellCtrl.dispose();
+                                      });
+                                    },
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: AccountingNumberField(
+                                    controller: lineDrafts[idx].qtyCtrl,
+                                    label: 'الكمية',
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: AccountingNumberField(
+                                    controller: lineDrafts[idx].buyCtrl,
+                                    label: 'الشراء',
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: AccountingNumberField(
+                                    controller: lineDrafts[idx].sellCtrl,
+                                    label: 'البيع',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  AccountingNumberField(
+                    controller: discCtrl,
+                    label: 'الخصم',
+                  ),
+                  const SizedBox(height: 10),
+                  SegmentedButton<PaymentType>(
+                    segments: const [
+                      ButtonSegment<PaymentType>(
+                        value: PaymentType.paid,
+                        label: Text('نقداً'),
+                      ),
+                      ButtonSegment<PaymentType>(
+                        value: PaymentType.partial,
+                        label: Text('جزئي'),
+                      ),
+                      ButtonSegment<PaymentType>(
+                        value: PaymentType.credit,
+                        label: Text('آجل'),
+                      ),
+                    ],
+                    selected: {pType},
+                    onSelectionChanged: (s) =>
+                        setModalState(() => pType = s.first),
+                  ),
+                  if (pType != PaymentType.credit) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        for (final m in const ['نقداً', 'تحويل', 'إيداع'])
+                          ChoiceChip(
+                            label: Text(m),
+                            selected: paymentMethod == m,
+                            onSelected: (_) =>
+                                setModalState(() => paymentMethod = m),
+                          ),
+                      ],
+                    ),
+                  ],
+                  if (pType == PaymentType.partial ||
+                      pType == PaymentType.paid) ...[
+                    const SizedBox(height: 8),
+                    AccountingNumberField(
+                      controller: paidCtrl,
+                      label: 'المدفوع',
+                    ),
+                  ],
+                  if (pType != PaymentType.credit &&
+                      paymentMethod != 'نقداً') ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: bankCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'البنك / الصرافة',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: transferNoCtrl,
+                            textDirection: TextDirection.ltr,
+                            decoration: const InputDecoration(
+                              labelText: 'رقم الحوالة',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   AccountingNumberField(
-                    controller: paidCtrl,
-                    label: 'المدفوع',
+                    controller: demarAmountCtrl,
+                    label: 'مبلغ الدمار (اختياري)',
                   ),
-                ],
-                if (pType != PaymentType.credit && paymentMethod != 'نقداً') ...[
                   const SizedBox(height: 8),
                   Row(
                     children: [
                       Expanded(
                         child: TextField(
-                          controller: bankCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'البنك / الصرافة',
-                          ),
+                          controller: demarTypeCtrl,
+                          decoration:
+                              const InputDecoration(labelText: 'نوع الدمار'),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: TextField(
-                          controller: transferNoCtrl,
+                          controller: demarNoCtrl,
                           textDirection: TextDirection.ltr,
-                          decoration: const InputDecoration(
-                            labelText: 'رقم الحوالة',
-                          ),
+                          decoration:
+                              const InputDecoration(labelText: 'رقم الدمار'),
                         ),
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: notesCtrl,
+                    decoration: const InputDecoration(labelText: 'ملاحظات'),
+                  ),
                 ],
-                const SizedBox(height: 8),
-                AccountingNumberField(
-                  controller: demarAmountCtrl,
-                  label: 'مبلغ الدمار (اختياري)',
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: demarTypeCtrl,
-                        decoration:
-                            const InputDecoration(labelText: 'نوع الدمار'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: demarNoCtrl,
-                        textDirection: TextDirection.ltr,
-                        decoration:
-                            const InputDecoration(labelText: 'رقم الدمار'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: notesCtrl,
-                  decoration: const InputDecoration(labelText: 'ملاحظات'),
-                ),
-              ],
+              ),
             ),
           ),
           actions: [
@@ -376,35 +467,32 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
             ),
             FilledButton(
               onPressed: () async {
-                final qty = QuantityMath.parseMilli(qtyCtrl.text);
-                final buy = Money.parseMinorUnits(buyCtrl.text);
-                final sell = Money.parseMinorUnits(sellCtrl.text);
-                if (qatCtrl.text.trim().isEmpty || qty <= 0) return;
-                final extraItems = p.items.length > 1
-                    ? p.items
-                        .skip(1)
-                        .map(
-                          (e) => NewPurchaseItemInput(
-                            qatTypeName: e.qatTypeName,
-                            qtyMilli: e.qtyMilli,
-                            unit: e.unit,
-                            buyPriceMinor: e.buyPriceMinor,
-                          ),
-                        )
-                        .toList()
-                    : const <NewPurchaseItemInput>[];
-                await ctrl.repo.editSupplierPurchase(
-                  purchaseId: p.id,
-                  newItems: [
+                final edited = <NewPurchaseItemInput>[];
+                for (final d in lineDrafts) {
+                  final qty = QuantityMath.parseMilli(d.qtyCtrl.text);
+                  final buy = Money.parseMinorUnits(d.buyCtrl.text);
+                  final sell = Money.parseMinorUnits(d.sellCtrl.text);
+                  if (d.qatCtrl.text.trim().isEmpty || qty <= 0) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      const SnackBar(
+                        content: Text('أكمل اسم الصنف والكمية لكل بند'),
+                      ),
+                    );
+                    return;
+                  }
+                  edited.add(
                     NewPurchaseItemInput(
-                      qatTypeName: qatCtrl.text.trim(),
+                      qatTypeName: d.qatCtrl.text.trim(),
                       qtyMilli: qty,
-                      unit: first?.unit ?? 'ربطة',
+                      unit: d.unit,
                       buyPriceMinor: buy,
                       sellPriceMinor: sell,
                     ),
-                    ...extraItems,
-                  ],
+                  );
+                }
+                await ctrl.repo.editSupplierPurchase(
+                  purchaseId: p.id,
+                  newItems: edited,
                   currency: p.currency,
                   discountMinor: Money.parseMinorUnits(discCtrl.text),
                   paymentType: pType,
@@ -417,6 +505,7 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
                   demarType: demarTypeCtrl.text,
                   demarNumber: demarNoCtrl.text,
                   notes: notesCtrl.text,
+                  dateMs: purchaseDateMs,
                 );
                 await ctrl.reloadAll();
                 if (ctx.mounted) Navigator.pop(ctx);
@@ -425,9 +514,11 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
             ),
           ],
         ),
-        ),
       ),
     );
+    for (final c in allControllers()) {
+      c.dispose();
+    }
   }
 
   @override
