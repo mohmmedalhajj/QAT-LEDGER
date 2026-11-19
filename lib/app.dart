@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
@@ -86,6 +87,36 @@ class MainShellScreen extends StatefulWidget {
 class _MainShellScreenState extends State<MainShellScreen> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  Future<void> _handleSystemBack(AppController ctrl) async {
+    if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+      _scaffoldKey.currentState?.closeDrawer();
+      return;
+    }
+    if (ctrl.hasUnsavedChanges) {
+      final discard = await showErpConfirmDialog(
+        context,
+        title: 'تغييرات غير محفوظة',
+        message:
+            'توجد تعديلات أو بنود فاتورة غير محفوظة. هل تريد العودة دون حفظها؟',
+        confirmLabel: 'متابعة والعودة',
+        destructive: true,
+      );
+      if (!discard || !mounted) return;
+    }
+    if (ctrl.popNavigationHistory()) {
+      return;
+    }
+    final exitOk = await showErpConfirmDialog(
+      context,
+      title: 'إغلاق التطبيق',
+      message: 'هل تريد الخروج من نظام ميزان القات؟ جميع الدفاتر محفوظة بأمان.',
+      confirmLabel: 'خروج',
+    );
+    if (exitOk) {
+      await SystemNavigator.pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
@@ -118,7 +149,13 @@ class _MainShellScreenState extends State<MainShellScreen> {
 
     final isDark = ctrl.settings.themeChoice == AppThemeModeChoice.darkBlack;
 
-    return Scaffold(
+    return PopScope<Object?>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        unawaited(_handleSystemBack(ctrl));
+      },
+      child: Scaffold(
       key: _scaffoldKey,
       drawer: _ErpCategorizedDrawer(
         onClose: () => _scaffoldKey.currentState?.closeDrawer(),
@@ -244,6 +281,7 @@ class _MainShellScreenState extends State<MainShellScreen> {
               onRouteSelected: (route) => ctrl.navigateToRoute(route),
               onMorePressed: () => _scaffoldKey.currentState?.openDrawer(),
             ),
+      ),
     );
   }
 }

@@ -129,7 +129,12 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
             onPressed: () async {
               final bytes = await PdfExportService.instance
                   .buildSaleInvoicePdf(agency: ctrl.settings, sale: sale);
-              await Printing.layoutPdf(onLayout: (_) async => bytes);
+              await Printing.layoutPdf(
+                name: PdfExportService.buildArabicPdfFileName(
+                  'فاتورة_${sale.invoiceNumber}',
+                ),
+                onLayout: (_) async => bytes,
+              );
             },
             icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
             label: const Text('PDF'),
@@ -736,6 +741,10 @@ class _SalesLedgerViewState extends State<SalesLedgerView> {
                                         sale: s,
                                       );
                                       await Printing.layoutPdf(
+                                        name: PdfExportService
+                                            .buildArabicPdfFileName(
+                                          'فاتورة_${s.invoiceNumber}',
+                                        ),
                                         onLayout: (_) async => bytes,
                                       );
                                     },

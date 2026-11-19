@@ -899,7 +899,10 @@ Future<void> showReceiptPreviewPrintSheet(
                                 ? PdfPageFormat.roll57
                                 : PdfPageFormat.roll80,
                           );
-                      await Printing.layoutPdf(onLayout: (_) async => pdf);
+                      await Printing.layoutPdf(
+                        name: PdfExportService.buildArabicPdfFileName(title),
+                        onLayout: (_) async => pdf,
+                      );
                     },
                     icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
                     label: const Text('طباعة / PDF'),

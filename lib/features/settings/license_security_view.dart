@@ -8,6 +8,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/platform_bridge.dart';
 import '../../core/theme.dart';
@@ -858,22 +859,79 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'طلب الترخيص والدعم الفني',
+                  'طلب الترخيص والدعم الفني والمطور',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 6),
+                const Text(
+                  'م. محمد أمين ردمان الحاج • Eng. Mohammed Amin Radman Al-Hajj',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 4),
                 Text(
-                  'للحصول على كود التفعيل للباقة الاحترافية (PRO) أو الدعم الفني، أرسل معرّف تثبيت الجهاز عبر واتساب أو مشاركة الطلب.',
+                  'للحصول على كود التفعيل للباقة الاحترافية (PRO) أو الدعم الفني، أرسل معرّف تثبيت الجهاز عبر واتساب أو اتصل مباشرة.',
                   style: TextStyle(fontSize: 12, color: pal.textSecondary),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '+967780961823',
+                      textDirection: TextDirection.ltr,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: pal.brand,
+                      ),
+                    ),
+                    Text(
+                      'الحقوق محفوظة © 2026',
+                      style: TextStyle(fontSize: 11.5, color: pal.textSecondary),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
+                    FilledButton.icon(
+                      onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        final dialUri = Uri(scheme: 'tel', path: '+967780961823');
+                        try {
+                          final launched = await launchUrl(
+                            dialUri,
+                            mode: LaunchMode.externalApplication,
+                          );
+                          if (!launched && mounted) {
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'تعذر بدء الاتصال تلقائياً، الرقم هو: +967780961823',
+                                ),
+                              ),
+                            );
+                          }
+                        } catch (_) {
+                          if (!mounted) return;
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'تعذر بدء الاتصال تلقائياً، الرقم هو: +967780961823',
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.phone_outlined, size: 17),
+                      label: const Text('اتصال مباشر'),
+                    ),
                     FilledButton.tonalIcon(
                       onPressed: () async {
                         await WhatsappShareService.instance.openWhatsApp(
+                          phone: '+967780961823',
                           text:
                               'مرحباً، أرغب في تفعيل ترخيص ميزان القات (PRO):\n'
                               'الوكالة: ${ctrl.settings.agencyName}\n'

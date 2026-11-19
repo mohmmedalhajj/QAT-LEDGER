@@ -237,7 +237,12 @@ class _AccountStatementViewState extends State<AccountStatementView> {
                             partyName: selectedPartyName,
                             linesByCurrency: _lines,
                           );
-                          await Printing.layoutPdf(onLayout: (_) async => bytes);
+                          await Printing.layoutPdf(
+                            name: PdfExportService.buildArabicPdfFileName(
+                              'كشف_${_isCustomer ? 'العميل' : 'المورد'}_$selectedPartyName',
+                            ),
+                            onLayout: (_) async => bytes,
+                          );
                         },
                         icon: const Icon(
                           Icons.picture_as_pdf_outlined,

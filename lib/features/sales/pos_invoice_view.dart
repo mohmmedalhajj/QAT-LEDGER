@@ -46,12 +46,27 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
 
   final List<NewSaleItemInput> _cart = [];
   bool _saving = false;
+  AppController? _boundCtrl;
 
   static const _units = ['ربطة', 'علاقية', 'كيلو', 'حبة'];
   static const _paymentMethods = ['نقداً', 'تحويل', 'إيداع', 'آجل'];
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _boundCtrl = context.read<AppController>();
+    _boundCtrl?.registerUnsavedGuard(
+      'pos_invoice',
+      () =>
+          _cart.isNotEmpty ||
+          _notesCtrl.text.trim().isNotEmpty ||
+          _newCustNameCtrl.text.trim().isNotEmpty,
+    );
+  }
+
+  @override
   void dispose() {
+    _boundCtrl?.unregisterUnsavedGuard('pos_invoice');
     _newCustNameCtrl.dispose();
     _newCustPhoneCtrl.dispose();
     _newCustAddrCtrl.dispose();
@@ -344,7 +359,12 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
             onPressed: () async {
               final bytes = await PdfExportService.instance
                   .buildSaleInvoicePdf(agency: ctrl.settings, sale: sale);
-              await Printing.layoutPdf(onLayout: (_) async => bytes);
+              await Printing.layoutPdf(
+                name: PdfExportService.buildArabicPdfFileName(
+                  'فاتورة_${sale.invoiceNumber}',
+                ),
+                onLayout: (_) async => bytes,
+              );
             },
             icon: const Icon(Icons.picture_as_pdf_outlined, size: 17),
             label: const Text('PDF / طباعة'),

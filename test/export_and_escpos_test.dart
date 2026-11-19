@@ -134,6 +134,21 @@ void main() {
       expenses: const [],
     );
     expect(String.fromCharCodes(expPdf.take(5)), '%PDF-');
+
+    expect(
+      PdfExportService.buildArabicPdfFileName(
+        'المالي',
+        DateTime(2026, 10, 15),
+      ),
+      'تقرير_المالي_2026-10-15.pdf',
+    );
+    expect(
+      PdfExportService.buildArabicPdfFileName(
+        'كشف_العميل',
+        DateTime(2026, 10, 15),
+      ),
+      'كشف_العميل_2026-10-15.pdf',
+    );
   });
 
   test('Spreadsheet export generates valid XLSX and UTF-8 BOM CSV, and ESC/POS raster supports 58mm & 80mm', () async {

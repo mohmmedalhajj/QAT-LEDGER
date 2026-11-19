@@ -154,7 +154,12 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
             onPressed: () async {
               final bytes = await PdfExportService.instance
                   .buildSupplierPurchasePdf(agency: ctrl.settings, purchase: p);
-              await Printing.layoutPdf(onLayout: (_) async => bytes);
+              await Printing.layoutPdf(
+                name: PdfExportService.buildArabicPdfFileName(
+                  'مشتريات_${p.purchaseNumber}',
+                ),
+                onLayout: (_) async => bytes,
+              );
             },
             icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
             label: const Text('PDF'),
@@ -620,6 +625,10 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
                                         purchase: p,
                                       );
                                       await Printing.layoutPdf(
+                                        name: PdfExportService
+                                            .buildArabicPdfFileName(
+                                          'مشتريات_${p.purchaseNumber}',
+                                        ),
                                         onLayout: (_) async => bytes,
                                       );
                                     },

@@ -354,7 +354,12 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
                             agency: ctrl.settings,
                             expenses: filtered,
                           );
-                          await Printing.layoutPdf(onLayout: (_) async => bytes);
+                          await Printing.layoutPdf(
+                            name: PdfExportService.buildArabicPdfFileName(
+                              'المصروفات',
+                            ),
+                            onLayout: (_) async => bytes,
+                          );
                         },
                         icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
                       ),

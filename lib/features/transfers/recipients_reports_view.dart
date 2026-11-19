@@ -572,6 +572,9 @@ class _RecipientStatusReportPageState
                                   toIso: _toIso,
                                 );
                                 await Printing.layoutPdf(
+                                  name: PdfExportService.buildArabicPdfFileName(
+                                    'حوالات_${s.recipient.name}',
+                                  ),
                                   onLayout: (_) async => pdf,
                                 );
                               },

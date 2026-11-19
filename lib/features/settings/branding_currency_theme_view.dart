@@ -41,11 +41,14 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
   late bool _footerEnabled;
   late bool _syncPdfColors;
   String _logoPath = '';
+  AppController? _boundCtrl;
 
   @override
   void initState() {
     super.initState();
-    final s = context.read<AppController>().settings;
+    final ctrl = context.read<AppController>();
+    _boundCtrl = ctrl;
+    final s = ctrl.settings;
     _nameCtrl = TextEditingController(text: s.agencyName);
     _displayAppCtrl = TextEditingController(text: s.appDisplayName);
     _ownerCtrl = TextEditingController(text: s.ownerName);
@@ -70,10 +73,32 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
     _footerEnabled = s.footerEnabled;
     _syncPdfColors = s.syncColorsWithPdf;
     _logoPath = s.logoPath;
+    ctrl.registerUnsavedGuard('branding_settings', _hasUnsavedEdits);
+  }
+
+  bool _hasUnsavedEdits() {
+    final s = _boundCtrl?.settings;
+    if (s == null) return false;
+    return _nameCtrl.text.trim() != s.agencyName ||
+        _displayAppCtrl.text.trim() != s.appDisplayName ||
+        _ownerCtrl.text.trim() != s.ownerName ||
+        _phoneCtrl.text.trim() != s.agencyPhone ||
+        _extraContactCtrl.text.trim() != s.additionalContact ||
+        _addrCtrl.text.trim() != s.agencyAddress ||
+        _taglineCtrl.text.trim() != s.tagline ||
+        _commercialCtrl.text.trim() != s.commercialDetails ||
+        _qatTypesRawCtrl.text.trim() != s.qatTypesRaw ||
+        _headerTextCtrl.text.trim() != s.headerText ||
+        _footerCtrl.text.trim() != s.footerNote ||
+        _logoPath != s.logoPath ||
+        _mode != s.currencyMode ||
+        _headerEnabled != s.headerEnabled ||
+        _footerEnabled != s.footerEnabled;
   }
 
   @override
   void dispose() {
+    _boundCtrl?.unregisterUnsavedGuard('branding_settings');
     _nameCtrl.dispose();
     _displayAppCtrl.dispose();
     _ownerCtrl.dispose();

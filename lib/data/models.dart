@@ -731,14 +731,16 @@ class DailyChartPoint {
     required this.shortLabel,
     required this.salesMinor,
     required this.expensesMinor,
+    this.cogsMinor = 0,
   });
 
   final String dateIso;
   final String shortLabel;
   final int salesMinor;
   final int expensesMinor;
+  final int cogsMinor;
 
-  int get profitMinor => salesMinor - expensesMinor;
+  int get profitMinor => salesMinor - cogsMinor - expensesMinor;
   String get labelAr => shortLabel;
 }
 

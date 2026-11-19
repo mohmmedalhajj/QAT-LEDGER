@@ -1675,10 +1675,57 @@ class QatRepository {
       if (rows.isEmpty) return;
       final r = rows.first;
       final isArchived = (r['is_archived'] as num).toInt() == 1;
+      final supplierId = (r['supplier_id'] as num).toInt();
+      final purchaseMs = (r['date_ms'] as num).toInt();
+
+      final items = await txn.query(
+        'supplier_purchase_items',
+        where: 'purchase_id = ?',
+        whereArgs: [purchaseId],
+      );
+      for (final it in items) {
+        final qatName = (it['qat_type_name'] ?? '').toString().trim();
+        final qtyMilli = (it['qty_milli'] as num).toInt();
+        final batchRows = await txn.query(
+          'inventory_batches',
+          where: 'supplier_id = ? AND purchase_date_ms = ? AND qat_type_name = ?',
+          whereArgs: [supplierId, purchaseMs, qatName],
+          limit: 1,
+        );
+        if (batchRows.isNotEmpty) {
+          final b = batchRows.first;
+          final batchId = (b['id'] as num).toInt();
+          final initialQty = (b['initial_qty_milli'] as num).toInt();
+          final remainingQty = (b['remaining_qty_milli'] as num).toInt();
+          final linkedSales = Sqflite.firstIntValue(
+                await txn.rawQuery(
+                  'SELECT COUNT(*) FROM sales_invoice_items WHERE inventory_batch_id = ?',
+                  [batchId],
+                ),
+              ) ??
+              0;
+          if (linkedSales == 0 && remainingQty <= qtyMilli && initialQty <= qtyMilli) {
+            await txn.delete('inventory_batches', where: 'id = ?', whereArgs: [batchId]);
+          } else {
+            final nextInitial = (initialQty - qtyMilli).clamp(0, 1 << 60).toInt();
+            final nextRemaining = (remainingQty - qtyMilli).clamp(0, nextInitial).toInt();
+            await txn.update(
+              'inventory_batches',
+              {
+                'initial_qty_milli': nextInitial,
+                'remaining_qty_milli': nextRemaining,
+              },
+              where: 'id = ?',
+              whereArgs: [batchId],
+            );
+          }
+        }
+      }
+
       if (!isArchived) {
         await _adjustSupplierBalance(
           txn,
-          supplierId: (r['supplier_id'] as num).toInt(),
+          supplierId: supplierId,
           currency: CurrencyCode.fromRaw(r['currency_code']?.toString()),
           deltaMinor: -(r['remaining_amount_minor'] as num).toInt(),
         );
@@ -2297,6 +2344,9 @@ class QatRepository {
   // Dashboard, Reports & Statements (Zero Currency Mixing)
   // ---------------------------------------------------------------------------
 
+  static bool _isDirectDebtEntry(Sale s) =>
+      s.invoiceNumber.startsWith('DEBT-') || s.status == 'دين مباشر';
+
   Future<Map<CurrencyCode, CurrencyDashboardMetrics>> getDashboardMetrics({
     String? fromIso,
     String? toIso,
@@ -2327,7 +2377,7 @@ class QatRepository {
       int salesDeposit = 0;
       int totalSoldQtyMilli = 0;
       int cogs = 0;
-      for (final s in sales.where((e) => e.currency == cur)) {
+      for (final s in sales.where((e) => e.currency == cur && !_isDirectDebtEntry(e))) {
         salesTotal += s.totalAmountMinor;
         salesPaid += s.paidAmountMinor;
         salesCredit += s.remainingAmountMinor;
@@ -2358,8 +2408,14 @@ class QatRepository {
         supplierSurplus += p.overpaymentSurplusMinor;
       }
 
+      // Exclude non-cash supplier returns ('مرتجع') from cash-box outflow
       final supPay = supPayments
-          .where((p) => p.currency == cur && inDateRange(p.dateIso))
+          .where(
+            (p) =>
+                p.currency == cur &&
+                inDateRange(p.dateIso) &&
+                p.paymentMethod != 'مرتجع',
+          )
           .fold<int>(0, (a, p) => a + p.amountMinor);
 
       final expTotal = expenses
@@ -2457,7 +2513,7 @@ class QatRepository {
     final salesTotalByCur = <CurrencyCode, int>{};
     final costSoldByCur = <CurrencyCode, int>{};
 
-    for (final s in sales) {
+    for (final s in sales.where((e) => !_isDirectDebtEntry(e))) {
       salesTotalByCur[s.currency] = (salesTotalByCur[s.currency] ?? 0) + s.totalAmountMinor;
       creditByCur[s.currency] = (creditByCur[s.currency] ?? 0) + s.remainingAmountMinor;
       final pm = s.effectivePaymentMethodLabel;
@@ -2524,8 +2580,11 @@ class QatRepository {
     final taxes = await getTaxEntries(fromIso: boundFromIso, toIso: boundToIso);
 
     final salesByDay = <String, int>{};
-    for (final s in sales.where((e) => e.currency == currency)) {
+    final cogsByDay = <String, int>{};
+    for (final s in sales.where((e) => e.currency == currency && !_isDirectDebtEntry(e))) {
       salesByDay[s.dateIso] = (salesByDay[s.dateIso] ?? 0) + s.totalAmountMinor;
+      final dayCogs = s.items.fold<int>(0, (sum, it) => sum + it.estimatedCostMinor);
+      cogsByDay[s.dateIso] = (cogsByDay[s.dateIso] ?? 0) + dayCogs;
     }
     final expByDay = <String, int>{};
     for (final e in expenses.where((e) => e.currency == currency)) {
@@ -2545,6 +2604,7 @@ class QatRepository {
         shortLabel: shortLabel,
         salesMinor: salesByDay[iso] ?? 0,
         expensesMinor: expByDay[iso] ?? 0,
+        cogsMinor: cogsByDay[iso] ?? 0,
       ));
     }
     return points;
@@ -2562,11 +2622,14 @@ class QatRepository {
     for (final cur in CurrencyCode.values) {
       final rawEvents = <({int ms, String iso, String ref, String desc, int debit, int credit})>[];
       for (final s in allSales.where((e) => e.currency == cur)) {
+        final isDebt = _isDirectDebtEntry(s);
         rawEvents.add((
           ms: s.dateMs,
           iso: s.dateIso,
           ref: s.invoiceNumber,
-          desc: 'فاتورة مبيعات (${s.effectivePaymentMethodLabel})',
+          desc: isDebt
+              ? (s.notes.isNotEmpty ? 'دين مباشر — ${s.notes}' : 'دين مباشر')
+              : 'فاتورة مبيعات (${s.effectivePaymentMethodLabel})',
           debit: s.totalAmountMinor,
           credit: s.paidAmountMinor,
         ));
@@ -2657,11 +2720,14 @@ class QatRepository {
         ));
       }
       for (final p in payments.where((e) => e.currency == cur)) {
+        final isReturn = p.paymentMethod == 'مرتجع';
         rawEvents.add((
           ms: p.dateMs,
           iso: p.dateIso,
-          ref: 'PAY-${p.id}',
-          desc: 'سند صرف (${p.paymentMethod}) ${p.notes}'.trim(),
+          ref: isReturn ? 'RET-${p.id}' : 'PAY-${p.id}',
+          desc: isReturn
+              ? (p.notes.isNotEmpty ? p.notes : 'سند مرتجع لمورد')
+              : 'سند صرف (${p.paymentMethod}) ${p.notes}'.trim(),
           debit: 0,
           credit: p.amountMinor,
         ));

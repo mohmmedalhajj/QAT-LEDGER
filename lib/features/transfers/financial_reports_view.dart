@@ -333,7 +333,10 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
                         fromIso: _fromIso,
                         toIso: _toIso,
                       );
-                      await Printing.layoutPdf(onLayout: (_) async => pdf);
+                      await Printing.layoutPdf(
+                        name: PdfExportService.buildArabicPdfFileName('المالي'),
+                        onLayout: (_) async => pdf,
+                      );
                     },
                     icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
                   ),

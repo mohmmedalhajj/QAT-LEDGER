@@ -320,7 +320,11 @@ class MainActivity : FlutterActivity() {
         val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         val adapter: BluetoothAdapter? = manager?.adapter
         if (adapter == null) {
-            result.success(emptyList<Map<String, String>>())
+            result.error("BT_UNSUPPORTED", "هذا الجهاز لا يدعم البلوتوث أو لا يتوفر محول بلوتوث فعلي.", null)
+            return
+        }
+        if (!adapter.isEnabled) {
+            result.error("BT_OFF", "البلوتوث متوقف حالياً. قم بتفعيل البلوتوث ثم أعد المحاولة.", null)
             return
         }
         val list = adapter.bondedDevices.orEmpty().map { dev: BluetoothDevice ->

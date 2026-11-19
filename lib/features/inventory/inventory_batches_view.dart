@@ -1008,6 +1008,8 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                                         importWeights: ctrl.importWeights,
                                       );
                                       await Printing.layoutPdf(
+                                        name: PdfExportService
+                                            .buildArabicPdfFileName('جرد_المخزون'),
                                         onLayout: (_) async => bytes,
                                       );
                                     },

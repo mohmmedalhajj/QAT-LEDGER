@@ -530,14 +530,22 @@ abstract final class AppTheme {
       );
 
   static ThemeData _build(QatPalette p, Brightness brightness) {
+    final onPrimary =
+        ThemeData.estimateBrightnessForColor(p.brand) == Brightness.dark
+            ? Colors.white
+            : const Color(0xFF031B10);
+    final onSecondary =
+        ThemeData.estimateBrightnessForColor(p.accent) == Brightness.dark
+            ? Colors.white
+            : Colors.black;
     final scheme = ColorScheme(
       brightness: brightness,
       primary: p.brand,
-      onPrimary: p.isDark ? const Color(0xFF031B10) : Colors.white,
+      onPrimary: onPrimary,
       primaryContainer: p.brandSoft,
       onPrimaryContainer: p.brand,
       secondary: p.accent,
-      onSecondary: p.isDark ? Colors.black : Colors.white,
+      onSecondary: onSecondary,
       secondaryContainer: p.accentSoft,
       onSecondaryContainer: p.accent,
       surface: p.card,

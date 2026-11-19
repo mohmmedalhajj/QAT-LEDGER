@@ -222,9 +222,15 @@ class PlatformBridge {
   }
 
   Future<List<BondedPrinter>> getBondedPrinters() async {
+    final res = await getBondedPrintersWithStatus();
+    return res.printers;
+  }
+
+  Future<({List<BondedPrinter> printers, String? statusMessage})>
+      getBondedPrintersWithStatus() async {
     try {
       final items = await _channel.invokeListMethod<dynamic>('getBondedPrinters');
-      if (items == null) return const [];
+      if (items == null) return (printers: const <BondedPrinter>[], statusMessage: null);
       final printers = items
           .whereType<Map<dynamic, dynamic>>()
           .map(
@@ -236,12 +242,22 @@ class PlatformBridge {
           .where((p) => p.address.isNotEmpty)
           .toList();
       printers.sort((a, b) => (b.isLikelyPrinter ? 1 : 0) - (a.isLikelyPrinter ? 1 : 0));
-      return printers;
+      return (
+        printers: printers,
+        statusMessage: printers.isEmpty
+            ? 'لا توجد طابعات بلوتوث مقترنة في إعدادات الجهاز حالياً.'
+            : null,
+      );
     } on MissingPluginException {
-      return const [];
+      return (printers: const <BondedPrinter>[], statusMessage: null);
+    } on PlatformException catch (e) {
+      return (
+        printers: const <BondedPrinter>[],
+        statusMessage: e.message ?? 'تعذر الوصول إلى البلوتوث.',
+      );
     } on FlutterError catch (e) {
       if (!_isUninitializedBindingError(e)) rethrow;
-      return const [];
+      return (printers: const <BondedPrinter>[], statusMessage: null);
     }
   }
 

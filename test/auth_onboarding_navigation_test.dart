@@ -161,6 +161,18 @@ void main() {
 
     await ctrl3.logout();
     expect(ctrl3.isLoggedIn, false);
+
+    // Backup package bytes (.qatbackup) + inspectBackupFile round-trip
+    final pkg = await ctrl3.backupService.buildBackupPackageBytes(
+      stagingDir: p.join(tempDir.path, 'qat_bak'),
+      appEdition: 'customer',
+    );
+    expect(pkg.metadata.fileName.endsWith('.qatbackup'), true);
+    expect(pkg.bytes.isNotEmpty, true);
+    final inspect = await ctrl3.backupService.inspectBackupFile(pkg.metadata.filePath);
+    expect(inspect.isValid, true);
+    expect(inspect.fileName, pkg.metadata.fileName);
+
     await dbService3.close();
   });
 }

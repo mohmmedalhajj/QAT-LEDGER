@@ -393,6 +393,83 @@ void main() {
       await repo.deleteInventoryReceiver(recvId);
       expect(await repo.getInventoryReceivers(), isEmpty);
 
+      // 9. Supplier return ('مرتجع') excludes cash outflow, Direct debt ('DEBT-*') excludes retail sales,
+      //    DailyChartPoint deducts COGS, and deleteSupplierPurchase cleans linked stock batches.
+      final freshSupId = await repo.upsertSupplier(name: 'مورد المرتجع والحذف');
+      final freshPurId = await repo.makeSupplierPurchase(
+        supplierId: freshSupId,
+        supplierName: 'مورد المرتجع والحذف',
+        items: const [
+          NewPurchaseItemInput(
+            qatTypeName: 'صنف حذفي',
+            qtyMilli: 4000,
+            unit: 'ربطة',
+            buyPriceMinor: 50000,
+            sellPriceMinor: 80000,
+          ),
+        ],
+        currency: CurrencyCode.yer,
+        paymentType: PaymentType.credit,
+        dateMs: customMs,
+      );
+      final batchesBeforeDel = (await repo.getInventoryBatches())
+          .where((b) => b.supplierId == freshSupId)
+          .toList();
+      expect(batchesBeforeDel.length, 1);
+
+      await repo.addSupplierReturn(
+        supplierId: freshSupId,
+        supplierName: 'مورد المرتجع والحذف',
+        amountMinor: 50000,
+        currency: CurrencyCode.yer,
+        inventoryBatchId: batchesBeforeDel.first.id,
+        returnedQtyMilli: 1000,
+        itemName: 'صنف حذفي',
+        dateMs: customMs,
+      );
+
+      final freshCustId = await repo.upsertCustomer(name: 'عميل الدين المباشر');
+      await repo.addDirectCustomerDebt(
+        customerId: freshCustId,
+        customerName: 'عميل الدين المباشر',
+        amountMinor: 75000,
+        currency: CurrencyCode.yer,
+        statement: 'دين مباشر قديم',
+        dateMs: customMs,
+      );
+
+      final dayMetrics = await repo.getDashboardMetrics(
+        fromIso: '2026-10-15',
+        toIso: '2026-10-15',
+      );
+      final mYer = dayMetrics[CurrencyCode.yer]!;
+      // Only the 150000 retail sale counts in salesTotalMinor (NOT the 75000 direct debt)
+      expect(mYer.salesTotalMinor, 150000);
+      // Supplier return ('مرتجع') must NOT inflate cash-box supplierPaymentsMinor
+      expect(mYer.supplierPaymentsMinor, 0);
+      // Direct debt must still count in customer debt balance
+      expect(
+        (await repo.getCustomers())
+            .firstWhere((c) => c.id == freshCustId)
+            .balanceFor(CurrencyCode.yer),
+        75000,
+      );
+
+      final dayChart = await repo.getDailyChartSeries(
+        currency: CurrencyCode.yer,
+        fromIso: '2026-10-15',
+        toIso: '2026-10-15',
+      );
+      expect(dayChart.single.salesMinor, 150000);
+      expect(dayChart.single.cogsMinor, 100000);
+      expect(dayChart.single.profitMinor, 50000);
+
+      await repo.deleteSupplierPurchase(freshPurId);
+      final batchesAfterDel = (await repo.getInventoryBatches())
+          .where((b) => b.supplierId == freshSupId)
+          .toList();
+      expect(batchesAfterDel, isEmpty);
+
       await dbService.close();
     } finally {
       await tempDir.delete(recursive: true);

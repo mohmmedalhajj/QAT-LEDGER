@@ -10,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../core/date_utils.dart';
 import '../../core/platform_bridge.dart';
 import '../../core/theme.dart';
+import '../../data/backup_service.dart';
 import '../../data/models.dart';
 import '../../services/esc_pos_service.dart';
 import '../../state/app_controller.dart';
@@ -26,6 +27,7 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
   List<BondedPrinter> _printers = [];
   List<File> _localBackups = [];
   bool _searchedPrinters = false;
+  String? _btStatusMessage;
   bool _busy = false;
   String? _lastBackupInfo;
 
@@ -43,7 +45,9 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
       final files = dir
           .listSync()
           .whereType<File>()
-          .where((f) => f.path.endsWith('.qbak'))
+          .where(
+            (f) => f.path.endsWith('.qatbackup') || f.path.endsWith('.qbak'),
+          )
           .toList()
         ..sort(
           (a, b) => b.statSync().modified.compareTo(a.statSync().modified),
@@ -52,12 +56,15 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
     } catch (_) {}
   }
 
-  Future<void> _createBackup(AppController ctrl) async {
+  Future<void> _createBackup(
+    AppController ctrl, {
+    bool saveToDevice = false,
+  }) async {
     setState(() => _busy = true);
     try {
       final docs = await getApplicationDocumentsDirectory();
-      final res = await ctrl.backupService.createAtomicBackup(
-        outputDir: '${docs.path}/qat_ledger_backups',
+      final pkg = await ctrl.backupService.buildBackupPackageBytes(
+        stagingDir: '${docs.path}/qat_ledger_backups',
         appEdition: ctrl.editionConfig.edition,
         agencyLogoPath: ctrl.settings.logoPath,
       );
@@ -65,12 +72,30 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
       if (!mounted) return;
       setState(() {
         _lastBackupInfo =
-            'تم إنشاء النسخة (${(res.sizeBytes / 1024).toStringAsFixed(1)} KB)\nSHA-256: ${res.dbSha256.substring(0, 16)}...';
+            '${pkg.metadata.fileName} (${(pkg.metadata.sizeBytes / 1024).toStringAsFixed(1)} KB)\nSHA-256: ${pkg.metadata.dbSha256.substring(0, 16)}...';
       });
-      await Share.shareXFiles(
-        [XFile(res.filePath)],
-        text: 'نسخة احتياطية ميزان القات (.qbak)',
-      );
+      if (saveToDevice) {
+        final savedPath = await FilePicker.platform.saveFile(
+          dialogTitle: 'حفظ النسخة الاحتياطية (.qatbackup)',
+          fileName: pkg.metadata.fileName,
+          bytes: pkg.bytes,
+        );
+        if (!mounted) return;
+        if (savedPath != null && savedPath.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'تم حفظ النسخة الاحتياطية بنجاح: ${pkg.metadata.fileName}',
+              ),
+            ),
+          );
+        }
+      } else {
+        await Share.shareXFiles(
+          [XFile(pkg.metadata.filePath)],
+          text: 'نسخة احتياطية ميزان القات (.qatbackup)',
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -85,26 +110,53 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
     AppController ctrl,
     String path,
   ) async {
+    setState(() => _busy = true);
+    final BackupInspectionResult info;
+    try {
+      info = await ctrl.backupService.inspectBackupFile(path);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (!mounted) return;
+
+    if (!info.isValid) {
+      await showErpConfirmDialog(
+        context,
+        title: 'ملف نسخة احتياطية غير صالح',
+        message: info.errorMessage ?? 'تعذر التحقق من سلامة الملف المختار.',
+        confirmLabel: 'حسناً',
+        cancelLabel: 'إغلاق',
+      );
+      return;
+    }
+
+    final shortSha = info.verifiedSha256.length >= 16
+        ? '${info.verifiedSha256.substring(0, 16)}...'
+        : info.verifiedSha256;
     final confirm = await showErpConfirmDialog(
       context,
       title: 'تأكيد استعادة البيانات',
       message:
-          'سيتم إنشاء نقطة رجوع تلقائية ثم استبدال الدفاتر الحالية بمحتوى الملف المختار. هل تريد المتابعة؟',
+          'الملف: ${info.fileName}\n'
+          'المحتوى: ${info.summaryLine}\n'
+          'SHA-256: $shortSha\n\n'
+          'سيتم إنشاء نقطة رجوع تلقائية ثم استبدال الدفاتر الحالية. هل تريد الاستعادة الآن؟',
       confirmLabel: 'استعادة الآن',
+      destructive: true,
     );
     if (!confirm || !mounted) return;
 
     setState(() => _busy = true);
     try {
       final res = await ctrl.backupService.restoreFromFile(path);
-      await ctrl.reloadAll();
+      await ctrl.handleDatabaseRestored();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             res.wasLegacyRoomDb
                 ? 'تم ترحيل قاعدة Room القديمة بنجاح والتحقق من القيود!'
-                : 'تمت الاستعادة بنجاح مع التحقق من SHA-256!',
+                : 'تمت الاستعادة بنجاح مع التحقق من SHA-256 وسلامة القاعدة!',
           ),
         ),
       );
@@ -140,12 +192,12 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'النسخ الاحتياطي الذري والاستعادة (.qbak / Room .db)',
+                  'النسخ الاحتياطي الذري والاستعادة (.qatbackup / .qbak / Room .db)',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'يتحقق النظام تلقائياً من بصمة SHA-256 وسلامة SQLite وينشئ نقطة رجوع قبل أي استعادة.',
+                  'يتحقق النظام تلقائياً من بصمة SHA-256 وسلامة SQLite والقيود المرجعية، وينشئ نقطة رجوع قبل أي استعادة.',
                   style: TextStyle(fontSize: 12, color: pal.textSecondary),
                 ),
                 if (_busy) ...[
@@ -154,15 +206,25 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
                 ],
                 const SizedBox(height: 12),
                 FilledButton.icon(
-                  onPressed: _busy ? null : () => _createBackup(ctrl),
+                  onPressed: _busy
+                      ? null
+                      : () => _createBackup(ctrl, saveToDevice: true),
+                  icon: const Icon(Icons.save_alt_outlined),
+                  label: const Text('حفظ نسخة احتياطية في الهاتف (.qatbackup)'),
+                ),
+                const SizedBox(height: 8),
+                FilledButton.tonalIcon(
+                  onPressed: _busy
+                      ? null
+                      : () => _createBackup(ctrl, saveToDevice: false),
                   icon: const Icon(Icons.backup_outlined),
-                  label: const Text('إنشاء ومشاركة نسخة احتياطية (.qbak)'),
+                  label: const Text('إنشاء ومشاركة نسخة احتياطية (.qatbackup)'),
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: _busy ? null : () => _restoreBackup(ctrl),
                   icon: const Icon(Icons.restore_page_outlined),
-                  label: const Text('استعادة نسخة (.qbak) أو استيراد Room (.db)'),
+                  label: const Text('فحص واستعادة نسخة (.qatbackup / .qbak / .db)'),
                 ),
                 if (_lastBackupInfo != null) ...[
                   const SizedBox(height: 10),
@@ -206,7 +268,7 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
                             icon: const Icon(Icons.share_outlined, size: 18),
                             onPressed: () => Share.shareXFiles(
                               [XFile(f.path)],
-                              text: 'نسخة احتياطية ميزان القات (.qbak)',
+                              text: 'نسخة احتياطية ميزان القات',
                             ),
                           ),
                           TextButton(
@@ -258,11 +320,12 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
                   onPressed: () async {
-                    final list =
-                        await PlatformBridge.instance.getBondedPrinters();
+                    final res = await PlatformBridge.instance
+                        .getBondedPrintersWithStatus();
                     if (!mounted) return;
                     setState(() {
-                      _printers = list;
+                      _printers = res.printers;
+                      _btStatusMessage = res.statusMessage;
                       _searchedPrinters = true;
                     });
                   },
@@ -271,10 +334,10 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
                 ),
                 if (_searchedPrinters && _printers.isEmpty) ...[
                   const SizedBox(height: 8),
-                  const ErpStatusBanner(
+                  ErpStatusBanner(
                     tone: ErpBannerTone.warning,
                     title: 'لم يتم العثور على طابعات مقترنة',
-                    subtitle:
+                    subtitle: _btStatusMessage ??
                         'تأكد من تشغيل البلوتوث ومنح صلاحية الأجهزة القريبة ثم اقترن بالطابعة من إعدادات Android أولاً.',
                   ),
                 ],
