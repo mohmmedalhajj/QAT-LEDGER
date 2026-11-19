@@ -96,6 +96,7 @@ class AppController extends ChangeNotifier {
   Map<CurrencyCode, CurrencyDashboardMetrics> _filteredMetrics = {};
   List<DailyChartPoint> _chartSeriesYer = [];
   List<DailyChartPoint> _chartSeriesSar = [];
+  List<DailyChartPoint> _chartSeriesUsd = [];
   Map<CurrencyCode, InventoryValuation> _inventoryValuation = {};
   List<QatType> _qatTypes = [];
   List<InventoryBatch> _batches = [];
@@ -147,6 +148,12 @@ class AppController extends ChangeNotifier {
   Map<CurrencyCode, CurrencyDashboardMetrics> get filteredMetrics => _filteredMetrics;
   List<DailyChartPoint> get chartSeriesYer => _chartSeriesYer;
   List<DailyChartPoint> get chartSeriesSar => _chartSeriesSar;
+  List<DailyChartPoint> get chartSeriesUsd => _chartSeriesUsd;
+  Map<CurrencyCode, List<DailyChartPoint>> get dailyCharts => {
+        CurrencyCode.yer: _chartSeriesYer,
+        CurrencyCode.sar: _chartSeriesSar,
+        CurrencyCode.usd: _chartSeriesUsd,
+      };
   Map<CurrencyCode, InventoryValuation> get inventoryValuation => _inventoryValuation;
   List<QatType> get qatTypes => _qatTypes;
   List<InventoryBatch> get batches => _batches;
@@ -501,6 +508,7 @@ class AppController extends ChangeNotifier {
     );
     _chartSeriesYer = await _repo.getDailyChartSeries(currency: CurrencyCode.yer);
     _chartSeriesSar = await _repo.getDailyChartSeries(currency: CurrencyCode.sar);
+    _chartSeriesUsd = await _repo.getDailyChartSeries(currency: CurrencyCode.usd);
     _inventoryValuation = await _repo.getInventoryValuation();
     _qatTypes = await _repo.getQatTypes();
     _batches = await _repo.getInventoryBatches();

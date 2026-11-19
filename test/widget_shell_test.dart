@@ -72,8 +72,10 @@ void main() {
     }
     controller.setSection(2, subTab: 0); // Inventory Batches + Receivers & Matching
     await tester.pumpAndSettle();
-    expect(find.textContaining('المستلمون والمطابقة'), findsOneWidget);
-    await tester.tap(find.textContaining('المستلمون والمطابقة'));
+    final receiversSeg = find.textContaining('المستلمون والمطابقة');
+    expect(receiversSeg, findsOneWidget);
+    await tester.ensureVisible(receiversSeg);
+    await tester.tap(receiversSeg);
     await tester.pumpAndSettle();
     expect(find.text('المطابقة اليومية الشاملة للكميات والمبيعات'), findsOneWidget);
 

@@ -238,7 +238,8 @@ void main() {
         customPath: p.join(tempDir.path, 'dev_a.db'),
       );
       final mgrA = DeveloperKeyManager(prefsA);
-      final infoA = await mgrA.getOrCreateKeyPair();
+      await mgrA.getOrGenerateSigningKeyPair();
+      final infoA = (await mgrA.getPublicKeyInfo())!;
       final seedB64 = await mgrA.exportSigningSeedB64();
       expect(seedB64, isNotNull);
 

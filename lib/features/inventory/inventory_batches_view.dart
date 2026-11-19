@@ -565,44 +565,22 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-            child: SegmentedButton<int>(
-              segments: [
-                const ButtonSegment<int>(
-                  value: 0,
-                  icon: Icon(Icons.inventory_2_outlined, size: 17),
-                  label: Text(
-                    'الدفعات',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                ButtonSegment<int>(
-                  value: 1,
-                  icon: const Icon(Icons.scale_outlined, size: 17),
-                  label: Text(
-                    'أوزان الوارد (${ctrl.importWeights.length})',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                ButtonSegment<int>(
-                  value: 2,
-                  icon: const Icon(Icons.people_alt_outlined, size: 17),
-                  label: Text(
-                    'المستلمون والمطابقة (${ctrl.inventoryReceivers.length})',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-              selected: {_section},
-              onSelectionChanged: (s) {
-                setState(() => _section = s.first);
-                if (s.first == 2) unawaited(_loadMatching(ctrl));
-              },
-            ),
+          SegmentedStrip(
+            tabs: [
+              'الدفعات (${ctrl.batches.length})',
+              'أوزان الوارد (${ctrl.importWeights.length})',
+              'المستلمون والمطابقة (${ctrl.inventoryReceivers.length})',
+            ],
+            icons: const [
+              Icons.inventory_2_outlined,
+              Icons.scale_outlined,
+              Icons.people_alt_outlined,
+            ],
+            selectedIndex: _section,
+            onChanged: (idx) {
+              setState(() => _section = idx);
+              if (idx == 2) unawaited(_loadMatching(ctrl));
+            },
           ),
           if (_section == 2) ...[
             Expanded(
