@@ -611,8 +611,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                                 onPressed: () async {
                                   final init =
                                       QatDateUtils.parseLegacyDate(_matchFromIso)
-                                              ?.date ??
-                                          DateTime.now();
+                                          .date;
                                   final picked = await showDatePicker(
                                     context: context,
                                     initialDate: init,
@@ -641,8 +640,7 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                                 onPressed: () async {
                                   final init =
                                       QatDateUtils.parseLegacyDate(_matchToIso)
-                                              ?.date ??
-                                          DateTime.now();
+                                          .date;
                                   final picked = await showDatePicker(
                                     context: context,
                                     initialDate: init,

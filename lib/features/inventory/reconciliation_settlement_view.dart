@@ -36,8 +36,7 @@ class _ReconciliationSettlementViewState
   bool _savingSettlement = false;
 
   Future<void> _pickSettlementDate(AppController ctrl) async {
-    final init =
-        QatDateUtils.parseLegacyDate(_settlementDateIso)?.date ?? DateTime.now();
+    final init = QatDateUtils.parseLegacyDate(_settlementDateIso).date;
     final picked = await showDatePicker(
       context: context,
       initialDate: init,

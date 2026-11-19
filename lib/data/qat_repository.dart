@@ -2504,20 +2504,18 @@ class QatRepository {
   }) async {
     DateTime anchor = anchorDate ?? DateTime.now();
     if (toIso != null && toIso.isNotEmpty) {
-      final parsedTo = QatDateUtils.parseLegacyDate(toIso)?.date;
-      if (parsedTo != null) anchor = parsedTo;
+      anchor = QatDateUtils.parseLegacyDate(toIso).date;
     }
     var spanDays = days;
     DateTime start = DateTime(anchor.year, anchor.month, anchor.day)
         .subtract(Duration(days: spanDays - 1));
     if (fromIso != null && fromIso.isNotEmpty) {
-      final parsedFrom = QatDateUtils.parseLegacyDate(fromIso)?.date;
-      if (parsedFrom != null) {
-        final rawDays = anchor.difference(parsedFrom).inDays + 1;
-        spanDays = rawDays.clamp(1, 31).toInt();
-        start = DateTime(anchor.year, anchor.month, anchor.day)
-            .subtract(Duration(days: spanDays - 1));
-      }
+      final parsedFrom = QatDateUtils.parseLegacyDate(fromIso).date;
+      final anchorDay = DateTime(anchor.year, anchor.month, anchor.day);
+      final fromDay = DateTime(parsedFrom.year, parsedFrom.month, parsedFrom.day);
+      final rawDays = anchorDay.difference(fromDay).inDays + 1;
+      spanDays = rawDays.clamp(1, 31).toInt();
+      start = anchorDay.subtract(Duration(days: spanDays - 1));
     }
     final boundFromIso = QatDateUtils.toIsoDate(start);
     final boundToIso = QatDateUtils.toIsoDate(anchor);

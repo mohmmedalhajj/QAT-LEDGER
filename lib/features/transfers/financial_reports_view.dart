@@ -480,7 +480,7 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
                 ],
               ),
               const SizedBox(height: 10),
-              if ((ctrl.dailyCharts[cur] ?? const []).isNotEmpty)
+              if ((ctrl.dailyCharts[cur] ?? const <DailyChartPoint>[]).isNotEmpty)
                 _buildReportChartCard(pal, cur, ctrl.dailyCharts[cur]!),
               const SizedBox(height: 8),
             ],

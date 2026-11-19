@@ -306,4 +306,6 @@ class ParsedDate {
   const ParsedDate({required this.epochMs, required this.isoDate});
   final int epochMs;
   final String isoDate;
+
+  DateTime get date => DateTime.fromMillisecondsSinceEpoch(epochMs);
 }
