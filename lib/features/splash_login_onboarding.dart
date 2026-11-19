@@ -852,6 +852,9 @@ class _AgencyOnboardingScreenState extends State<AgencyOnboardingScreen> {
     final isLegacyPendingOwner =
         ctrl.settings.onboardingComplete && ctrl.users.isEmpty;
     final hasLogo = _logoPath.isNotEmpty && File(_logoPath).existsSync();
+    final ImageProvider<Object> logoProvider = hasLogo
+        ? FileImage(File(_logoPath))
+        : const AssetImage('assets/images/app_logo.png');
 
     return Scaffold(
       appBar: AppBar(title: const Text('تهيئة الوكالة وحساب المالك')),
@@ -889,9 +892,7 @@ class _AgencyOnboardingScreenState extends State<AgencyOnboardingScreen> {
                           CircleAvatar(
                             radius: 28,
                             backgroundColor: pal.brandSoft,
-                            backgroundImage: hasLogo
-                                ? FileImage(File(_logoPath)) as ImageProvider<Object>
-                                : const AssetImage('assets/images/app_logo.png'),
+                            backgroundImage: logoProvider,
                           ),
                           const SizedBox(width: 12),
                           Expanded(

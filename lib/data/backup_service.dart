@@ -105,7 +105,7 @@ class BackupService {
     final d = ts.day.toString().padLeft(2, '0');
     final hh = ts.hour.toString().padLeft(2, '0');
     final mm = ts.minute.toString().padLeft(2, '0');
-    return 'نسخة_احتياطية_ميزان_القات_$y-${m}-${d}_$hh-$mm$backupExtension';
+    return 'نسخة_احتياطية_ميزان_القات_$y-$m-${d}_$hh-$mm$backupExtension';
   }
 
   Future<({Uint8List bytes, BackupResult metadata})> buildBackupPackageBytes({

@@ -70,7 +70,7 @@ class DeveloperKeyManager {
   /// Imports a 32-byte Ed25519 seed (Base64, Base64Url, or 64-char Hex) so the developer
   /// can restore or synchronize their signing identity across builds/devices.
   Future<DeveloperKeyInfo> importSigningSeedB64(String rawSeedInput) async {
-    var clean = rawSeedInput.trim().replaceAll(RegExp(r'\s+'), '');
+    final clean = rawSeedInput.trim().replaceAll(RegExp(r'\s+'), '');
     if (clean.isEmpty) {
       throw const FormatException('البذرة فارغة');
     }
