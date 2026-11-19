@@ -28,14 +28,32 @@ class LicenseAndSecurityView extends StatefulWidget {
 
 class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
   final _tokenCtrl = TextEditingController();
-  final _newUserCtrl = TextEditingController(text: 'admin');
+  final _newUserCtrl = TextEditingController();
+  final _currentPassCtrl = TextEditingController();
   final _newPassCtrl = TextEditingController();
+  final _confirmPassCtrl = TextEditingController();
+  bool _seededUsername = false;
+  bool _obscureCurrent = true;
+  bool _obscureNew = true;
+  bool _obscureConfirm = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_seededUsername) {
+      _seededUsername = true;
+      _newUserCtrl.text =
+          context.read<AppController>().currentUser?.username ?? '';
+    }
+  }
 
   @override
   void dispose() {
     _tokenCtrl.dispose();
     _newUserCtrl.dispose();
+    _currentPassCtrl.dispose();
     _newPassCtrl.dispose();
+    _confirmPassCtrl.dispose();
     super.dispose();
   }
 
@@ -511,9 +529,18 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'تغيير بيانات الدخول',
+                  'تغيير بيانات الدخول وأمان الجلسة',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
+                if (ctrl.currentUserLegacyWeakPassword) ...[
+                  const SizedBox(height: 8),
+                  const ErpStatusBanner(
+                    tone: ErpBannerTone.warning,
+                    title: 'تنبيه أمني للحساب المرحّل',
+                    subtitle:
+                        'هذا الحساب يستخدم كلمة مرور قديمة مرحّلة؛ يرجى تحديثها بكلمة مرور قوية الآن.',
+                  ),
+                ],
                 const SizedBox(height: 10),
                 TextField(
                   controller: _newUserCtrl,
@@ -524,12 +551,70 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                 ),
                 const SizedBox(height: 8),
                 TextField(
-                  controller: _newPassCtrl,
-                  obscureText: true,
+                  controller: _currentPassCtrl,
+                  obscureText: _obscureCurrent,
                   textDirection: TextDirection.ltr,
-                  decoration: const InputDecoration(
-                    labelText: 'كلمة المرور الجديدة',
+                  decoration: InputDecoration(
+                    labelText: 'كلمة المرور الحالية',
+                    suffixIcon: IconButton(
+                      onPressed: () =>
+                          setState(() => _obscureCurrent = !_obscureCurrent),
+                      icon: Icon(
+                        _obscureCurrent
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                      ),
+                    ),
                   ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _newPassCtrl,
+                  obscureText: _obscureNew,
+                  textDirection: TextDirection.ltr,
+                  decoration: InputDecoration(
+                    labelText: 'كلمة المرور الجديدة (6 أحرف على الأقل)',
+                    suffixIcon: IconButton(
+                      onPressed: () =>
+                          setState(() => _obscureNew = !_obscureNew),
+                      icon: Icon(
+                        _obscureNew ? Icons.visibility_off : Icons.visibility,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _confirmPassCtrl,
+                  obscureText: _obscureConfirm,
+                  textDirection: TextDirection.ltr,
+                  decoration: InputDecoration(
+                    labelText: 'تأكيد كلمة المرور الجديدة',
+                    suffixIcon: IconButton(
+                      onPressed: () =>
+                          setState(() => _obscureConfirm = !_obscureConfirm),
+                      icon: Icon(
+                        _obscureConfirm
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('طلب تسجيل الدخول عند كل فتح للتطبيق'),
+                  subtitle: const Text(
+                    'عند التعطيل تبقى الجلسة محفوظة حتى تسجيل الخروج يدوياً',
+                  ),
+                  value: ctrl.settings.appLockEnabled,
+                  onChanged: (v) async {
+                    await ctrl.updateSettings(
+                      ctrl.settings.copyWith(appLockEnabled: v),
+                    );
+                  },
                 ),
                 const SizedBox(height: 10),
                 Row(
@@ -538,16 +623,43 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                       child: FilledButton.tonal(
                         onPressed: () async {
                           final messenger = ScaffoldMessenger.of(context);
+                          if (_currentPassCtrl.text.isEmpty) {
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('أدخل كلمة المرور الحالية للتأكيد'),
+                              ),
+                            );
+                            return;
+                          }
+                          if (_newPassCtrl.text != _confirmPassCtrl.text) {
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('تأكيد كلمة المرور الجديدة غير مطابق'),
+                              ),
+                            );
+                            return;
+                          }
+                          final ok = await showErpConfirmDialog(
+                            context,
+                            title: 'تأكيد تغيير بيانات الدخول',
+                            message:
+                                'سيتم تحديث اسم المستخدم وكلمة المرور للحساب الحالي، ولن تتأثر بيانات الوكالة أو الدفاتر.',
+                            confirmLabel: 'تحديث الآن',
+                          );
+                          if (!ok || !mounted) return;
                           try {
                             await ctrl.updateCredentials(
                               newUsername: _newUserCtrl.text,
                               newPassword: _newPassCtrl.text,
+                              currentPassword: _currentPassCtrl.text,
                             );
+                            _currentPassCtrl.clear();
                             _newPassCtrl.clear();
+                            _confirmPassCtrl.clear();
                             if (!mounted) return;
                             messenger.showSnackBar(
                               const SnackBar(
-                                content: Text('تم تحديث كلمة المرور بنجاح'),
+                                content: Text('تم تحديث بيانات الدخول بنجاح'),
                               ),
                             );
                           } catch (e) {
@@ -567,13 +679,13 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                           context,
                           title: 'قفل النظام وتسجيل الخروج',
                           message:
-                              'هل تريد قفل التطبيق والعودة إلى شاشة الدخول؟',
-                          confirmLabel: 'قفل الآن',
+                              'هل تريد قفل التطبيق والعودة إلى شاشة الدخول؟ ستبقى جميع بيانات الوكالة والحسابات محفوظة.',
+                          confirmLabel: 'خروج وقفل',
                         );
-                        if (ok) ctrl.logout();
+                        if (ok) await ctrl.logout();
                       },
                       icon: const Icon(Icons.logout, size: 16),
-                      label: const Text('قفل'),
+                      label: const Text('تسجيل الخروج'),
                     ),
                   ],
                 ),

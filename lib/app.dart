@@ -66,11 +66,11 @@ class _RootGate extends StatelessWidget {
     if (!ctrl.initialized) {
       return const SplashLoadingView();
     }
+    if (ctrl.needsOnboarding) {
+      return const AgencyOnboardingScreen();
+    }
     if (!ctrl.isLoggedIn) {
       return const LoginScreen();
-    }
-    if (!ctrl.settings.onboardingComplete) {
-      return const AgencyOnboardingScreen();
     }
     return const MainShellScreen();
   }
@@ -414,7 +414,7 @@ class _ErpCategorizedDrawer extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '${ctrl.currentUser?.displayName ?? 'admin'} • ${ctrl.licenseStatus.isPro ? 'الباقة الاحترافية PRO' : 'الباقة الأساسية BASIC'}',
+                          '${ctrl.currentUser?.displayName ?? (ctrl.settings.ownerName.isNotEmpty ? ctrl.settings.ownerName : 'المالك')} • ${ctrl.licenseStatus.isPro ? 'الباقة الاحترافية PRO' : 'الباقة الأساسية BASIC'}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -562,7 +562,7 @@ class _ErpCategorizedDrawer extends StatelessWidget {
                   message: 'هل تريد قفل الجلسة والعودة إلى شاشة تسجيل الدخول؟',
                   confirmLabel: 'قفل وخروج',
                 );
-                if (ok) ctrl.logout();
+                if (ok) await ctrl.logout();
               },
             ),
           ],

@@ -199,7 +199,10 @@ class _ReconciliationSettlementViewState
         transferFeesMinor: m.transfersFeesMinor,
         pendingTransfersCount: pendingTransfers,
         notes: _settlementNotesCtrl.text.trim(),
-        createdBy: ctrl.currentUser?.username ?? 'admin',
+        createdBy: ctrl.currentUser?.username ??
+            (ctrl.settings.ownerName.isNotEmpty
+                ? ctrl.settings.ownerName
+                : 'المالك'),
       );
       await ctrl.saveDailySettlement(snap);
       _settlementNotesCtrl.clear();

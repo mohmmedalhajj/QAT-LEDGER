@@ -295,7 +295,7 @@ class DashboardTab extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '${policy.mode.arabicLabel} • ${QatDateUtils.todayIso()} • ${ctrl.currentUser?.displayName ?? 'admin'}',
+                          '${policy.mode.arabicLabel} • ${QatDateUtils.todayIso()} • ${ctrl.currentUser?.displayName ?? (ctrl.settings.ownerName.isNotEmpty ? ctrl.settings.ownerName : 'المالك')}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.bodySmall,

@@ -1,10 +1,10 @@
 import 'dart:convert';
-import 'package:crypto/crypto.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/date_utils.dart';
 import '../core/money.dart';
+import '../core/password_security.dart';
 import '../core/platform_bridge.dart';
 import '../core/theme.dart';
 import '../data/backup_service.dart';
@@ -62,7 +62,12 @@ class AppController extends ChangeNotifier {
   LocalLicenseStore? _licenseStore;
   DeveloperKeyManager? _devKeyManager;
 
-  // Navigation (supports both 12-screen Android routing and legacy 5-section compatibility)
+  static const String _prefSessionLoggedIn = 'qat_session_logged_in_v1';
+  static const String _prefSessionUsername = 'qat_session_username_v1';
+  static const String _prefSessionIssuedMs = 'qat_session_issued_ms_v1';
+  static const String _prefRememberedUsername = 'qat_last_username_v1';
+
+  // Navigation (supports 12-screen routing, history back-stack & unsaved-edit guards)
   AppScreenRoute _activeRoute = AppScreenRoute.dashboard;
   int _sectionIndex = 0;
   int _salesSubTab = 0;
@@ -71,6 +76,8 @@ class AppController extends ChangeNotifier {
   int _settingsSubTab = 0;
   int? _statementCustomerId;
   int? _statementSupplierId;
+  final List<({AppScreenRoute route, int section, int subTab})> _navHistory = [];
+  final Map<String, bool Function()> _unsavedGuards = {};
 
   // Active Date/Period Filter (Today, Yesterday, Week 1-5, Month, Year, Custom Range, All)
   LedgerPeriodFilter _periodFilter = LedgerPeriodFilter.defaultToday();
@@ -78,6 +85,8 @@ class AppController extends ChangeNotifier {
   // Boot & Auth
   bool _initialized = false;
   bool _isLoggedIn = false;
+  String? _rememberedUsername;
+  bool _currentUserLegacyWeakPassword = false;
   EditionConfig _editionConfig = const EditionConfig(
     edition: 'customer',
     publicKeysCsv: '',
@@ -96,7 +105,6 @@ class AppController extends ChangeNotifier {
   Map<CurrencyCode, CurrencyDashboardMetrics> _filteredMetrics = {};
   List<DailyChartPoint> _chartSeriesYer = [];
   List<DailyChartPoint> _chartSeriesSar = [];
-  List<DailyChartPoint> _chartSeriesUsd = [];
   Map<CurrencyCode, InventoryValuation> _inventoryValuation = {};
   List<QatType> _qatTypes = [];
   List<InventoryBatch> _batches = [];
@@ -123,6 +131,9 @@ class AppController extends ChangeNotifier {
   // Getters
   bool get initialized => _initialized;
   bool get isLoggedIn => _isLoggedIn;
+  bool get needsOnboarding => !_settings.onboardingComplete || _users.isEmpty;
+  String? get rememberedUsername => _rememberedUsername;
+  bool get currentUserLegacyWeakPassword => _currentUserLegacyWeakPassword;
   EditionConfig get editionConfig => _editionConfig;
   bool get isDeveloperEdition => _editionConfig.isDeveloper;
   String get installationId => _installationId;
@@ -142,17 +153,23 @@ class AppController extends ChangeNotifier {
   int get settingsSubTab => _settingsSubTab;
   int? get statementCustomerId => _statementCustomerId;
   int? get statementSupplierId => _statementSupplierId;
+  bool get canNavigateBack => _navHistory.isNotEmpty;
+  bool get hasUnsavedChanges => _unsavedGuards.values.any((fn) {
+        try {
+          return fn();
+        } catch (_) {
+          return false;
+        }
+      });
   LedgerPeriodFilter get periodFilter => _periodFilter;
 
   Map<CurrencyCode, CurrencyDashboardMetrics> get todayMetrics => _todayMetrics;
   Map<CurrencyCode, CurrencyDashboardMetrics> get filteredMetrics => _filteredMetrics;
   List<DailyChartPoint> get chartSeriesYer => _chartSeriesYer;
   List<DailyChartPoint> get chartSeriesSar => _chartSeriesSar;
-  List<DailyChartPoint> get chartSeriesUsd => _chartSeriesUsd;
   Map<CurrencyCode, List<DailyChartPoint>> get dailyCharts => {
         CurrencyCode.yer: _chartSeriesYer,
         CurrencyCode.sar: _chartSeriesSar,
-        CurrencyCode.usd: _chartSeriesUsd,
       };
   Map<CurrencyCode, InventoryValuation> get inventoryValuation => _inventoryValuation;
   List<QatType> get qatTypes => _qatTypes;
@@ -207,9 +224,11 @@ class AppController extends ChangeNotifier {
     }
 
     _migrationSummary = await _migrator.migrateIfNeeded();
-    await _ensureDefaultCredentials();
+    await _consumeLegacyMigratedSecurityAndLicense();
+    await _loadUsersAndPermissions();
     await refreshLicense();
     await reloadAll();
+    await _restorePersistedSession();
 
     // Sync launcher display identity from migrated/saved branding
     if (_settings.appDisplayName.isNotEmpty || _settings.logoPath.isNotEmpty) {
@@ -225,60 +244,95 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _ensureDefaultCredentials() async {
-    final user = await _repo.getSetting('auth_username');
-    final passHash = await _repo.getSetting('auth_password_sha256');
-    if (user == null || user.isEmpty) {
-      await _repo.setSetting('auth_username', 'admin');
+  Future<void> _consumeLegacyMigratedSecurityAndLicense() async {
+    final migPerms = await _repo.getSetting('migrated_section_permissions_json');
+    final existingPerms = await _repo.getSetting('section_permissions_json');
+    if (migPerms != null &&
+        migPerms.isNotEmpty &&
+        (existingPerms == null || existingPerms.isEmpty)) {
+      await _repo.setSetting('section_permissions_json', migPerms);
     }
-    if (passHash == null || passHash.isEmpty) {
-      await _repo.setSetting('auth_password_sha256', _hashPassword('123456'));
+
+    final migPass = await _repo.getSetting('migrated_legacy_admin_password');
+    final existingUsers = await _repo.getSetting('app_users_json');
+    if (migPass != null &&
+        migPass.isNotEmpty &&
+        (existingUsers == null || existingUsers.isEmpty)) {
+      final legacyUser = (await _repo.getSetting('auth_username'))?.trim();
+      final uname = (legacyUser != null && legacyUser.isNotEmpty) ? legacyUser : 'owner';
+      final user = AppUser(
+        username: uname,
+        displayName: 'مدير الوكالة',
+        role: UserRole.admin,
+        passwordSha256: PasswordSecurity.hashPassword(migPass),
+        canDelete: true,
+        canEditPrices: true,
+        canManageSettings: true,
+        canViewReports: true,
+      );
+      await _repo.setSetting('app_users_json', jsonEncode([user.toJson()]));
+      await _repo.setSetting('migrated_legacy_admin_password', '');
     }
-    await _loadUsersAndPermissions();
+
+    final migLicense = await _repo.getSetting('migrated_legacy_license_doc');
+    if (migLicense != null && migLicense.isNotEmpty && _licenseStore != null) {
+      final existingRaw = await _licenseStore!.loadRawLicense();
+      if (existingRaw == null || existingRaw.trim().isEmpty) {
+        final candidate = await activateLicense(migLicense);
+        if (candidate.isValid) {
+          await _repo.setSetting('migrated_legacy_license_doc', '');
+        }
+      }
+    }
   }
 
   Future<void> _loadUsersAndPermissions() async {
-    final savedUser = (await _repo.getSetting('auth_username')) ?? 'admin';
-    final savedHash =
-        (await _repo.getSetting('auth_password_sha256')) ?? _hashPassword('123456');
+    final loaded = <AppUser>[];
     final usersJson = await _repo.getSetting('app_users_json');
     if (usersJson != null && usersJson.isNotEmpty) {
       try {
         final Object? decoded = jsonDecode(usersJson);
         if (decoded is List<Object?>) {
-          _users = decoded
-              .whereType<Map<Object?, Object?>>()
-              .map(
-                (m) => AppUser.fromJson(
-                  m.map<String, dynamic>(
-                    (k, v) => MapEntry<String, dynamic>(k.toString(), v),
+          loaded.addAll(
+            decoded.whereType<Map<Object?, Object?>>().map(
+                  (m) => AppUser.fromJson(
+                    m.map<String, dynamic>(
+                      (k, v) => MapEntry<String, dynamic>(k.toString(), v),
+                    ),
                   ),
                 ),
-              )
-              .toList();
+          );
         }
       } catch (_) {
-        // Ignore malformed persisted user list and fall back to defaults.
+        // Ignore malformed persisted user list.
       }
     }
-    if (_users.isEmpty) {
-      _users = [
-        AppUser(
-          username: savedUser,
-          displayName: 'المدير العام',
-          role: UserRole.admin,
-          passwordSha256: savedHash,
-          canDelete: true,
-          canEditPrices: true,
-          canManageSettings: true,
-          canViewReports: true,
-        ),
-      ];
-      await _repo.setSetting(
-        'app_users_json',
-        jsonEncode(_users.map((u) => u.toJson()).toList()),
-      );
+
+    // Legacy Flutter DB compatibility: if an existing migrated database has
+    // auth_username + auth_password_sha256 without app_users_json, preserve it.
+    if (loaded.isEmpty) {
+      final legacyUser = (await _repo.getSetting('auth_username'))?.trim() ?? '';
+      final legacyHash = (await _repo.getSetting('auth_password_sha256'))?.trim() ?? '';
+      if (legacyUser.isNotEmpty && legacyHash.isNotEmpty) {
+        loaded.add(
+          AppUser(
+            username: legacyUser,
+            displayName: 'مدير الوكالة',
+            role: UserRole.admin,
+            passwordSha256: legacyHash,
+            canDelete: true,
+            canEditPrices: true,
+            canManageSettings: true,
+            canViewReports: true,
+          ),
+        );
+        await _repo.setSetting(
+          'app_users_json',
+          jsonEncode(loaded.map((u) => u.toJson()).toList()),
+        );
+      }
     }
+    _users = loaded;
 
     final secJson = await _repo.getSetting('section_permissions_json');
     if (secJson != null && secJson.isNotEmpty) {
@@ -297,63 +351,265 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  String _hashPassword(String raw) {
-    return sha256.convert(utf8.encode('QAT_LEDGER_AUTH:$raw')).toString();
+  Future<void> _restorePersistedSession() async {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    final rem = prefs.getString(_prefRememberedUsername)?.trim();
+    if (rem != null && rem.isNotEmpty && _users.any((u) => u.username == rem)) {
+      _rememberedUsername = rem;
+    } else {
+      _rememberedUsername = null;
+    }
+
+    final sessionActive = prefs.getBool(_prefSessionLoggedIn) ?? false;
+    final sessionUser = prefs.getString(_prefSessionUsername)?.trim() ?? '';
+    if (!sessionActive || sessionUser.isEmpty || _settings.appLockEnabled) {
+      _isLoggedIn = false;
+      _currentUser = null;
+      return;
+    }
+
+    final matched = _users.where((u) => u.username == sessionUser).toList();
+    if (matched.isEmpty || !_settings.onboardingComplete) {
+      await _clearSessionStorage(clearRemembered: false);
+      _isLoggedIn = false;
+      _currentUser = null;
+      return;
+    }
+    _currentUser = matched.first;
+    _isLoggedIn = true;
+    _currentUserLegacyWeakPassword =
+        PasswordSecurity.isKnownWeakLegacyHash(matched.first.passwordSha256);
   }
 
-  Future<bool> login(String username, String password) async {
+  Future<void> _persistSession(AppUser user, {bool rememberUsername = true}) async {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    await prefs.setBool(_prefSessionLoggedIn, true);
+    await prefs.setString(_prefSessionUsername, user.username);
+    await prefs.setInt(_prefSessionIssuedMs, DateTime.now().millisecondsSinceEpoch);
+    if (rememberUsername && _settings.rememberMe) {
+      await prefs.setString(_prefRememberedUsername, user.username);
+      _rememberedUsername = user.username;
+    } else if (!_settings.rememberMe) {
+      await prefs.remove(_prefRememberedUsername);
+      _rememberedUsername = null;
+    }
+  }
+
+  Future<void> _clearSessionStorage({bool clearRemembered = false}) async {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    await prefs.remove(_prefSessionLoggedIn);
+    await prefs.remove(_prefSessionUsername);
+    await prefs.remove(_prefSessionIssuedMs);
+    if (clearRemembered) {
+      await prefs.remove(_prefRememberedUsername);
+      _rememberedUsername = null;
+    }
+  }
+
+  Future<void> completeFirstRunOnboarding({
+    required AgencySettings agencySettings,
+    required String ownerDisplayName,
+    required String username,
+    required String password,
+    required String confirmPassword,
+  }) async {
+    final cleanAgency = agencySettings.agencyName.trim();
+    final cleanOwner = ownerDisplayName.trim();
+    final cleanUser = username.trim();
+
+    if (cleanAgency.isEmpty) {
+      throw ArgumentError('يرجى إدخال اسم الوكالة.');
+    }
+    if (cleanOwner.isEmpty) {
+      throw ArgumentError('يرجى إدخال اسم المالك أو المدير.');
+    }
+    if (cleanUser.length < 3 || cleanUser.contains(' ')) {
+      throw ArgumentError('اسم المستخدم يجب أن يكون 3 أحرف على الأقل وبدون مسافات.');
+    }
+    if (password.length < 6) {
+      throw ArgumentError('كلمة المرور يجب أن تكون 6 أحرف على الأقل.');
+    }
+    if (password != confirmPassword) {
+      throw ArgumentError('كلمتا المرور غير متطابقتين.');
+    }
+
+    final ownerUser = AppUser(
+      username: cleanUser,
+      displayName: cleanOwner,
+      role: UserRole.admin,
+      passwordSha256: PasswordSecurity.hashPassword(password),
+      canDelete: true,
+      canEditPrices: true,
+      canManageSettings: true,
+      canViewReports: true,
+    );
+
+    final nextUsers = _users.isEmpty
+        ? <AppUser>[ownerUser]
+        : <AppUser>[
+            ownerUser,
+            ..._users.where((u) => u.username != cleanUser),
+          ];
+
+    final finalSettings = agencySettings.copyWith(
+      agencyName: cleanAgency,
+      ownerName: cleanOwner,
+      onboardingComplete: true,
+    );
+    await _repo.saveAgencySettings(finalSettings);
+    await _repo.setSetting(
+      'app_users_json',
+      jsonEncode(nextUsers.map((u) => u.toJson()).toList()),
+    );
+    await _repo.setSetting('auth_username', '');
+    await _repo.setSetting('auth_password_sha256', '');
+
+    _settings = finalSettings;
+    _users = nextUsers;
+    _currentUser = ownerUser;
+    _isLoggedIn = true;
+    _currentUserLegacyWeakPassword = false;
+    _navHistory.clear();
+    _activeRoute = AppScreenRoute.dashboard;
+    _sectionIndex = 0;
+
+    await _persistSession(ownerUser);
+    await PlatformBridge.instance.applyLauncherIdentity(
+      appName: finalSettings.appDisplayName.isNotEmpty
+          ? finalSettings.appDisplayName
+          : finalSettings.agencyName,
+      logoPath: finalSettings.logoPath,
+    );
+    await reloadAll();
+  }
+
+  Future<bool> login(
+    String username,
+    String password, {
+    bool rememberMe = true,
+  }) async {
     await _loadUsersAndPermissions();
     final trimmed = username.trim();
-    final hash = _hashPassword(password);
-    for (final u in _users) {
-      if (u.username == trimmed && u.passwordSha256 == hash) {
-        _currentUser = u;
+    if (trimmed.isEmpty || password.isEmpty) return false;
+
+    for (int i = 0; i < _users.length; i++) {
+      final u = _users[i];
+      if (u.username == trimmed &&
+          PasswordSecurity.verifyPassword(password, u.passwordSha256)) {
+        final wasWeak = PasswordSecurity.isKnownWeakLegacyHash(u.passwordSha256);
+        var activeUser = u;
+        if (PasswordSecurity.needsRehash(u.passwordSha256)) {
+          activeUser = AppUser(
+            username: u.username,
+            displayName: u.displayName,
+            role: u.role,
+            passwordSha256: PasswordSecurity.hashPassword(password),
+            canDelete: u.canDelete,
+            canEditPrices: u.canEditPrices,
+            canManageSettings: u.canManageSettings,
+            canViewReports: u.canViewReports,
+          );
+          _users[i] = activeUser;
+          await _repo.setSetting(
+            'app_users_json',
+            jsonEncode(_users.map((x) => x.toJson()).toList()),
+          );
+        }
+        if (_settings.rememberMe != rememberMe) {
+          _settings = _settings.copyWith(rememberMe: rememberMe);
+          await _repo.setSetting('remember_me', rememberMe ? '1' : '0');
+        }
+        _currentUser = activeUser;
         _isLoggedIn = true;
+        _currentUserLegacyWeakPassword = wasWeak;
+        await _persistSession(activeUser, rememberUsername: rememberMe);
         notifyListeners();
         return true;
       }
     }
-    final savedUser = (await _repo.getSetting('auth_username')) ?? 'admin';
-    final savedHash =
-        (await _repo.getSetting('auth_password_sha256')) ?? _hashPassword('123456');
-    if (trimmed == savedUser && hash == savedHash) {
-      _currentUser = AppUser(
-        username: savedUser,
-        displayName: 'المدير العام',
-        role: UserRole.admin,
-        passwordSha256: savedHash,
-      );
-      _isLoggedIn = true;
-      notifyListeners();
-      return true;
-    }
     return false;
   }
 
-  void logout() {
+  Future<void> logout() async {
+    await _clearSessionStorage(clearRemembered: false);
     _isLoggedIn = false;
     _currentUser = null;
+    _currentUserLegacyWeakPassword = false;
+    _navHistory.clear();
+    _unsavedGuards.clear();
+    _sectionIndex = 0;
+    _activeRoute = AppScreenRoute.dashboard;
+    notifyListeners();
+  }
+
+  Future<void> handleDatabaseRestored() async {
+    _navHistory.clear();
+    _unsavedGuards.clear();
+    await _loadUsersAndPermissions();
+    await reloadAll();
+    if (_users.isEmpty || !_settings.onboardingComplete) {
+      await _clearSessionStorage(clearRemembered: true);
+      _isLoggedIn = false;
+      _currentUser = null;
+    } else if (_currentUser != null) {
+      final match =
+          _users.where((u) => u.username == _currentUser!.username).toList();
+      if (match.isEmpty) {
+        await _clearSessionStorage(clearRemembered: true);
+        _isLoggedIn = false;
+        _currentUser = null;
+      } else {
+        _currentUser = match.first;
+        await _persistSession(match.first);
+      }
+    }
+    await PlatformBridge.instance.applyLauncherIdentity(
+      appName: _settings.appDisplayName.isNotEmpty
+          ? _settings.appDisplayName
+          : _settings.agencyName,
+      logoPath: _settings.logoPath,
+    );
     notifyListeners();
   }
 
   Future<void> updateCredentials({
     required String newUsername,
     required String newPassword,
+    String? currentPassword,
   }) async {
-    if (newUsername.trim().isEmpty || newPassword.length < 4) {
-      throw ArgumentError('اسم المستخدم مطلوب وكلمة المرور 4 أحرف على الأقل.');
-    }
     final cleanUser = newUsername.trim();
-    final newHash = _hashPassword(newPassword);
-    await _repo.setSetting('auth_username', cleanUser);
-    await _repo.setSetting('auth_password_sha256', newHash);
+    if (cleanUser.length < 3 || cleanUser.contains(' ')) {
+      throw ArgumentError('اسم المستخدم يجب أن يكون 3 أحرف على الأقل وبدون مسافات.');
+    }
+    if (newPassword.length < 6) {
+      throw ArgumentError('كلمة المرور يجب أن تكون 6 أحرف على الأقل.');
+    }
+    if (currentPassword != null && _currentUser != null) {
+      if (!PasswordSecurity.verifyPassword(
+        currentPassword,
+        _currentUser!.passwordSha256,
+      )) {
+        throw ArgumentError('كلمة المرور الحالية غير صحيحة.');
+      }
+    }
 
+    final newHash = PasswordSecurity.hashPassword(newPassword);
     final targetUsername =
         _currentUser?.username ?? (_users.isEmpty ? cleanUser : _users.first.username);
+    if (cleanUser != targetUsername &&
+        _users.any((u) => u.username == cleanUser)) {
+      throw ArgumentError('اسم المستخدم "$cleanUser" مستخدم بالفعل لحساب آخر.');
+    }
+
     final idx = _users.indexWhere((u) => u.username == targetUsername);
     final updatedUser = AppUser(
       username: cleanUser,
-      displayName: idx >= 0 ? _users[idx].displayName : 'المدير العام',
+      displayName: idx >= 0
+          ? _users[idx].displayName
+          : (_settings.ownerName.isNotEmpty ? _settings.ownerName : cleanUser),
       role: idx >= 0 ? _users[idx].role : UserRole.admin,
       passwordSha256: newHash,
       canDelete: idx >= 0 ? _users[idx].canDelete : true,
@@ -367,10 +623,12 @@ class AppController extends ChangeNotifier {
       _users.add(updatedUser);
     }
     _currentUser = updatedUser;
+    _currentUserLegacyWeakPassword = false;
     await _repo.setSetting(
       'app_users_json',
       jsonEncode(_users.map((u) => u.toJson()).toList()),
     );
+    await _persistSession(updatedUser);
     notifyListeners();
   }
 
@@ -385,23 +643,24 @@ class AppController extends ChangeNotifier {
     required bool canViewReports,
   }) async {
     final clean = username.trim();
-    if (clean.isEmpty) {
-      throw ArgumentError('اسم المستخدم مطلوب.');
+    if (clean.length < 3 || clean.contains(' ')) {
+      throw ArgumentError('اسم المستخدم يجب أن يكون 3 أحرف على الأقل وبدون مسافات.');
     }
     final next = List<AppUser>.from(_users);
     final idx = next.indexWhere((u) => u.username == clean);
-    if (idx < 0 && password.length < 4) {
-      throw ArgumentError('كلمة المرور يجب أن تكون 4 أحرف على الأقل.');
+    if (idx < 0 && password.length < 6) {
+      throw ArgumentError('كلمة المرور يجب أن تكون 6 أحرف على الأقل.');
     }
-    if (password.isNotEmpty && password.length < 4) {
-      throw ArgumentError('كلمة المرور الجديدة يجب أن تكون 4 أحرف على الأقل.');
+    if (password.isNotEmpty && password.length < 6) {
+      throw ArgumentError('كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل.');
     }
     final user = AppUser(
       username: clean,
       displayName: displayName.trim().isEmpty ? clean : displayName.trim(),
       role: role,
-      passwordSha256:
-          password.isEmpty ? next[idx].passwordSha256 : _hashPassword(password),
+      passwordSha256: password.isEmpty
+          ? next[idx].passwordSha256
+          : PasswordSecurity.hashPassword(password),
       canDelete: canDelete,
       canEditPrices: canEditPrices,
       canManageSettings: canManageSettings,
@@ -417,6 +676,9 @@ class AppController extends ChangeNotifier {
       'app_users_json',
       jsonEncode(_users.map((u) => u.toJson()).toList()),
     );
+    if (_currentUser?.username == clean) {
+      _currentUser = user;
+    }
     notifyListeners();
   }
 
@@ -506,9 +768,16 @@ class AppController extends ChangeNotifier {
       fromIso: range.fromIso,
       toIso: range.toIso,
     );
-    _chartSeriesYer = await _repo.getDailyChartSeries(currency: CurrencyCode.yer);
-    _chartSeriesSar = await _repo.getDailyChartSeries(currency: CurrencyCode.sar);
-    _chartSeriesUsd = await _repo.getDailyChartSeries(currency: CurrencyCode.usd);
+    _chartSeriesYer = await _repo.getDailyChartSeries(
+      currency: CurrencyCode.yer,
+      fromIso: range.fromIso,
+      toIso: range.toIso,
+    );
+    _chartSeriesSar = await _repo.getDailyChartSeries(
+      currency: CurrencyCode.sar,
+      fromIso: range.fromIso,
+      toIso: range.toIso,
+    );
     _inventoryValuation = await _repo.getInventoryValuation();
     _qatTypes = await _repo.getQatTypes();
     _batches = await _repo.getInventoryBatches();
@@ -538,6 +807,16 @@ class AppController extends ChangeNotifier {
       fromIso: range.fromIso,
       toIso: range.toIso,
     );
+    _chartSeriesYer = await _repo.getDailyChartSeries(
+      currency: CurrencyCode.yer,
+      fromIso: range.fromIso,
+      toIso: range.toIso,
+    );
+    _chartSeriesSar = await _repo.getDailyChartSeries(
+      currency: CurrencyCode.sar,
+      fromIso: range.fromIso,
+      toIso: range.toIso,
+    );
     notifyListeners();
   }
 
@@ -550,54 +829,154 @@ class AppController extends ChangeNotifier {
     required List<({InventoryBatch batch, int countedQtyMilli})> counts,
     required String notes,
   }) async {
+    final actor = _currentUser?.username ??
+        (_settings.ownerName.isNotEmpty ? _settings.ownerName : 'النظام');
     await _repo.applyInventoryReconciliation(
       counts: counts,
       notes: notes,
-      createdBy: _currentUser?.username ?? 'admin',
+      createdBy: actor,
     );
     await reloadAll();
   }
 
-  void navigateToRoute(AppScreenRoute route) {
-    _activeRoute = route;
-    switch (route) {
-      case AppScreenRoute.dashboard:
-        _sectionIndex = 0;
-      case AppScreenRoute.sales:
-        _sectionIndex = 1;
-        _salesSubTab = 0;
-      case AppScreenRoute.customers:
-        _sectionIndex = 1;
-        _salesSubTab = 2;
-      case AppScreenRoute.statement:
-        _sectionIndex = 1;
-        _salesSubTab = 3;
-      case AppScreenRoute.inventory:
-        _sectionIndex = 2;
-        _inventorySubTab = 0;
-      case AppScreenRoute.suppliers:
-        _sectionIndex = 2;
-        _inventorySubTab = 3;
-      case AppScreenRoute.accounts:
-        _sectionIndex = 2;
-        _inventorySubTab = 2;
-      case AppScreenRoute.transfers:
-        _sectionIndex = 3;
-        _transfersSubTab = 0;
-      case AppScreenRoute.reports:
-        _sectionIndex = 3;
-        _transfersSubTab = 2;
-      case AppScreenRoute.archive:
-        _sectionIndex = 3;
-        _transfersSubTab = 4;
-      case AppScreenRoute.expenses:
-        _sectionIndex = 4;
-        _settingsSubTab = 0;
-      case AppScreenRoute.settings:
-        _sectionIndex = 4;
-        _settingsSubTab = 1;
+  void registerUnsavedGuard(String key, bool Function() checker) {
+    _unsavedGuards[key] = checker;
+  }
+
+  void unregisterUnsavedGuard(String key) {
+    _unsavedGuards.remove(key);
+  }
+
+  bool canAccessRoute(AppScreenRoute route) {
+    final isAdmin = _currentUser?.role == UserRole.admin;
+    if (isAdmin) return true;
+    return switch (route) {
+      AppScreenRoute.dashboard || AppScreenRoute.settings => true,
+      AppScreenRoute.sales ||
+      AppScreenRoute.customers ||
+      AppScreenRoute.statement =>
+        _sectionPermissions.sales,
+      AppScreenRoute.inventory ||
+      AppScreenRoute.suppliers ||
+      AppScreenRoute.accounts =>
+        _sectionPermissions.inventory,
+      AppScreenRoute.transfers => _sectionPermissions.transfers,
+      AppScreenRoute.reports =>
+        _sectionPermissions.reports && (_currentUser?.canViewReports ?? true),
+      AppScreenRoute.archive => _sectionPermissions.archive,
+      AppScreenRoute.expenses => _sectionPermissions.expenses,
+    };
+  }
+
+  bool canAccessSection(int index) {
+    final isAdmin = _currentUser?.role == UserRole.admin;
+    if (isAdmin) return true;
+    return switch (index) {
+      0 || 4 => true,
+      1 => _sectionPermissions.sales,
+      2 => _sectionPermissions.inventory,
+      3 => _sectionPermissions.transfers ||
+          _sectionPermissions.reports ||
+          _sectionPermissions.archive,
+      _ => true,
+    };
+  }
+
+  int _currentSubTabForSection(int section) => switch (section) {
+        1 => _salesSubTab,
+        2 => _inventorySubTab,
+        3 => _transfersSubTab,
+        4 => _settingsSubTab,
+        _ => 0,
+      };
+
+  void _pushCurrentToHistoryIfChanged(
+    AppScreenRoute nextRoute,
+    int nextSection,
+    int nextSubTab,
+  ) {
+    if (_activeRoute == nextRoute &&
+        _sectionIndex == nextSection &&
+        _currentSubTabForSection(_sectionIndex) == nextSubTab) {
+      return;
     }
+    final entry = (
+      route: _activeRoute,
+      section: _sectionIndex,
+      subTab: _currentSubTabForSection(_sectionIndex),
+    );
+    if (_navHistory.isEmpty || _navHistory.last != entry) {
+      _navHistory.add(entry);
+      if (_navHistory.length > 40) {
+        _navHistory.removeAt(0);
+      }
+    }
+  }
+
+  bool tryNavigateToRoute(AppScreenRoute route) {
+    if (!canAccessRoute(route)) return false;
+    final ({int section, int subTab}) target = switch (route) {
+      AppScreenRoute.dashboard => (section: 0, subTab: 0),
+      AppScreenRoute.sales => (section: 1, subTab: 0),
+      AppScreenRoute.customers => (section: 1, subTab: 2),
+      AppScreenRoute.statement => (section: 1, subTab: 3),
+      AppScreenRoute.inventory => (section: 2, subTab: 0),
+      AppScreenRoute.accounts => (section: 2, subTab: 2),
+      AppScreenRoute.suppliers => (section: 2, subTab: 3),
+      AppScreenRoute.transfers => (section: 3, subTab: 0),
+      AppScreenRoute.reports => (section: 3, subTab: 2),
+      AppScreenRoute.archive => (section: 3, subTab: 4),
+      AppScreenRoute.expenses => (section: 4, subTab: 0),
+      AppScreenRoute.settings => (section: 4, subTab: 1),
+    };
+    if (_activeRoute == route &&
+        _sectionIndex == target.section &&
+        _currentSubTabForSection(_sectionIndex) == target.subTab) {
+      return true;
+    }
+    _pushCurrentToHistoryIfChanged(route, target.section, target.subTab);
+    _applyRouteTarget(route, target.section, target.subTab);
     notifyListeners();
+    return true;
+  }
+
+  void _applyRouteTarget(AppScreenRoute route, int section, int subTab) {
+    _activeRoute = route;
+    _sectionIndex = section.clamp(0, 4).toInt();
+    switch (_sectionIndex) {
+      case 1:
+        _salesSubTab = subTab;
+      case 2:
+        _inventorySubTab = subTab;
+      case 3:
+        _transfersSubTab = subTab;
+      case 4:
+        _settingsSubTab = subTab;
+    }
+  }
+
+  void navigateToRoute(AppScreenRoute route) {
+    tryNavigateToRoute(route);
+  }
+
+  bool popNavigationHistory() {
+    while (_navHistory.isNotEmpty) {
+      final prev = _navHistory.removeLast();
+      if (canAccessRoute(prev.route) &&
+          (prev.route != _activeRoute ||
+              prev.section != _sectionIndex ||
+              prev.subTab != _currentSubTabForSection(_sectionIndex))) {
+        _applyRouteTarget(prev.route, prev.section, prev.subTab);
+        notifyListeners();
+        return true;
+      }
+    }
+    if (_sectionIndex != 0) {
+      _applyRouteTarget(AppScreenRoute.dashboard, 0, 0);
+      notifyListeners();
+      return true;
+    }
+    return false;
   }
 
   void openStatementForCustomer(int customerId) {
@@ -613,78 +992,58 @@ class AppController extends ChangeNotifier {
   }
 
   void setSection(int index, {int? subTab}) {
-    _sectionIndex = index.clamp(0, 4).toInt();
-    if (subTab != null) {
-      switch (_sectionIndex) {
-        case 1:
-          _salesSubTab = subTab;
-        case 2:
-          _inventorySubTab = subTab;
-        case 3:
-          _transfersSubTab = subTab;
-        case 4:
-          _settingsSubTab = subTab;
-      }
+    final targetSection = index.clamp(0, 4).toInt();
+    if (!canAccessSection(targetSection)) return;
+    final targetSub = subTab ?? _currentSubTabForSection(targetSection);
+    final nextRoute = _resolveRoute(targetSection, targetSub);
+    if (!canAccessRoute(nextRoute)) return;
+    if (_sectionIndex == targetSection &&
+        _currentSubTabForSection(_sectionIndex) == targetSub &&
+        _activeRoute == nextRoute) {
+      return;
     }
-    _activeRoute = switch (_sectionIndex) {
-      0 => AppScreenRoute.dashboard,
-      1 => switch (_salesSubTab) {
-          2 => AppScreenRoute.customers,
-          3 => AppScreenRoute.statement,
-          _ => AppScreenRoute.sales,
-        },
-      2 => switch (_inventorySubTab) {
-          2 => AppScreenRoute.accounts,
-          3 || 4 => AppScreenRoute.suppliers,
-          _ => AppScreenRoute.inventory,
-        },
-      3 => switch (_transfersSubTab) {
-          2 => AppScreenRoute.reports,
-          4 => AppScreenRoute.archive,
-          _ => AppScreenRoute.transfers,
-        },
-      _ => switch (_settingsSubTab) {
-          0 => AppScreenRoute.expenses,
-          _ => AppScreenRoute.settings,
-        },
-    };
+    _pushCurrentToHistoryIfChanged(nextRoute, targetSection, targetSub);
+    _applyRouteTarget(nextRoute, targetSection, targetSub);
     notifyListeners();
   }
 
+  AppScreenRoute _resolveRoute(int section, int subTab) => switch (section) {
+        0 => AppScreenRoute.dashboard,
+        1 => switch (subTab) {
+            2 => AppScreenRoute.customers,
+            3 => AppScreenRoute.statement,
+            _ => AppScreenRoute.sales,
+          },
+        2 => switch (subTab) {
+            2 => AppScreenRoute.accounts,
+            3 || 4 => AppScreenRoute.suppliers,
+            _ => AppScreenRoute.inventory,
+          },
+        3 => switch (subTab) {
+            2 => AppScreenRoute.reports,
+            4 => AppScreenRoute.archive,
+            _ => AppScreenRoute.transfers,
+          },
+        _ => switch (subTab) {
+            0 => AppScreenRoute.expenses,
+            _ => AppScreenRoute.settings,
+          },
+      };
+
   void setSalesSubTab(int idx) {
-    _salesSubTab = idx;
-    _activeRoute = switch (idx) {
-      2 => AppScreenRoute.customers,
-      3 => AppScreenRoute.statement,
-      _ => AppScreenRoute.sales,
-    };
-    notifyListeners();
+    setSection(1, subTab: idx);
   }
 
   void setInventorySubTab(int idx) {
-    _inventorySubTab = idx;
-    _activeRoute = switch (idx) {
-      2 => AppScreenRoute.accounts,
-      3 || 4 => AppScreenRoute.suppliers,
-      _ => AppScreenRoute.inventory,
-    };
-    notifyListeners();
+    setSection(2, subTab: idx);
   }
 
   void setTransfersSubTab(int idx) {
-    _transfersSubTab = idx;
-    _activeRoute = switch (idx) {
-      2 => AppScreenRoute.reports,
-      4 => AppScreenRoute.archive,
-      _ => AppScreenRoute.transfers,
-    };
-    notifyListeners();
+    setSection(3, subTab: idx);
   }
 
   void setSettingsSubTab(int idx) {
-    _settingsSubTab = idx;
-    _activeRoute = idx == 0 ? AppScreenRoute.expenses : AppScreenRoute.settings;
-    notifyListeners();
+    setSection(4, subTab: idx);
   }
 
   Future<void> updateSettings(AgencySettings updated) async {
@@ -701,19 +1060,19 @@ class AppController extends ChangeNotifier {
 
   Future<void> resetBrandingToDefaults() async {
     final prev = _settings;
-    final reset = AgencySettings(
+    final reset = prev.copyWith(
       agencyName: 'وكالة ميزان القات',
+      appDisplayName: '',
       agencyPhone: '',
+      additionalContact: '',
       agencyAddress: '',
+      tagline: '',
+      commercialDetails: '',
+      headerText: '',
       footerNote: 'شكراً لتعاملكم معنا',
       logoPath: '',
-      currencyMode: prev.currencyMode,
-      displaySarToYerMilli: prev.displaySarToYerMilli,
-      themeChoice: prev.themeChoice,
-      onboardingComplete: prev.onboardingComplete,
-      savedPrinterName: prev.savedPrinterName,
-      savedPrinterAddress: prev.savedPrinterAddress,
-      printerPaperMm: prev.printerPaperMm,
+      headerEnabled: true,
+      footerEnabled: true,
     );
     await updateSettings(reset);
   }

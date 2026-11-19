@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/logo_storage.dart';
 import '../../core/money.dart';
 import '../../core/theme.dart';
 import '../../state/app_controller.dart';
@@ -343,7 +344,21 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
                                     final picked = await ImagePicker()
                                         .pickImage(source: ImageSource.gallery);
                                     if (!mounted || picked == null) return;
-                                    setState(() => _logoPath = picked.path);
+                                    try {
+                                      final durablePath =
+                                          await LogoStorage.persistLogoFile(
+                                        picked.path,
+                                      );
+                                      if (!mounted) return;
+                                      setState(() => _logoPath = durablePath);
+                                    } catch (e) {
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('تعذر حفظ الشعار: $e'),
+                                        ),
+                                      );
+                                    }
                                   },
                             icon: const Icon(Icons.image_outlined, size: 18),
                             label: const Text('تغيير شعار الوكالة'),

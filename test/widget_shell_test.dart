@@ -16,7 +16,7 @@ void main() {
   sqfliteFfiInit();
 
   testWidgets(
-      'App boots in RTL across small & large phone sizes, tests hidden admin gate, 6-tab bar + drawer, PRO gating, multi-user permissions, and themes',
+      'App boots in RTL into first-run onboarding (no default credentials), verifies Login 3-tap gate, 6-tab bar + drawer, PRO gating, multi-user permissions, and themes',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
@@ -29,7 +29,15 @@ void main() {
     final controller = AppController(dbService: dbService, prefs: prefs);
     await tester.runAsync(controller.initialize);
 
-    // Test small phone viewport (360x640) on Login screen + hidden admin 3-tap gate
+    // No default admin / 123456 credentials exist on fresh install
+    expect(controller.needsOnboarding, true);
+    expect(controller.isLoggedIn, false);
+    final defaultLogin = await tester.runAsync<bool>(
+      () => controller.login('admin', '123456'),
+    );
+    expect(defaultLogin, false);
+
+    // Test small phone viewport (360x640) on First-Run Onboarding screen
     tester.view.physicalSize = const Size(360, 640);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(() {
@@ -45,6 +53,24 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.byKey(const Key('onboarding_username')), findsOneWidget);
+    expect(find.byKey(const Key('onboarding_password')), findsOneWidget);
+
+    // Complete first-run onboarding with owner account, then logout to verify Login screen
+    await tester.runAsync(
+      () => controller.completeFirstRunOnboarding(
+        agencySettings: controller.settings.copyWith(agencyName: 'وكالة الاختبار'),
+        ownerDisplayName: 'سالم المالك',
+        username: 'salem_owner',
+        password: 'ownerPass99',
+        confirmPassword: 'ownerPass99',
+      ),
+    );
+    expect(controller.needsOnboarding, false);
+    expect(controller.isLoggedIn, true);
+    await tester.runAsync(controller.logout);
+    await tester.pumpAndSettle();
+
     // 3 consecutive taps on login logo opens hidden admin password gate
     final logoFinder = find.byKey(const Key('login_logo_secret_trigger'));
     expect(logoFinder, findsOneWidget);
@@ -56,13 +82,11 @@ void main() {
     await tester.tap(find.text('إلغاء'));
     await tester.pumpAndSettle();
 
-    // Login & complete onboarding
-    await tester.runAsync(() => controller.login('admin', '123456'));
-    await tester.runAsync(
-      () => controller.updateSettings(
-        controller.settings.copyWith(onboardingComplete: true),
-      ),
+    // Login as configured owner
+    final ownerOk = await tester.runAsync<bool>(
+      () => controller.login('salem_owner', 'ownerPass99'),
     );
+    expect(ownerOk, true);
     await tester.pumpAndSettle();
 
     // Navigate all 5 sections and sub-tabs on small viewport without overflow
@@ -149,7 +173,7 @@ void main() {
         canViewReports: false,
       ),
     );
-    controller.logout();
+    await tester.runAsync(controller.logout);
     final cashierOk = await tester.runAsync<bool>(
       () => controller.login('cashier1', 'pass123'),
     );

@@ -2494,20 +2494,36 @@ class QatRepository {
     );
   }
 
-  /// 7-day sales & expenses chart series per currency (matching original Android HomeScreen chart).
+  /// Daily sales & expenses chart series per currency.
   Future<List<DailyChartPoint>> getDailyChartSeries({
     required CurrencyCode currency,
     int days = 7,
     DateTime? anchorDate,
+    String? fromIso,
+    String? toIso,
   }) async {
-    final anchor = anchorDate ?? DateTime.now();
-    final start = DateTime(anchor.year, anchor.month, anchor.day)
-        .subtract(Duration(days: days - 1));
-    final fromIso = QatDateUtils.toIsoDate(start);
-    final toIso = QatDateUtils.toIsoDate(anchor);
-    final sales = await getSales(fromIso: fromIso, toIso: toIso);
-    final expenses = await getExpenses(fromIso: fromIso, toIso: toIso);
-    final taxes = await getTaxEntries(fromIso: fromIso, toIso: toIso);
+    DateTime anchor = anchorDate ?? DateTime.now();
+    if (toIso != null && toIso.isNotEmpty) {
+      final parsedTo = QatDateUtils.parseLegacyDate(toIso)?.date;
+      if (parsedTo != null) anchor = parsedTo;
+    }
+    var spanDays = days;
+    DateTime start = DateTime(anchor.year, anchor.month, anchor.day)
+        .subtract(Duration(days: spanDays - 1));
+    if (fromIso != null && fromIso.isNotEmpty) {
+      final parsedFrom = QatDateUtils.parseLegacyDate(fromIso)?.date;
+      if (parsedFrom != null) {
+        final rawDays = anchor.difference(parsedFrom).inDays + 1;
+        spanDays = rawDays.clamp(1, 31).toInt();
+        start = DateTime(anchor.year, anchor.month, anchor.day)
+            .subtract(Duration(days: spanDays - 1));
+      }
+    }
+    final boundFromIso = QatDateUtils.toIsoDate(start);
+    final boundToIso = QatDateUtils.toIsoDate(anchor);
+    final sales = await getSales(fromIso: boundFromIso, toIso: boundToIso);
+    final expenses = await getExpenses(fromIso: boundFromIso, toIso: boundToIso);
+    final taxes = await getTaxEntries(fromIso: boundFromIso, toIso: boundToIso);
 
     final salesByDay = <String, int>{};
     for (final s in sales.where((e) => e.currency == currency)) {
@@ -2522,7 +2538,7 @@ class QatRepository {
     }
 
     final points = <DailyChartPoint>[];
-    for (int i = 0; i < days; i++) {
+    for (int i = 0; i < spanDays; i++) {
       final d = start.add(Duration(days: i));
       final iso = QatDateUtils.toIsoDate(d);
       final shortLabel = '${d.month}/${d.day}';

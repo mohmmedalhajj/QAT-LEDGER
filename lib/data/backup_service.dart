@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
+import '../core/logo_storage.dart';
 import 'database_service.dart';
 import 'room_migrator.dart';
 import 'schema.dart';
@@ -15,12 +16,14 @@ import 'schema.dart';
 class BackupResult {
   const BackupResult({
     required this.filePath,
+    required this.fileName,
     required this.dbSha256,
     required this.sizeBytes,
     required this.rowCounts,
   });
 
   final String filePath;
+  final String fileName;
   final String dbSha256;
   final int sizeBytes;
   final Map<String, int> rowCounts;
@@ -33,12 +36,50 @@ class RestoreResult {
     required this.rollbackBackupPath,
     required this.verifiedSha256,
     required this.rowCounts,
+    this.postRestoreVerified = true,
   });
 
   final bool wasLegacyRoomDb;
   final String rollbackBackupPath;
   final String verifiedSha256;
   final Map<String, int> rowCounts;
+  final bool postRestoreVerified;
+}
+
+@immutable
+class BackupInspectionResult {
+  const BackupInspectionResult({
+    required this.isValid,
+    required this.isLegacyRoomDb,
+    required this.fileName,
+    this.formatVersion = 0,
+    this.dbVersion = 0,
+    this.createdAtMs = 0,
+    this.appEdition = '',
+    this.verifiedSha256 = '',
+    this.rowCounts = const {},
+    this.errorMessage,
+  });
+
+  final bool isValid;
+  final bool isLegacyRoomDb;
+  final String fileName;
+  final int formatVersion;
+  final int dbVersion;
+  final int createdAtMs;
+  final String appEdition;
+  final String verifiedSha256;
+  final Map<String, int> rowCounts;
+  final String? errorMessage;
+
+  int get totalRecords => rowCounts.values.fold<int>(0, (a, b) => a + b);
+
+  String get summaryLine {
+    if (isLegacyRoomDb) {
+      return 'قاعدة بيانات قديمة (${totalRecords > 0 ? '$totalRecords سجل' : 'SQLite/Room'})';
+    }
+    return 'إصدار قاعدة البيانات v$dbVersion • إجمالي السجلات: $totalRecords';
+  }
 }
 
 class BackupService {
@@ -50,10 +91,44 @@ class BackupService {
   final DatabaseService dbService;
   final RoomMigrator migrator;
 
+  static const String backupExtension = '.qatbackup';
+  static const List<String> supportedBackupExtensions = [
+    '.qatbackup',
+    '.qbak',
+    '.db',
+  ];
+
+  static String formatArabicBackupFileName([DateTime? timestamp]) {
+    final ts = timestamp ?? DateTime.now();
+    final y = ts.year.toString().padLeft(4, '0');
+    final m = ts.month.toString().padLeft(2, '0');
+    final d = ts.day.toString().padLeft(2, '0');
+    final hh = ts.hour.toString().padLeft(2, '0');
+    final mm = ts.minute.toString().padLeft(2, '0');
+    return 'نسخة_احتياطية_ميزان_القات_$y-${m}-${d}_$hh-$mm$backupExtension';
+  }
+
+  Future<({Uint8List bytes, BackupResult metadata})> buildBackupPackageBytes({
+    required String stagingDir,
+    String appEdition = 'customer',
+    String? agencyLogoPath,
+    String? outputPathOverride,
+  }) async {
+    final res = await createAtomicBackup(
+      outputDir: stagingDir,
+      appEdition: appEdition,
+      agencyLogoPath: agencyLogoPath,
+      fileNameOverride: outputPathOverride == null ? null : p.basename(outputPathOverride),
+    );
+    final bytes = await File(res.filePath).readAsBytes();
+    return (bytes: bytes, metadata: res);
+  }
+
   Future<BackupResult> createAtomicBackup({
     required String outputDir,
     String appEdition = 'customer',
     String? agencyLogoPath,
+    String? fileNameOverride,
   }) async {
     final db = await dbService.database;
     final dbPath = await dbService.resolveDatabasePath();
@@ -87,7 +162,7 @@ class BackupService {
       final rowCounts = await _collectRowCounts(db);
 
       final manifest = {
-        'format_version': 3,
+        'format_version': 4,
         'app': 'QAT_LEDGER',
         'app_edition': appEdition,
         'db_version': QatLedgerSchema.currentVersion,
@@ -95,6 +170,8 @@ class BackupService {
         'db_filename': QatLedgerSchema.databaseFileName,
         'db_sha256': dbHash,
         'row_counts': rowCounts,
+        'device_bound_security_note':
+            'Device-bound installationId, hardware keystore wraps, and offline license bindings are intentionally bound per device.',
       };
       final manifestBytes = utf8.encode(const JsonEncoder.withIndent('  ').convert(manifest));
 
@@ -106,18 +183,27 @@ class BackupService {
           agencyLogoPath.isNotEmpty &&
           File(agencyLogoPath).existsSync()) {
         final logoBytes = await File(agencyLogoPath).readAsBytes();
-        final ext = p.extension(agencyLogoPath);
-        archive.addFile(ArchiveFile('agency_assets/logo$ext', logoBytes.length, logoBytes));
+        if (logoBytes.isNotEmpty) {
+          final ext = p.extension(agencyLogoPath);
+          archive.addFile(ArchiveFile('agency_assets/logo$ext', logoBytes.length, logoBytes));
+        }
       }
 
       final zipBytes = ZipEncoder().encode(archive)!;
-      final finalPath = p.join(outputDir, 'QatLedger_Backup_$stamp.qbak');
+      final outName = fileNameOverride ?? formatArabicBackupFileName(ts);
+      var finalPath = p.join(outputDir, outName);
+      if (File(finalPath).existsSync()) {
+        final base = p.basenameWithoutExtension(outName);
+        final ext = p.extension(outName);
+        finalPath = p.join(outputDir, '${base}_${ts.second.toString().padLeft(2, '0')}$ext');
+      }
       final tmpZipPath = '$finalPath.tmp';
       await File(tmpZipPath).writeAsBytes(zipBytes, flush: true);
       await File(tmpZipPath).rename(finalPath);
 
       return BackupResult(
         filePath: finalPath,
+        fileName: p.basename(finalPath),
         dbSha256: dbHash,
         sizeBytes: zipBytes.length,
         rowCounts: rowCounts,
@@ -129,12 +215,200 @@ class BackupService {
     }
   }
 
-  Future<RestoreResult> restoreFromFile(String sourceFilePath) async {
+  /// Validates format, manifest version, SHA-256, SQLite integrity, and FK constraints
+  /// WITHOUT altering the live database.
+  Future<BackupInspectionResult> inspectBackupFile(String sourceFilePath) async {
     final file = File(sourceFilePath);
+    final fileName = p.basename(sourceFilePath);
     if (!file.existsSync()) {
-      throw StateError('ملف النسخة الاحتياطية غير موجود.');
+      return BackupInspectionResult(
+        isValid: false,
+        isLegacyRoomDb: false,
+        fileName: fileName,
+        errorMessage: 'ملف النسخة الاحتياطية غير موجود.',
+      );
     }
 
+    try {
+      final bytes = await file.readAsBytes();
+      if (bytes.length < 16) {
+        return BackupInspectionResult(
+          isValid: false,
+          isLegacyRoomDb: false,
+          fileName: fileName,
+          errorMessage: 'حجم الملف المختار صغير جداً أو غير صالح.',
+        );
+      }
+
+      final isZip = bytes[0] == 0x50 && bytes[1] == 0x4B;
+      if (!isZip) {
+        final header = utf8.decode(bytes.sublist(0, 15), allowMalformed: true);
+        if (!header.startsWith('SQLite format 3')) {
+          return BackupInspectionResult(
+            isValid: false,
+            isLegacyRoomDb: false,
+            fileName: fileName,
+            errorMessage:
+                'صيغة الملف غير مدعومة (يجب اختيار ملف .qatbackup أو .qbak أو قاعدة بيانات SQLite صالحة).',
+          );
+        }
+        final tempDir = await Directory.systemTemp.createTemp('qat_inspect_');
+        final tmpDb = p.join(tempDir.path, 'inspect.db');
+        try {
+          await File(tmpDb).writeAsBytes(bytes, flush: true);
+          final db = await dbService.effectiveFactory.openDatabase(
+            tmpDb,
+            options: OpenDatabaseOptions(readOnly: true),
+          );
+          try {
+            final integrity = await db.rawQuery('PRAGMA integrity_check');
+            final ok = integrity.isNotEmpty &&
+                integrity.first.values.first?.toString().toLowerCase() == 'ok';
+            if (!ok) {
+              return BackupInspectionResult(
+                isValid: false,
+                isLegacyRoomDb: false,
+                fileName: fileName,
+                errorMessage: 'فشل فحص سلامة قاعدة البيانات داخل الملف.',
+              );
+            }
+            final hasCustBal = await db.rawQuery(
+              "SELECT name FROM sqlite_master WHERE type='table' AND name='customer_balances'",
+            );
+            final isLegacy = hasCustBal.isEmpty;
+            final counts = await _collectRowCounts(db);
+            return BackupInspectionResult(
+              isValid: true,
+              isLegacyRoomDb: isLegacy,
+              fileName: fileName,
+              dbVersion: isLegacy ? 18 : QatLedgerSchema.currentVersion,
+              verifiedSha256: sha256.convert(bytes).toString(),
+              rowCounts: counts,
+            );
+          } finally {
+            await db.close();
+          }
+        } finally {
+          if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+        }
+      }
+
+      final archive = ZipDecoder().decodeBytes(bytes, verify: true);
+      final manifestEntry = archive.findFile('manifest.json');
+      final dbEntry = archive.findFile(QatLedgerSchema.databaseFileName);
+      if (manifestEntry == null || dbEntry == null) {
+        return BackupInspectionResult(
+          isValid: false,
+          isLegacyRoomDb: false,
+          fileName: fileName,
+          errorMessage:
+              'ملف النسخة الاحتياطية غير مكتمل: ينقصه manifest.json أو قاعدة البيانات.',
+        );
+      }
+
+      final manifestMap = jsonDecode(utf8.decode(manifestEntry.content as List<int>))
+          as Map<String, dynamic>;
+      final appName = (manifestMap['app'] ?? '').toString();
+      if (appName.isNotEmpty && appName != 'QAT_LEDGER') {
+        return BackupInspectionResult(
+          isValid: false,
+          isLegacyRoomDb: false,
+          fileName: fileName,
+          errorMessage: 'هذا الملف لا ينتمي إلى نظام ميزان القات.',
+        );
+      }
+
+      final formatVersion = (manifestMap['format_version'] as num?)?.toInt() ?? 0;
+      if (formatVersion < 1 || formatVersion > 10) {
+        return BackupInspectionResult(
+          isValid: false,
+          isLegacyRoomDb: false,
+          fileName: fileName,
+          errorMessage: 'إصدار تنسيق النسخة الاحتياطية غير مدعوم ($formatVersion).',
+        );
+      }
+
+      final dbBytes = dbEntry.content as List<int>;
+      final expectedSha = (manifestMap['db_sha256'] ?? '').toString();
+      final actualSha = sha256.convert(dbBytes).toString();
+      if (expectedSha.isEmpty || expectedSha != actualSha) {
+        return BackupInspectionResult(
+          isValid: false,
+          isLegacyRoomDb: false,
+          fileName: fileName,
+          errorMessage:
+              'فشل التحقق من البصمة الرقمية (SHA-256)؛ قد يكون ملف النسخة تالفاً أو معدّلاً.',
+        );
+      }
+
+      final tempDir = await Directory.systemTemp.createTemp('qat_inspect_zip_');
+      final tmpDb = p.join(tempDir.path, 'inspect.db');
+      try {
+        await File(tmpDb).writeAsBytes(dbBytes, flush: true);
+        final db = await dbService.effectiveFactory.openDatabase(
+          tmpDb,
+          options: OpenDatabaseOptions(readOnly: false),
+        );
+        try {
+          final integrity = await db.rawQuery('PRAGMA integrity_check');
+          final ok = integrity.isNotEmpty &&
+              integrity.first.values.first?.toString().toLowerCase() == 'ok';
+          if (!ok) {
+            return BackupInspectionResult(
+              isValid: false,
+              isLegacyRoomDb: false,
+              fileName: fileName,
+              errorMessage: 'قاعدة البيانات داخل الأرشيف تالفة.',
+            );
+          }
+          await db.execute('PRAGMA foreign_keys = ON');
+          final fk = await db.rawQuery('PRAGMA foreign_key_check');
+          if (fk.isNotEmpty) {
+            return BackupInspectionResult(
+              isValid: false,
+              isLegacyRoomDb: false,
+              fileName: fileName,
+              errorMessage:
+                  'توجد مخالفات قيود مرجعية داخل النسخة (${fk.length} مخالفة).',
+            );
+          }
+          final counts = await _collectRowCounts(db);
+          return BackupInspectionResult(
+            isValid: true,
+            isLegacyRoomDb: false,
+            fileName: fileName,
+            formatVersion: formatVersion,
+            dbVersion: (manifestMap['db_version'] as num?)?.toInt() ?? 2,
+            createdAtMs: (manifestMap['created_at_ms'] as num?)?.toInt() ?? 0,
+            appEdition: (manifestMap['app_edition'] ?? '').toString(),
+            verifiedSha256: actualSha,
+            rowCounts: counts,
+          );
+        } finally {
+          await db.close();
+        }
+      } finally {
+        if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+      }
+    } catch (e) {
+      return BackupInspectionResult(
+        isValid: false,
+        isLegacyRoomDb: false,
+        fileName: fileName,
+        errorMessage: 'فشل فحص النسخة الاحتياطية: $e',
+      );
+    }
+  }
+
+  Future<RestoreResult> restoreFromFile(String sourceFilePath) async {
+    final inspection = await inspectBackupFile(sourceFilePath);
+    if (!inspection.isValid) {
+      throw StateError(
+        inspection.errorMessage ?? 'ملف النسخة الاحتياطية غير صالح للاستعادة.',
+      );
+    }
+
+    final file = File(sourceFilePath);
     final dbPath = await dbService.resolveDatabasePath();
     final dbDir = p.dirname(dbPath);
     final rollbackDir = Directory(p.join(dbDir, 'restore_rollbacks'));
@@ -144,44 +418,25 @@ class BackupService {
     final rollbackRes = await createAtomicBackup(outputDir: rollbackDir.path);
 
     final bytes = await file.readAsBytes();
-    final isZip = bytes.length >= 4 &&
-        bytes[0] == 0x50 &&
-        bytes[1] == 0x4B;
+    final isZip = bytes.length >= 4 && bytes[0] == 0x50 && bytes[1] == 0x4B;
 
     if (!isZip) {
-      // Raw SQLite file: verify SQLite header and inspect schema (v2 vs legacy Room <= 18)
-      final header = bytes.length >= 16 ? utf8.decode(bytes.sublist(0, 15), allowMalformed: true) : '';
-      if (!header.startsWith('SQLite format 3')) {
-        throw StateError('صيغة الملف غير مدعومة (يجب أن يكون .qbak أو قاعدة بيانات SQLite صالحة).');
-      }
       return _restoreRawSqliteFile(
         sourceSqlitePath: sourceFilePath,
         rollbackBackupPath: rollbackRes.filePath,
       );
     }
 
-    // Parse .qbak ZIP archive & verify SHA-256 manifest
+    // Parse archive & extract verified DB
     final archive = ZipDecoder().decodeBytes(bytes, verify: true);
-    final manifestEntry = archive.findFile('manifest.json');
-    final dbEntry = archive.findFile(QatLedgerSchema.databaseFileName);
-    if (manifestEntry == null || dbEntry == null) {
-      throw StateError('ملف .qbak غير مكتمل: ينقصه manifest.json أو ملف قاعدة البيانات.');
-    }
-
-    final manifestMap = jsonDecode(utf8.decode(manifestEntry.content as List<int>))
-        as Map<String, dynamic>;
-    final expectedSha = (manifestMap['db_sha256'] ?? '').toString();
+    final dbEntry = archive.findFile(QatLedgerSchema.databaseFileName)!;
     final dbBytes = dbEntry.content as List<int>;
     final actualSha = sha256.convert(dbBytes).toString();
-    if (expectedSha.isEmpty || expectedSha != actualSha) {
-      throw StateError('فشل التحقق من البصمة الرقمية (SHA-256) للنسخة الاحتياطية؛ قد يكون الملف تالفاً.');
-    }
 
     final stagePath = p.join(dbDir, '.restore_stage_${DateTime.now().millisecondsSinceEpoch}.db');
     await File(stagePath).writeAsBytes(dbBytes, flush: true);
 
     try {
-      // Verify integrity & foreign keys on staged database before swapping
       final stageDb = await dbService.effectiveFactory.openDatabase(
         stagePath,
         options: OpenDatabaseOptions(readOnly: false),
@@ -210,21 +465,32 @@ class BackupService {
       }
       await File(stagePath).rename(dbPath);
       await dbService.reopenAfterRestore();
-      // Ensure any v1/v2 backup upgrades idempotently to v3 schema columns/tables.
-      await dbService.database;
+      final liveDb = await dbService.database;
 
-      // Restore bundled agency logo if present in .qbak
+      // Post-restore integrity verification
+      final postCheck = await liveDb.rawQuery('PRAGMA integrity_check');
+      final postOk = postCheck.isNotEmpty &&
+          postCheck.first.values.first?.toString().toLowerCase() == 'ok';
+      if (!postOk) {
+        throw StateError('فشل فحص سلامة قاعدة البيانات بعد الاستعادة.');
+      }
+
+      // Restore bundled agency logo into durable storage if present
       for (final entry in archive.files) {
         if (entry.isFile && entry.name.startsWith('agency_assets/logo')) {
           final ext = p.extension(entry.name);
-          final restoredLogo = p.join(dbDir, 'agency_logo_restored$ext');
-          await File(restoredLogo).writeAsBytes(entry.content as List<int>, flush: true);
-          final db = await dbService.database;
-          await db.insert(
+          final tmpLogo = p.join(dbDir, '.restored_logo_tmp$ext');
+          await File(tmpLogo).writeAsBytes(entry.content as List<int>, flush: true);
+          final durableLogo = await LogoStorage.persistLogoFile(
+            tmpLogo,
+            customDirectoryPath: dbDir,
+          );
+          if (File(tmpLogo).existsSync()) await File(tmpLogo).delete();
+          await liveDb.insert(
             'app_settings',
             {
               'key': 'agency_logo_path',
-              'value': restoredLogo,
+              'value': durableLogo,
               'updated_at_ms': DateTime.now().millisecondsSinceEpoch,
             },
             conflictAlgorithm: ConflictAlgorithm.replace,
@@ -238,9 +504,20 @@ class BackupService {
         rollbackBackupPath: rollbackRes.filePath,
         verifiedSha256: actualSha,
         rowCounts: counts,
+        postRestoreVerified: true,
       );
     } catch (e) {
       if (File(stagePath).existsSync()) await File(stagePath).delete();
+      // Attempt automatic rollback to snapshot if live swap occurred
+      try {
+        final rbBytes = await File(rollbackRes.filePath).readAsBytes();
+        final rbArchive = ZipDecoder().decodeBytes(rbBytes, verify: true);
+        final rbDb = rbArchive.findFile(QatLedgerSchema.databaseFileName);
+        if (rbDb != null) {
+          await dbService.close();
+          await File(dbPath).writeAsBytes(rbDb.content as List<int>, flush: true);
+        }
+      } catch (_) {}
       await dbService.reopenAfterRestore();
       rethrow;
     }
@@ -271,6 +548,7 @@ class BackupService {
         rollbackBackupPath: rollbackBackupPath,
         verifiedSha256: summary.sourceSha256,
         rowCounts: summary.rowCounts,
+        postRestoreVerified: true,
       );
     }
 
@@ -302,12 +580,16 @@ class BackupService {
       }
       await File(stagePath).rename(dbPath);
       await dbService.reopenAfterRestore();
-      await dbService.database;
+      final liveDb = await dbService.database;
+      final post = await liveDb.rawQuery('PRAGMA integrity_check');
+      final postOk = post.isNotEmpty &&
+          post.first.values.first?.toString().toLowerCase() == 'ok';
       return RestoreResult(
         wasLegacyRoomDb: false,
         rollbackBackupPath: rollbackBackupPath,
         verifiedSha256: sha,
         rowCounts: counts,
+        postRestoreVerified: postOk,
       );
     } catch (e) {
       if (File(stagePath).existsSync()) await File(stagePath).delete();
