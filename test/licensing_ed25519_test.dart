@@ -229,7 +229,13 @@ void main() {
     final wrappedSms = 'مرحباً بك في ميزان القات\nرمز التفعيل الخاص بك:\n$ql1\nشكراً لتعاملكم معنا';
 
     final parsed = LicenseCanonical.parseInput(wrappedSms);
-    expect(parsed.compactToken, ql1);
+    expect(
+      LicenseCanonical.encodeCompactToken(
+        payload: parsed.payload,
+        signatureBytes: parsed.signatureBytes,
+      ),
+      ql1,
+    );
     expect(parsed.payload.licenseId, 'QAT-PROSE-1');
 
     final verifier = OfflineLicenseVerifier(registry: reg, timeGuard: TrustedTimeGuard());
