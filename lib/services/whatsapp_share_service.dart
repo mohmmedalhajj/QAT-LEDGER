@@ -114,7 +114,7 @@ class WhatsappShareService {
     return false;
   }
 
-  Future<bool> openSms({required String phone, required String text}) async {
+  Future<bool> openSms({String phone = '', required String text}) async {
     final digits = normalizeDigits(phone).replaceAll(RegExp(r'[^0-9+]'), '');
     final uri = Uri(scheme: 'smsto', path: digits, queryParameters: {'body': text});
     if (await canLaunchUrl(uri)) {
