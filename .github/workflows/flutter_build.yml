@@ -51,7 +51,26 @@ jobs:
         run: flutter pub get
 
       - name: Run Flutter analyzer
-        run: flutter analyze
+        run: |
+          set -o pipefail
+          mkdir -p ci-dist
+          set +e
+          flutter analyze 2>&1 | tee ci-dist/flutter_analyze.log
+          RC=${PIPESTATUS[0]}
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            python3 - <<'PY' || true
+          import re
+          with open('ci-dist/flutter_analyze.log', encoding='utf-8', errors='replace') as fh:
+              for line in fh:
+                  m = re.match(r'^\s*(error|warning|info)\s+(?:•|-)\s+(.+?)\s+(?:•|-)\s+([^:\s]+):(\d+):(\d+)\s+(?:•|-)\s+(\S+)\s*$', line.strip())
+                  if m:
+                      sev, msg, fpath, ln, col, code = m.groups()
+                      level = 'error' if sev == 'error' else 'warning'
+                      print(f'::{level} file={fpath},line={ln},col={col}::{sev} [{code}] {msg}')
+          PY
+            exit "$RC"
+          fi
 
       - name: Run Flutter tests
         run: flutter test -r expanded
@@ -200,30 +219,50 @@ jobs:
           mkdir -p ci-dist
           LOG="ci-dist/emulator_smoke.log"
           BOOT_LOG="ci-dist/emulator_boot.log"
+          LOGCAT_LOG="ci-dist/adb_logcat.txt"
+          : > "$LOG"
+          : > "$BOOT_LOG"
+          : > "$LOGCAT_LOG"
 
           if [ ! -s ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk ] || \
              [ ! -s ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk ]; then
-            echo "NOT_EXECUTED: Required APK files are missing." | tee "$LOG"
+            echo "NOT_EXECUTED: Required APK files are missing." | tee -a "$LOG"
             exit 0
           fi
 
           if [ ! -e /dev/kvm ]; then
-            echo "NOT_EXECUTED: /dev/kvm device is not present on this runner." | tee "$LOG"
+            echo "NOT_EXECUTED: /dev/kvm device is not present on this runner." | tee -a "$LOG"
             exit 0
           fi
 
           sudo chmod a+rw /dev/kvm 2>/dev/null || true
 
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-            echo "NOT_EXECUTED: KVM is not readable/writable by runner user." | tee "$LOG"
+            echo "NOT_EXECUTED: KVM is not readable/writable by runner user." | tee -a "$LOG"
             exit 0
           fi
 
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          if [ -z "$SDK_ROOT" ]; then
-            echo "NOT_EXECUTED: Android SDK path not found." | tee "$LOG"
-            exit 0
+          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
+            echo "FAIL: Android SDK path was not found (ANDROID_HOME=${ANDROID_HOME:-}, ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-})." | tee -a "$LOG"
+            exit 1
           fi
+
+          export HOME="${HOME:-/home/runner}"
+          export ANDROID_HOME="$SDK_ROOT"
+          export ANDROID_SDK_ROOT="$SDK_ROOT"
+          export ANDROID_USER_HOME="$HOME/.android"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          unset ANDROID_SDK_HOME || true
+          mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME"
+
+          {
+            echo "HOME=$HOME"
+            echo "ANDROID_HOME=$ANDROID_HOME"
+            echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+            echo "ANDROID_USER_HOME=$ANDROID_USER_HOME"
+            echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME"
+          } | tee -a "$LOG"
 
           SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           AVDMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
@@ -231,69 +270,137 @@ jobs:
           ADB="$SDK_ROOT/platform-tools/adb"
 
           if [ ! -x "$SDKMANAGER" ] || [ ! -x "$AVDMANAGER" ]; then
-            echo "NOT_EXECUTED: Android SDK command-line tools are missing." | tee "$LOG"
-            exit 0
+            echo "FAIL: Android SDK command-line tools are missing under $SDK_ROOT/cmdline-tools/latest/bin." | tee -a "$LOG"
+            exit 1
           fi
 
           sudo apt-get update && sudo apt-get install -y libpulse0 libgl1 libnss3 libxkbcommon0 || true
-          (yes || true) | timeout 60 "$SDKMANAGER" --licenses > /dev/null || true
+          set +o pipefail
+          yes | timeout 60 "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
 
-          timeout 300 "$SDKMANAGER" \
+          SYS_IMAGE_PKG="system-images;android-34;google_apis;x86_64"
+          SYS_IMAGE_TAG="google_apis"
+          if ! yes | timeout 300 "$SDKMANAGER" --sdk_root="$SDK_ROOT" \
             "platform-tools" \
             "emulator" \
-            "system-images;android-34;default;x86_64"
+            "$SYS_IMAGE_PKG"; then
+            SYS_IMAGE_PKG="system-images;android-34;default;x86_64"
+            SYS_IMAGE_TAG="default"
+            yes | timeout 300 "$SDKMANAGER" --sdk_root="$SDK_ROOT" \
+              "platform-tools" \
+              "emulator" \
+              "$SYS_IMAGE_PKG"
+          fi
+          set -o pipefail
 
           if [ ! -x "$EMULATOR" ] || [ ! -x "$ADB" ]; then
-            echo "NOT_EXECUTED: Emulator or ADB installation failed." | tee "$LOG"
-            exit 0
+            echo "FAIL: Emulator or ADB installation failed under $SDK_ROOT." | tee -a "$LOG"
+            exit 1
           fi
 
-          if ! "$EMULATOR" -accel-check > "$LOG" 2>&1; then
+          SYS_IMAGE_DIR="$SDK_ROOT/system-images/android-34/$SYS_IMAGE_TAG/x86_64"
+          if [ ! -d "$SYS_IMAGE_DIR" ] || [ ! -f "$SYS_IMAGE_DIR/source.properties" ]; then
+            echo "FAIL: Required Android SDK system image ($SYS_IMAGE_PKG) is not present at $SYS_IMAGE_DIR." | tee -a "$LOG"
+            exit 1
+          fi
+
+          if ! "$EMULATOR" -accel-check >> "$LOG" 2>&1; then
             cat "$LOG"
             echo "NOT_EXECUTED: Emulator hardware acceleration is unavailable." | tee -a "$LOG"
             exit 0
           fi
           cat "$LOG"
 
-          echo "no" | "$AVDMANAGER" create avd \
-            -f -n qat_smoke \
-            -k "system-images;android-34;default;x86_64" \
-            --abi x86_64
+          AVD_NAME="qat_smoke"
+          AVD_DIR="$ANDROID_AVD_HOME/${AVD_NAME}.avd"
+          AVD_INI="$ANDROID_AVD_HOME/${AVD_NAME}.ini"
+
+          rm -rf "$AVD_DIR" "$AVD_INI"
+
+          if ! "$AVDMANAGER" create avd \
+            --force \
+            --name "$AVD_NAME" \
+            --package "$SYS_IMAGE_PKG" \
+            --tag "$SYS_IMAGE_TAG" \
+            --abi x86_64 \
+            --path "$AVD_DIR" \
+            --device "pixel_6" <<< "no" >> "$LOG" 2>&1; then
+            echo "Retrying avdmanager create avd without explicit --device profile..." | tee -a "$LOG"
+            "$AVDMANAGER" create avd \
+              --force \
+              --name "$AVD_NAME" \
+              --package "$SYS_IMAGE_PKG" \
+              --tag "$SYS_IMAGE_TAG" \
+              --abi x86_64 \
+              --path "$AVD_DIR" <<< "no" >> "$LOG" 2>&1
+          fi
+
+          if [ ! -s "$AVD_INI" ] || [ ! -d "$AVD_DIR" ] || [ ! -s "$AVD_DIR/config.ini" ]; then
+            echo "FAIL: AVD creation did not produce $AVD_INI, $AVD_DIR, or config.ini." | tee -a "$LOG"
+            ls -la "$ANDROID_AVD_HOME" | tee -a "$LOG" || true
+            exit 1
+          fi
+
+          echo "=== Created AVD files ===" | tee -a "$LOG"
+          ls -la "$ANDROID_AVD_HOME" | tee -a "$LOG"
+          cat "$AVD_INI" | tee -a "$LOG"
+
+          echo "=== emulator -list-avds ===" | tee -a "$LOG"
+          AVD_LIST=$("$EMULATOR" -list-avds 2>&1 | tr -d '\r' || true)
+          printf '%s\n' "$AVD_LIST" | tee -a "$LOG"
+
+          if ! printf '%s\n' "$AVD_LIST" | grep -Fxq "$AVD_NAME"; then
+            echo "FAIL: AVD '$AVD_NAME' was not reported by 'emulator -list-avds' under ANDROID_AVD_HOME=$ANDROID_AVD_HOME." | tee -a "$LOG"
+            exit 1
+          fi
 
           timeout 15 "$ADB" start-server || true
 
           EMU_PID=""
           cleanup() {
             set +e
-            timeout 10 "$ADB" emu kill >/dev/null 2>&1 || true
+            if [ -x "$ADB" ]; then
+              timeout 15 "$ADB" logcat -d > "$LOGCAT_LOG" 2>&1 || true
+              timeout 10 "$ADB" emu kill >/dev/null 2>&1 || true
+            fi
             if [ -n "$EMU_PID" ] && kill -0 "$EMU_PID" 2>/dev/null; then
               kill "$EMU_PID" >/dev/null 2>&1 || true
+              sleep 2
+              kill -9 "$EMU_PID" >/dev/null 2>&1 || true
             fi
-            timeout 10 "$ADB" kill-server >/dev/null 2>&1 || true
+            if [ -x "$ADB" ]; then
+              timeout 10 "$ADB" kill-server >/dev/null 2>&1 || true
+            fi
             if [ -f "$BOOT_LOG" ]; then
               echo "=== emulator_boot.log (tail) ==="
-              tail -n 60 "$BOOT_LOG" || true
+              tail -n 80 "$BOOT_LOG" || true
+            fi
+            if [ -s "$LOGCAT_LOG" ]; then
+              echo "=== adb_logcat.txt (tail) ==="
+              tail -n 60 "$LOGCAT_LOG" || true
             fi
           }
           trap cleanup EXIT
 
-          "$EMULATOR" \
-            -avd qat_smoke \
+          timeout 660 "$EMULATOR" \
+            -avd "$AVD_NAME" \
             -no-window \
             -no-audio \
             -no-boot-anim \
             -no-snapshot \
             -no-metrics \
+            -wipe-data \
             -gpu swiftshader_indirect \
+            -memory 2048 \
+            -cores 2 \
             </dev/null > "$BOOT_LOG" 2>&1 &
 
           EMU_PID=$!
 
           DEVICE_READY=false
-
           for i in $(seq 1 90); do
             if ! kill -0 "$EMU_PID" 2>/dev/null; then
-              echo "FAIL: Emulator process stopped unexpectedly." | tee -a "$LOG"
+              echo "FAIL: Emulator process stopped unexpectedly before ADB came online." | tee -a "$LOG"
               exit 1
             fi
 
@@ -306,20 +413,18 @@ jobs:
           done
 
           if [ "$DEVICE_READY" != "true" ]; then
-            echo "FAIL: Emulator did not connect to ADB in time." | tee -a "$LOG"
+            echo "FAIL: Emulator did not connect to ADB within 180s timeout." | tee -a "$LOG"
             exit 1
           fi
 
           BOOTED=false
-
           for i in $(seq 1 90); do
             if ! kill -0 "$EMU_PID" 2>/dev/null; then
-              echo "FAIL: Emulator process stopped during boot." | tee -a "$LOG"
+              echo "FAIL: Emulator process stopped unexpectedly during Android boot." | tee -a "$LOG"
               exit 1
             fi
 
             BOOT=$(timeout 5 "$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
-
             if [ "$BOOT" = "1" ]; then
               BOOTED=true
               break
@@ -329,11 +434,11 @@ jobs:
           done
 
           if [ "$BOOTED" != "true" ]; then
-            echo "FAIL: Android did not finish booting." | tee -a "$LOG"
+            echo "FAIL: Android did not reach sys.boot_completed=1 within 180s timeout." | tee -a "$LOG"
             exit 1
           fi
 
-          timeout 15 "$ADB" logcat -c
+          timeout 15 "$ADB" logcat -c || true
 
           test -s ci-dist/customer-badging.txt
           test -s ci-dist/developer-badging.txt
@@ -354,6 +459,7 @@ jobs:
             DEVELOPER_ACTIVITY="com.aistudio.tofanqat.nxzwmb.dev${DEVELOPER_ACTIVITY}"
           fi
 
+          echo "=== Installing and launching Customer APK ===" | tee -a "$LOG"
           timeout 60 "$ADB" install -r ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk \
             | tee -a "$LOG"
 
@@ -368,6 +474,7 @@ jobs:
 
           timeout 20 "$ADB" exec-out screencap -p > ci-dist/customer_launch.png || true
 
+          echo "=== Installing and launching Developer APK ===" | tee -a "$LOG"
           timeout 60 "$ADB" install -r ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk \
             | tee -a "$LOG"
 
@@ -380,15 +487,18 @@ jobs:
           DEV_PID=$(timeout 10 "$ADB" shell pidof com.aistudio.tofanqat.nxzwmb.dev || true)
           echo "DEVELOPER_PID=$DEV_PID" | tee -a "$LOG"
 
+          timeout 20 "$ADB" exec-out screencap -p > ci-dist/developer_launch.png || true
+
+          timeout 20 "$ADB" logcat -d > "$LOGCAT_LOG" 2>&1 || true
           timeout 20 "$ADB" logcat -d -s AndroidRuntime:E flutter:E \
-            >> "$LOG" || true
+            >> "$LOG" 2>&1 || true
 
           if [ -z "$CUST_PID" ] || [ -z "$DEV_PID" ]; then
-            echo "FAIL: One or both apps did not remain running." | tee -a "$LOG"
+            echo "FAIL: One or both apps did not remain running (CUSTOMER_PID='$CUST_PID', DEVELOPER_PID='$DEV_PID')." | tee -a "$LOG"
             exit 1
           fi
 
-          echo "PASS: Customer and Developer apps launched on the emulator." \
+          echo "PASS: Customer and Developer apps installed, launched, and remained running on the emulator." \
             | tee -a "$LOG"
 
       - name: Upload emulator smoke-test logs
@@ -399,6 +509,8 @@ jobs:
           path: |
             ci-dist/emulator_smoke.log
             ci-dist/emulator_boot.log
+            ci-dist/adb_logcat.txt
             ci-dist/customer_launch.png
+            ci-dist/developer_launch.png
           if-no-files-found: warn
           retention-days: 14
