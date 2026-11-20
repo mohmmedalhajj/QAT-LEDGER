@@ -358,8 +358,27 @@ void main() {
         receiverName: 'سالم أمين المستودع',
         dateMs: customMs,
       );
+      final datedSaleId = await repo.makeSale(
+        customerId: custId,
+        customerName: 'عميل عدن',
+        items: [
+          NewSaleItemInput(
+            inventoryBatchId: batchDatedId,
+            qatTypeName: 'همداني ممتاز',
+            qtyMilli: 2000,
+            unit: 'ربطة',
+            unitPriceMinor: 150000,
+            buyPriceMinor: 100000,
+          ),
+        ],
+        currency: CurrencyCode.yer,
+        paymentType: PaymentType.paid,
+        paidAmountMinor: 300000,
+        paymentMethod: 'نقداً',
+        dateMs: DateTime(2026, 10, 14, 11, 30).millisecondsSinceEpoch,
+      );
       await repo.editSale(
-        saleId: saleId,
+        saleId: datedSaleId,
         customerId: custId,
         customerName: 'عميل عدن',
         newItems: [
@@ -379,7 +398,7 @@ void main() {
         dateMs: customMs,
       );
       final updatedDatedSale =
-          (await repo.getSales()).firstWhere((s) => s.id == saleId);
+          (await repo.getSales()).firstWhere((s) => s.id == datedSaleId);
       expect(updatedDatedSale.dateIso, '2026-10-15');
 
       final matching = await repo.getDailyInventoryMatching(

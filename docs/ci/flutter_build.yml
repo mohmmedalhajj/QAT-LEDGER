@@ -419,6 +419,15 @@ jobs:
               echo "=== adb_logcat.txt (tail) ==="
               tail -n 60 "$LOGCAT_LOG" || true
             fi
+            if [ -s "$LOG" ]; then
+              SUMMARY=$(tr '\n' '|' < "$LOG" | sed 's/|/ | /g')
+              if grep -q "^FAIL:" "$LOG"; then
+                BOOT_TAIL=$(tail -n 20 "$BOOT_LOG" 2>/dev/null | tr '\n' ' ' || true)
+                echo "::error title=emulator_smoke::${SUMMARY:0:700} BOOT_TAIL: ${BOOT_TAIL:0:400}"
+              else
+                echo "::notice title=emulator_smoke::${SUMMARY:0:900}"
+              fi
+            fi
           }
           trap cleanup EXIT
 

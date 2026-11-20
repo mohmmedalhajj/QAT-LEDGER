@@ -19,6 +19,9 @@ abstract final class PasswordSecurity {
   static final String _legacyDefaultWeakHash = sha256
       .convert(utf8.encode('QAT_LEDGER_AUTH:${String.fromCharCodes(const [49, 50, 51, 52, 53, 54])}'))
       .toString();
+  static final String _legacyKotlinDefaultWeakHash = sha256
+      .convert(utf8.encode(String.fromCharCodes(const [49, 50, 51, 52, 53, 54])))
+      .toString();
 
   static String hashPassword(String plain) {
     final rnd = Random.secure();
@@ -62,8 +65,11 @@ abstract final class PasswordSecurity {
   static bool needsRehash(String storedHash) =>
       !storedHash.trim().startsWith('$prefix\$');
 
-  static bool isKnownWeakLegacyHash(String storedHash) =>
-      storedHash.trim().toLowerCase() == _legacyDefaultWeakHash;
+  static bool isKnownWeakLegacyHash(String storedHash) {
+    final norm = storedHash.trim().toLowerCase();
+    return norm == _legacyDefaultWeakHash ||
+        norm == _legacyKotlinDefaultWeakHash;
+  }
 
   static Uint8List _pbkdf2Sha256(
     List<int> password,

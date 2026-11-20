@@ -203,7 +203,14 @@ void main() {
     final prefixedCsv = 'QAT_LICENSE_PUBLIC_KEYS="$pem"';
     final reg = TrustedPublicKeyRegistry.fromCsv(prefixedCsv);
     expect(reg.isEmpty, false);
-    expect(reg.keyIds.length, 1);
+    expect(
+      reg.keyIds,
+      containsAll(<String>[
+        TrustedPublicKeyRegistry.computeKeyIdFromRaw(pub.bytes),
+        TrustedPublicKeyRegistry.computeKotlinKeyIdFromRaw(pub.bytes),
+      ]),
+    );
+    expect(reg.keyIds.length, 2);
 
     const payload = LicensePayload(
       format: LicenseCanonical.canonicalPayloadFormat,
