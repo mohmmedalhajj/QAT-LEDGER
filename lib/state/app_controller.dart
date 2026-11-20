@@ -276,7 +276,7 @@ class AppController extends ChangeNotifier {
 
     final migLicense = await _repo.getSetting('migrated_legacy_license_doc');
     if (migLicense != null && migLicense.isNotEmpty && _licenseStore != null) {
-      final existingRaw = await _licenseStore!.loadRawLicense();
+      final existingRaw = _licenseStore!.getStoredRawLicense();
       if (existingRaw == null || existingRaw.trim().isEmpty) {
         final candidate = await activateLicense(migLicense);
         if (candidate.isValid) {

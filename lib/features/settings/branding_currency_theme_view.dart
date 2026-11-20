@@ -366,6 +366,8 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
                             onPressed: !canEdit
                                 ? null
                                 : () async {
+                                    final messenger =
+                                        ScaffoldMessenger.of(context);
                                     final picked = await ImagePicker()
                                         .pickImage(source: ImageSource.gallery);
                                     if (!mounted || picked == null) return;
@@ -378,7 +380,7 @@ class _BrandingCurrencyThemeViewState extends State<BrandingCurrencyThemeView> {
                                       setState(() => _logoPath = durablePath);
                                     } catch (e) {
                                       if (!mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      messenger.showSnackBar(
                                         SnackBar(
                                           content: Text('تعذر حفظ الشعار: $e'),
                                         ),

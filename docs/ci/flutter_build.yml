@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify-and-build:
@@ -209,6 +209,24 @@ jobs:
           path: ci-dist/
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Publish GitHub Release APKs
+        if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="build-${{ github.run_id }}-${{ github.run_attempt }}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          gh release create "$TAG" \
+            --target "${{ github.sha }}" \
+            --title "QAT-LEDGER Flutter Build ($SHORT_SHA)" \
+            --notes "Automated verified release APKs for commit $SHORT_SHA (signing: ${{ steps.keystore.outputs.signed_by }})." \
+            --prerelease \
+            ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk \
+            ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk \
+            ci-dist/QAT_LEDGER_FLUTTER_SOURCE.zip \
+            ci-dist/SHA256SUMS.txt
 
       - name: Smoke-test APKs on Android Emulator
         if: always()
