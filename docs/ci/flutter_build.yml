@@ -73,7 +73,29 @@ jobs:
           fi
 
       - name: Run Flutter tests
-        run: flutter test -r expanded
+        run: |
+          set -o pipefail
+          mkdir -p ci-dist
+          set +e
+          flutter test -r expanded 2>&1 | tee ci-dist/flutter_test.log
+          RC=${PIPESTATUS[0]}
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            python3 - <<'PY' || true
+          lines = open('ci-dist/flutter_test.log', encoding='utf-8', errors='replace').read().splitlines()
+          fail_chunks = []
+          for idx, ln in enumerate(lines):
+              if '[E]' in ln or 'EXCEPTION CAUGHT BY' in ln or 'Some tests failed.' in ln:
+                  start = max(0, idx - 1)
+                  end = min(len(lines), idx + 14)
+                  fail_chunks.append(' | '.join(x.strip() for x in lines[start:end] if x.strip()))
+          if not fail_chunks:
+              fail_chunks = [' | '.join(x.strip() for x in lines[-35:] if x.strip())]
+          for msg in fail_chunks[:12]:
+              print(f'::error title=flutter_test::{msg[:900]}')
+          PY
+            exit "$RC"
+          fi
 
       - name: Ensure Android Gradle wrapper exists
         run: |
