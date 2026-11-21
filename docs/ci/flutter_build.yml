@@ -144,6 +144,9 @@ jobs:
 
           MISSING=""
           MATRIX=""
+          SAFE_MATRIX=""
+          st_label() { [ -n "${!1:-}" ] && echo "SET" || echo "MISSING"; }
+          SAFE_MATRIX="S1(b64)=$(st_label KEYSTORE_B64) S2(store_pass)=$(st_label KEYSTORE_PASSWORD) S3(alias)=$(st_label KEY_ALIAS) S4(key_pass)=$(st_label KEY_PASSWORD) S5(cert_sha256)=$(st_label RELEASE_KEYSTORE_SHA256)"
           for S_NAME in KEYSTORE_B64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD RELEASE_KEYSTORE_SHA256; do
             S_VAL="${!S_NAME:-}"
             if [ -z "$S_VAL" ]; then
@@ -154,6 +157,8 @@ jobs:
             fi
           done
           echo "keystore_secrets_matrix=${MATRIX%;}" >> "$GITHUB_OUTPUT"
+          echo "keystore_secrets_safe=${SAFE_MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=keystore_secrets_state::${SAFE_MATRIX}"
 
           if [ -z "$MISSING" ]; then
             EXPECTED_SHA256=$(printf '%s' "$RELEASE_KEYSTORE_SHA256" | tr '[:upper:]' '[:lower:]' | tr -d ': ')
@@ -314,7 +319,9 @@ jobs:
       - name: Build Customer APK
         env:
           QAT_LICENSE_PUBLIC_KEYS: ${{ env.RESOLVED_QAT_LICENSE_PUBLIC_KEYS }}
+          ORG_GRADLE_PROJECT_QAT_LICENSE_PUBLIC_KEYS: ${{ env.RESOLVED_QAT_LICENSE_PUBLIC_KEYS }}
           RELEASE_SIGNING_REQUIRED: ${{ steps.keystore.outputs.release_signing_required }}
+          ORG_GRADLE_PROJECT_RELEASE_SIGNING_REQUIRED: ${{ steps.keystore.outputs.release_signing_required }}
         run: |
           rm -f android/app/src/developer/assets/dev_bootstrap_seed.b64
           flutter build apk --release --flavor customer \
@@ -325,7 +332,9 @@ jobs:
       - name: Build Developer APK
         env:
           QAT_LICENSE_PUBLIC_KEYS: ${{ env.RESOLVED_QAT_LICENSE_PUBLIC_KEYS }}
+          ORG_GRADLE_PROJECT_QAT_LICENSE_PUBLIC_KEYS: ${{ env.RESOLVED_QAT_LICENSE_PUBLIC_KEYS }}
           RELEASE_SIGNING_REQUIRED: ${{ steps.keystore.outputs.release_signing_required }}
+          ORG_GRADLE_PROJECT_RELEASE_SIGNING_REQUIRED: ${{ steps.keystore.outputs.release_signing_required }}
         run: |
           rm -f android/app/src/developer/assets/dev_bootstrap_seed.b64
           flutter build apk --release --flavor developer \

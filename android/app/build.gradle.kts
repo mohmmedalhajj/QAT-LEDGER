@@ -7,10 +7,10 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-val qatLicensePublicKeys: String =
-    ((project.findProperty("QAT_LICENSE_PUBLIC_KEYS") as String?)
-        ?: System.getenv("QAT_LICENSE_PUBLIC_KEYS")
-        ?: "").trim()
+val qatLicensePublicKeys: String = listOfNotNull(
+    (project.findProperty("QAT_LICENSE_PUBLIC_KEYS") as String?)?.trim()?.takeIf { it.isNotEmpty() },
+    System.getenv("QAT_LICENSE_PUBLIC_KEYS")?.trim()?.takeIf { it.isNotEmpty() },
+).firstOrNull() ?: ""
 
 fun escapeBuildConfig(value: String): String =
     value.replace("\\", "\\\\").replace("\"", "\\\"")
@@ -35,10 +35,11 @@ val hasReleaseKeystore = resolvedReleaseKeystoreFile != null &&
     !keystoreProperties.getProperty("keyAlias").isNullOrBlank() &&
     !keystoreProperties.getProperty("keyPassword").isNullOrBlank()
 
-val releaseSigningRequired: Boolean =
-    ((project.findProperty("RELEASE_SIGNING_REQUIRED") as String?)
-        ?: System.getenv("RELEASE_SIGNING_REQUIRED")
-        ?: "false").trim().equals("true", ignoreCase = true)
+val releaseSigningRequired: Boolean = listOfNotNull(
+    (project.findProperty("RELEASE_SIGNING_REQUIRED") as String?)?.trim()?.takeIf { it.isNotEmpty() },
+    System.getenv("RELEASE_SIGNING_REQUIRED")?.trim()?.takeIf { it.isNotEmpty() },
+    "false",
+).first().equals("true", ignoreCase = true)
 
 if (releaseSigningRequired && !hasReleaseKeystore) {
     throw org.gradle.api.GradleException(
