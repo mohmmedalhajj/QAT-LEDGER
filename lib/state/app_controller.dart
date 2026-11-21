@@ -12,8 +12,7 @@ import '../data/database_service.dart';
 import '../data/models.dart';
 import '../data/qat_repository.dart';
 import '../data/room_migrator.dart';
-import '../developer/developer_database.dart';
-import '../developer/developer_key_manager.dart';
+import '../licensing/developer_bridge.dart';
 import '../licensing/license_models.dart';
 import '../licensing/license_verifier.dart';
 import '../licensing/local_license_store.dart';
@@ -44,8 +43,10 @@ class AppController extends ChangeNotifier {
   AppController({
     DatabaseService? dbService,
     SharedPreferences? prefs,
+    DeveloperBridge? developerBridge,
   })  : _dbService = dbService ?? DatabaseService.instance,
-        _overridePrefs = prefs {
+        _overridePrefs = prefs,
+        _developerBridge = developerBridge {
     _repo = QatRepository(_dbService);
     _migrator = RoomMigrator(dbService: _dbService);
     _backupService = BackupService(dbService: _dbService, migrator: _migrator);
@@ -53,6 +54,7 @@ class AppController extends ChangeNotifier {
 
   final DatabaseService _dbService;
   final SharedPreferences? _overridePrefs;
+  final DeveloperBridge? _developerBridge;
 
   late final QatRepository _repo;
   late final RoomMigrator _migrator;
@@ -60,7 +62,6 @@ class AppController extends ChangeNotifier {
 
   SharedPreferences? _prefs;
   LocalLicenseStore? _licenseStore;
-  DeveloperKeyManager? _devKeyManager;
 
   static const String _prefSessionLoggedIn = 'qat_session_logged_in_v1';
   static const String _prefSessionUsername = 'qat_session_username_v1';
@@ -76,6 +77,7 @@ class AppController extends ChangeNotifier {
   int _settingsSubTab = 0;
   int? _statementCustomerId;
   int? _statementSupplierId;
+  String? _statementWorkerName;
   final List<({AppScreenRoute route, int section, int subTab})> _navHistory = [];
   final Map<String, bool Function()> _unsavedGuards = {};
 
@@ -124,6 +126,7 @@ class AppController extends ChangeNotifier {
   List<TransferRecipientSummary> _recipientReports = [];
   List<DailySettlementSnapshot> _dailySettlements = [];
   List<InventoryReconciliationEntry> _reconciliationLogs = [];
+  List<WorkerHandoff> _workerHandoffs = [];
   List<AppUser> _users = [];
   AppUser? _currentUser;
   SectionPermissions _sectionPermissions = const SectionPermissions();
@@ -153,6 +156,7 @@ class AppController extends ChangeNotifier {
   int get settingsSubTab => _settingsSubTab;
   int? get statementCustomerId => _statementCustomerId;
   int? get statementSupplierId => _statementSupplierId;
+  String? get statementWorkerName => _statementWorkerName;
   bool get canNavigateBack => _navHistory.isNotEmpty;
   bool get hasUnsavedChanges => _unsavedGuards.values.any((fn) {
         try {
@@ -193,6 +197,7 @@ class AppController extends ChangeNotifier {
   List<DailySettlementSnapshot> get dailySettlements => _dailySettlements;
   List<InventoryReconciliationEntry> get reconciliationLogs =>
       _reconciliationLogs;
+  List<WorkerHandoff> get workerHandoffs => _workerHandoffs;
   List<AppUser> get users => _users;
   AppUser? get currentUser => _currentUser;
   SectionPermissions get sectionPermissions => _sectionPermissions;
@@ -210,8 +215,10 @@ class AppController extends ChangeNotifier {
 
   QatRepository get repo => _repo;
   BackupService get backupService => _backupService;
-  DeveloperKeyManager? get developerKeyManager => _devKeyManager;
-  DeveloperDatabaseService get developerDb => DeveloperDatabaseService.instance;
+  DeveloperBridge? get developerBridge =>
+      (_editionConfig.isDeveloper && (_developerBridge?.isReady ?? false))
+          ? _developerBridge
+          : null;
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -219,8 +226,8 @@ class AppController extends ChangeNotifier {
     _editionConfig = await PlatformBridge.instance.getEditionConfig();
     _licenseStore = LocalLicenseStore(_prefs!);
     _installationId = await _licenseStore!.getOrCreateInstallationId();
-    if (_editionConfig.isDeveloper) {
-      _devKeyManager = DeveloperKeyManager(_prefs!);
+    if (_editionConfig.isDeveloper && _developerBridge != null) {
+      await _developerBridge!.initialize(_prefs!);
     }
 
     _migrationSummary = await _migrator.migrateIfNeeded();
@@ -575,6 +582,42 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Creates an automatic rollback `.qatbackup` first, verifies current user password,
+  /// and wipes all accounting/operational records (or full factory reset when requested).
+  Future<BackupResult> resetSystemLedgerData({
+    required String passwordConfirmation,
+    required String backupDir,
+    bool fullFactoryReset = false,
+  }) async {
+    if (_currentUser != null) {
+      if (!PasswordSecurity.verifyPassword(
+        passwordConfirmation,
+        _currentUser!.passwordSha256,
+      )) {
+        throw ArgumentError('كلمة المرور غير صحيحة؛ تم إلغاء التهيئة لحماية بياناتك.');
+      }
+    }
+    final rollback = await _backupService.resetAllAccountingData(
+      rollbackDir: backupDir,
+      appEdition: _editionConfig.edition,
+      agencyLogoPath: _settings.logoPath,
+      fullFactoryReset: fullFactoryReset,
+    );
+
+    _navHistory.clear();
+    _unsavedGuards.clear();
+    _statementCustomerId = null;
+    _statementSupplierId = null;
+    if (fullFactoryReset) {
+      await _clearSessionStorage(clearRemembered: true);
+      _isLoggedIn = false;
+      _currentUser = null;
+      _users = [];
+    }
+    await reloadAll();
+    return rollback;
+  }
+
   Future<void> updateCredentials({
     required String newUsername,
     required String newPassword,
@@ -706,13 +749,9 @@ class AppController extends ChangeNotifier {
 
   Future<void> refreshLicense() async {
     if (_licenseStore == null) return;
-    TrustedPublicKeyRegistry? devReg;
-    if (_editionConfig.isDeveloper && _devKeyManager != null) {
-      final info = await _devKeyManager!.getPublicKeyInfo();
-      if (info != null) {
-        devReg = TrustedPublicKeyRegistry.fromRawPublicKeys([info.rawPublicBytes]);
-      }
-    }
+    final devReg = _editionConfig.isDeveloper && _developerBridge != null
+        ? await _developerBridge!.getActivePublicKeyRegistry()
+        : null;
     _licenseStatus = await _licenseStore!.loadAndVerify(
       editionConfig: _editionConfig,
       extraDevRegistry: devReg,
@@ -725,13 +764,9 @@ class AppController extends ChangeNotifier {
     if (_licenseStore == null) {
       return const LicenseVerificationResult(kind: LicenseStateKind.corrupted);
     }
-    TrustedPublicKeyRegistry? devReg;
-    if (_editionConfig.isDeveloper && _devKeyManager != null) {
-      final info = await _devKeyManager!.getPublicKeyInfo();
-      if (info != null) {
-        devReg = TrustedPublicKeyRegistry.fromRawPublicKeys([info.rawPublicBytes]);
-      }
-    }
+    final devReg = _editionConfig.isDeveloper && _developerBridge != null
+        ? await _developerBridge!.getActivePublicKeyRegistry()
+        : null;
     final installId = await _licenseStore!.getOrCreateInstallationId();
     final registry = TrustedPublicKeyRegistry.fromCsv(_editionConfig.publicKeysCsv);
     final verifier = OfflineLicenseVerifier(
@@ -797,7 +832,38 @@ class AppController extends ChangeNotifier {
     _recipientReports = await _repo.getAllRecipientsReports();
     _dailySettlements = await _repo.getDailySettlements();
     _reconciliationLogs = await _repo.getInventoryReconciliations();
+    _workerHandoffs = await _repo.getWorkerHandoffs();
     notifyListeners();
+  }
+
+  Future<void> addWorkerHandoff({
+    required String workerName,
+    int? receiverId,
+    required WorkerHandoffDirection direction,
+    required int amountMinor,
+    required CurrencyCode currency,
+    int qtyMilli = 0,
+    String unit = 'ربطة',
+    String notes = '',
+    int? dateMs,
+  }) async {
+    await _repo.addWorkerHandoff(
+      workerName: workerName,
+      receiverId: receiverId,
+      direction: direction,
+      amountMinor: amountMinor,
+      currency: currency,
+      qtyMilli: qtyMilli,
+      unit: unit,
+      notes: notes,
+      dateMs: dateMs,
+    );
+    await reloadAll();
+  }
+
+  Future<void> deleteWorkerHandoff(int id) async {
+    await _repo.deleteWorkerHandoff(id);
+    await reloadAll();
   }
 
   Future<void> setPeriodFilter(LedgerPeriodFilter filter) async {
@@ -982,12 +1048,21 @@ class AppController extends ChangeNotifier {
   void openStatementForCustomer(int customerId) {
     _statementCustomerId = customerId;
     _statementSupplierId = null;
+    _statementWorkerName = null;
     navigateToRoute(AppScreenRoute.statement);
   }
 
   void openStatementForSupplier(int supplierId) {
     _statementSupplierId = supplierId;
     _statementCustomerId = null;
+    _statementWorkerName = null;
+    navigateToRoute(AppScreenRoute.statement);
+  }
+
+  void openStatementForWorker(String workerName) {
+    _statementWorkerName = workerName;
+    _statementCustomerId = null;
+    _statementSupplierId = null;
     navigateToRoute(AppScreenRoute.statement);
   }
 

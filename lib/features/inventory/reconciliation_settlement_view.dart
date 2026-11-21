@@ -158,7 +158,7 @@ class _ReconciliationSettlementViewState
     CurrencyCode cur,
     CurrencyDashboardMetrics m,
   ) async {
-    final expectedCash = m.cashNetFlowMinor;
+    final expectedCash = m.cashBoxBalanceMinor;
     final actualCounted = Money.parseMinorUnits(_actualCashCtrl.text);
     final variance = actualCounted - expectedCash;
     final pendingTransfers = ctrl.transfers
@@ -522,10 +522,11 @@ class _ReconciliationSettlementViewState
     CurrencyCode activeCur,
     CurrencyDashboardMetrics m,
   ) {
-    final expectedCash = m.cashNetFlowMinor;
+    final expectedCash = m.cashBoxBalanceMinor;
     final actualCounted = Money.parseMinorUnits(_actualCashCtrl.text);
     final variance = actualCounted - expectedCash;
     final hasInput = _actualCashCtrl.text.trim().isNotEmpty;
+    final transfersOutTotal = m.transfersDeliveredMinor + m.transfersPendingMinor;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -586,13 +587,25 @@ class _ReconciliationSettlementViewState
                   value: Money(m.expensesMinor, activeCur).format(),
                   valueColor: pal.danger,
                 ),
+                if (m.taxMinor > 0)
+                  ErpDetailRow(
+                    label: '- ضرائب القات',
+                    value: Money(m.taxMinor, activeCur).format(),
+                    valueColor: pal.danger,
+                  ),
                 if (m.stallOutflowMinor > 0 || m.laborOutflowMinor > 0)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
-                      'ضرائب/التزامات: فرش ${Money(m.stallOutflowMinor, activeCur).format()} • عمال ${Money(m.laborOutflowMinor, activeCur).format()}',
+                      'مخرجات تاريخية: فرش ${Money(m.stallOutflowMinor, activeCur).format()} • عمال ${Money(m.laborOutflowMinor, activeCur).format()}',
                       style: TextStyle(fontSize: 11.5, color: pal.textSecondary),
                     ),
+                  ),
+                if (transfersOutTotal > 0)
+                  ErpDetailRow(
+                    label: '- الحوالات الصادرة (المسلمة والمعلقة)',
+                    value: Money(transfersOutTotal, activeCur).format(),
+                    valueColor: pal.danger,
                   ),
                 ErpDetailRow(
                   label: '- عمولات الحوالات',

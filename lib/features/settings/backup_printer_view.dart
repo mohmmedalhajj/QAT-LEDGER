@@ -27,7 +27,9 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
   List<BondedPrinter> _printers = [];
   List<File> _localBackups = [];
   bool _searchedPrinters = false;
+  bool _hideNonPrinters = true;
   String? _btStatusMessage;
+  String? _lastPrintResultNote;
   bool _busy = false;
   String? _lastBackupInfo;
 
@@ -175,6 +177,118 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
     final path = picked?.files.single.path;
     if (path == null || !mounted) return;
     await _restoreFromSpecificPath(ctrl, path);
+  }
+
+  Future<void> _confirmAndResetSystem(AppController ctrl) async {
+    final passCtrl = TextEditingController();
+    bool fullFactory = false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => ErpDialogControllerScope(
+          controllers: [passCtrl],
+          child: AlertDialog(
+            title: const Text('تهيئة ومسح شامل للنظام'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'تنبيه حرج: سيتم حذف جميع المبيعات، المشتريات، العملاء، الموردين، المخزون، المصروفات، الضرائب، والحوالات بشكل نهائي.\n'
+                    'سيقوم النظام تلقائياً بحفظ نسخة احتياطية آمنة (.qatbackup) قبل المسح.',
+                    style: TextStyle(fontSize: 12.5, height: 1.5),
+                  ),
+                  const SizedBox(height: 10),
+                  RadioListTile<bool>(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    value: false,
+                    groupValue: fullFactory,
+                    onChanged: (v) => setDlgState(() => fullFactory = v ?? false),
+                    title: const Text('تصفير الدفاتر والحسابات فقط'),
+                    subtitle: const Text(
+                      'الإبقاء على اسم الوكالة والشعار وحسابات الدخول',
+                      style: TextStyle(fontSize: 11),
+                    ),
+                  ),
+                  RadioListTile<bool>(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    value: true,
+                    groupValue: fullFactory,
+                    onChanged: (v) => setDlgState(() => fullFactory = v ?? true),
+                    title: const Text('إعادة ضبط المصنع بالكامل'),
+                    subtitle: const Text(
+                      'حذف كل الدفاتر والإعدادات والمستخدمين والبدء من شاشة التأسيس',
+                      style: TextStyle(fontSize: 11),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: passCtrl,
+                    obscureText: true,
+                    textDirection: TextDirection.ltr,
+                    decoration: const InputDecoration(
+                      labelText: 'أدخل كلمة المرور الحالية للتأكيد',
+                      prefixIcon: Icon(Icons.lock_outline),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: context.pal.danger,
+                ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('تنفيذ المسح الشامل'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    final password = passCtrl.text;
+    passCtrl.dispose();
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      final rollback = await ctrl.resetSystemLedgerData(
+        passwordConfirmation: password,
+        backupDir: '${docs.path}/qat_ledger_backups',
+        fullFactoryReset: fullFactory,
+      );
+      await _refreshLocalBackups();
+      if (!mounted) return;
+      setState(() {
+        _lastBackupInfo =
+            'نسخة ما قبل التهيئة: ${rollback.fileName} (${(rollback.sizeBytes / 1024).toStringAsFixed(1)} KB)';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            fullFactory
+                ? 'تمت إعادة ضبط النظام بالكامل مع حفظ نسخة أمان (${rollback.fileName}).'
+                : 'تم مسح وتصفير جميع الدفاتر بنجاح مع حفظ نسخة أمان (${rollback.fileName}).',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -330,109 +444,212 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
                     });
                   },
                   icon: const Icon(Icons.bluetooth_searching),
-                  label: const Text('جلب الطابعات المقترنة'),
+                  label: const Text('فحص وجلب الطابعات المقترنة'),
                 ),
-                if (_searchedPrinters && _printers.isEmpty) ...[
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'تصفية الطابعات الحرارية فقط',
+                    style: TextStyle(fontSize: 12.5),
+                  ),
+                  subtitle: const Text(
+                    'إخفاء سماعات البلوتوث والساعات والهواتف المقترنة',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                  value: _hideNonPrinters,
+                  onChanged: (v) => setState(() => _hideNonPrinters = v),
+                ),
+                if (_searchedPrinters && _btStatusMessage != null) ...[
+                  const SizedBox(height: 6),
+                  ErpStatusBanner(
+                    tone: _printers.any((p) => p.isLikelyPrinter)
+                        ? ErpBannerTone.success
+                        : ErpBannerTone.warning,
+                    title: _printers.any((p) => p.isLikelyPrinter)
+                        ? 'نتيجة فحص البلوتوث'
+                        : 'تنبيه اكتشاف الطابعات',
+                    subtitle: _btStatusMessage!,
+                  ),
+                ],
+                if (_lastPrintResultNote != null) ...[
                   const SizedBox(height: 8),
                   ErpStatusBanner(
-                    tone: ErpBannerTone.warning,
-                    title: 'لم يتم العثور على طابعات مقترنة',
-                    subtitle: _btStatusMessage ??
-                        'تأكد من تشغيل البلوتوث ومنح صلاحية الأجهزة القريبة ثم اقترن بالطابعة من إعدادات Android أولاً.',
+                    tone: ErpBannerTone.info,
+                    title: 'حالة آخر عملية إرسال للطابعة',
+                    subtitle: _lastPrintResultNote!,
                   ),
                 ],
                 if (ctrl.settings.savedPrinterAddress.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  FilledButton.tonalIcon(
-                    onPressed: () async {
-                      final messenger = ScaffoldMessenger.of(context);
-                      final nowMs = DateTime.now().millisecondsSinceEpoch;
-                      final testSale = Sale(
-                        id: 0,
-                        invoiceNumber: 'TEST-ESC-POS',
-                        customerId: null,
-                        customerName: 'عميل تجريبي',
-                        dateMs: nowMs,
-                        dateIso: QatDateUtils.todayIso(),
-                        currency: ctrl.currencyPolicy.defaultCurrency,
-                        subtotalMinor: 500000,
-                        discountMinor: 0,
-                        taxBps: 0,
-                        taxAmountMinor: 0,
-                        totalAmountMinor: 500000,
-                        paidAmountMinor: 500000,
-                        remainingAmountMinor: 0,
-                        paymentType: PaymentType.paid,
-                        status: PaymentType.paid.arabicLabel,
-                        notes:
-                            'اختبار طباعة حرارية ${ctrl.settings.printerPaperMm}mm',
-                        isArchived: false,
-                        items: [
-                          SaleItem(
-                            id: 0,
-                            saleId: 0,
-                            inventoryBatchId: null,
-                            qatTypeName: 'صنف اختباري',
-                            qtyMilli: 1000,
-                            unit: 'ربطة',
-                            unitPriceMinor: 500000,
-                            buyPriceMinor: 350000,
-                            lineTotalMinor: 500000,
-                            currency: ctrl.currencyPolicy.defaultCurrency,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.tonalIcon(
+                          onPressed: () async {
+                            final messenger = ScaffoldMessenger.of(context);
+                            final nowMs = DateTime.now().millisecondsSinceEpoch;
+                            final testSale = Sale(
+                              id: 0,
+                              invoiceNumber: 'TEST-ESC-POS',
+                              customerId: null,
+                              customerName: 'عميل تجريبي',
+                              dateMs: nowMs,
+                              dateIso: QatDateUtils.todayIso(),
+                              currency: ctrl.currencyPolicy.defaultCurrency,
+                              subtotalMinor: 500000,
+                              discountMinor: 0,
+                              taxBps: 0,
+                              taxAmountMinor: 0,
+                              totalAmountMinor: 500000,
+                              paidAmountMinor: 500000,
+                              remainingAmountMinor: 0,
+                              paymentType: PaymentType.paid,
+                              status: PaymentType.paid.arabicLabel,
+                              notes:
+                                  'اختبار طباعة حرارية ${ctrl.settings.printerPaperMm}mm',
+                              isArchived: false,
+                              items: [
+                                SaleItem(
+                                  id: 0,
+                                  saleId: 0,
+                                  inventoryBatchId: null,
+                                  qatTypeName: 'صنف اختباري',
+                                  qtyMilli: 1000,
+                                  unit: 'ربطة',
+                                  unitPriceMinor: 500000,
+                                  buyPriceMinor: 350000,
+                                  lineTotalMinor: 500000,
+                                  currency: ctrl.currencyPolicy.defaultCurrency,
+                                ),
+                              ],
+                            );
+                            try {
+                              await EscPosService.instance.printSaleReceipt(
+                                agency: ctrl.settings,
+                                sale: testSale,
+                                printerAddress: ctrl.settings.savedPrinterAddress,
+                                paperMm: ctrl.settings.printerPaperMm,
+                              );
+                              if (!mounted) return;
+                              setState(() {
+                                _lastPrintResultNote =
+                                    'تم إرسال بيانات ESC/POS (${ctrl.settings.printerPaperMm} مم) عبر منفذ SPP للطابعة ${ctrl.settings.savedPrinterName}. إذا لم يخرج ورق تحقق من وجود بكرة ورق وشحن الطابعة.';
+                              });
+                              messenger.showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'تم إرسال حزمة الاختبار للطابعة بنجاح',
+                                  ),
+                                ),
+                              );
+                            } catch (e) {
+                              if (!mounted) return;
+                              setState(() {
+                                _lastPrintResultNote = 'تعذر الإرسال للطابعة: $e';
+                              });
+                              messenger.showSnackBar(
+                                SnackBar(content: Text(e.toString())),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.print_outlined),
+                          label: Text(
+                            'اختبار طباعة (${ctrl.settings.printerPaperMm} مم)',
                           ),
-                        ],
-                      );
-                      try {
-                        await EscPosService.instance.printSaleReceipt(
-                          agency: ctrl.settings,
-                          sale: testSale,
-                          printerAddress: ctrl.settings.savedPrinterAddress,
-                          paperMm: ctrl.settings.printerPaperMm,
-                        );
-                        if (!mounted) return;
-                        messenger.showSnackBar(
-                          const SnackBar(
-                            content:
-                                Text('تم إرسال إيصال الاختبار للطابعة بنجاح'),
-                          ),
-                        );
-                      } catch (e) {
-                        if (!mounted) return;
-                        messenger.showSnackBar(
-                          SnackBar(content: Text(e.toString())),
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.print_outlined),
-                    label: Text(
-                      'اختبار طباعة (${ctrl.settings.printerPaperMm} مم)',
-                    ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: 'إزالة الطابعة المحفوظة',
+                        onPressed: () async {
+                          final prev = ctrl.settings;
+                          await ctrl.updateSettings(
+                            prev.copyWith(
+                              savedPrinterName: '',
+                              savedPrinterAddress: '',
+                            ),
+                          );
+                        },
+                        icon: Icon(Icons.link_off, color: pal.danger),
+                      ),
+                    ],
                   ),
                 ],
-                for (final p in _printers)
+                for (final p in _printers.where(
+                  (p) => !_hideNonPrinters || !p.isBlockedNonPrinter,
+                ))
                   ListTile(
                     dense: true,
                     leading: Icon(
                       p.isLikelyPrinter
                           ? Icons.print_outlined
-                          : Icons.bluetooth_connected,
-                      color: p.isLikelyPrinter ? pal.success : pal.textSecondary,
+                          : (p.isBlockedNonPrinter
+                              ? Icons.headset_off_outlined
+                              : Icons.bluetooth_connected),
+                      color: p.isLikelyPrinter
+                          ? pal.success
+                          : (p.isBlockedNonPrinter
+                              ? pal.danger
+                              : pal.textSecondary),
                     ),
                     title: Text(p.name),
                     subtitle: Text('${p.address} • ${p.deviceCategoryLabel}'),
                     trailing: TextButton(
-                      onPressed: () async {
-                        final prev = ctrl.settings;
-                        await ctrl.updateSettings(
-                          prev.copyWith(
-                            savedPrinterName: p.name,
-                            savedPrinterAddress: p.address,
-                          ),
-                        );
-                      },
-                      child: const Text('اعتماد'),
+                      onPressed: p.isBlockedNonPrinter
+                          ? null
+                          : () async {
+                              final prev = ctrl.settings;
+                              await ctrl.updateSettings(
+                                prev.copyWith(
+                                  savedPrinterName: p.name,
+                                  savedPrinterAddress: p.address,
+                                ),
+                              );
+                            },
+                      child: Text(p.isBlockedNonPrinter ? 'غير مدعوم' : 'اعتماد'),
                     ),
                   ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          color: pal.dangerSoft,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.delete_forever_outlined, color: pal.danger),
+                    const SizedBox(width: 8),
+                    Text(
+                      'منطقة الخطر — تهيئة ومسح شامل للنظام',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(color: pal.danger),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'تصفير جميع الدفاتر المالية والعملاء والموردين والمخزون والمصروفات والحوالات، مع حفظ نسخة احتياطية أوتوماتيكية قبل التنفيذ.',
+                  style: TextStyle(fontSize: 12, color: pal.textSecondary),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: pal.danger,
+                    side: BorderSide(color: pal.danger),
+                  ),
+                  onPressed: _busy ? null : () => _confirmAndResetSystem(ctrl),
+                  icon: const Icon(Icons.cleaning_services_outlined),
+                  label: const Text('تهيئة / مسح شامل للنظام'),
+                ),
               ],
             ),
           ),

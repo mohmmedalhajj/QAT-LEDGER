@@ -45,6 +45,8 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               ErpDetailRow(label: 'المورد', value: p.supplierName),
+              if (p.receiverName.isNotEmpty)
+                ErpDetailRow(label: 'مستلم المخزون', value: p.receiverName),
               ErpDetailRow(label: 'التاريخ', value: p.dateIso, ltr: true),
               ErpDetailRow(
                 label: 'طريقة الدفع',
@@ -223,10 +225,12 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
     );
     final demarTypeCtrl = TextEditingController(text: p.demarType);
     final demarNoCtrl = TextEditingController(text: p.demarNumber);
+    final receiverCtrl = TextEditingController(text: p.receiverName);
     PaymentType pType = p.paymentType;
     String paymentMethod =
         p.paymentMethod.isNotEmpty ? p.paymentMethod : 'نقداً';
     int purchaseDateMs = p.dateMs;
+    int? receiverId = p.receiverId;
 
     List<TextEditingController> allControllers() => [
           discCtrl,
@@ -236,6 +240,7 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
           demarAmountCtrl,
           demarTypeCtrl,
           demarNoCtrl,
+          receiverCtrl,
           notesCtrl,
           for (final d in lineDrafts) ...[
             d.qatCtrl,
@@ -457,6 +462,47 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
                     ],
                   ),
                   const SizedBox(height: 8),
+                  if (ctrl.inventoryReceivers.isNotEmpty) ...[
+                    DropdownButtonFormField<int?>(
+                      key: ValueKey<String>('edit_pur_recv_${receiverId ?? 'none'}'),
+                      initialValue:
+                          ctrl.inventoryReceivers.any((r) => r.id == receiverId)
+                              ? receiverId
+                              : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'مستلم المخزون (اختياري)',
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('بدون مستلم محدد / إدخال يدوي'),
+                        ),
+                        ...ctrl.inventoryReceivers.map(
+                          (r) => DropdownMenuItem<int?>(
+                            value: r.id,
+                            child: Text(r.name),
+                          ),
+                        ),
+                      ],
+                      onChanged: (v) {
+                        setModalState(() => receiverId = v);
+                        if (v != null) {
+                          receiverCtrl.text = ctrl.inventoryReceivers
+                              .firstWhere((r) => r.id == v)
+                              .name;
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  TextField(
+                    controller: receiverCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'اسم مستلم المخزون',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   TextField(
                     controller: notesCtrl,
                     decoration: const InputDecoration(labelText: 'ملاحظات'),
@@ -509,6 +555,9 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
                   demarMinor: Money.parseMinorUnits(demarAmountCtrl.text),
                   demarType: demarTypeCtrl.text,
                   demarNumber: demarNoCtrl.text,
+                  receiverId: receiverId,
+                  receiverName: receiverCtrl.text,
+                  importWeightId: p.importWeightId,
                   notes: notesCtrl.text,
                   dateMs: purchaseDateMs,
                 );
@@ -602,6 +651,7 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
                               const SizedBox(height: 6),
                               Text(
                                 '${p.dateIso} • الإجمالي: ${Money(p.totalAmountMinor, p.currency).format()} • ${p.overpaymentSurplusMinor > 0 ? 'فائض لنا: ${Money(p.overpaymentSurplusMinor, p.currency).format()}' : 'المتبقي: ${Money(p.remainingAmountMinor, p.currency).format()}'}'
+                                '${p.receiverName.isNotEmpty ? ' • المستلم: ${p.receiverName}' : ''}'
                                 '${p.demarMinor > 0 ? ' • دمار: ${Money(p.demarMinor, p.currency).format()}' : ''}',
                                 style: TextStyle(
                                   fontSize: 12.5,
@@ -703,9 +753,19 @@ class _SupplierPurchasesViewState extends State<SupplierPurchasesView> {
                                           destructive: true,
                                         );
                                         if (!ok) return;
-                                        await ctrl.repo
-                                            .deleteSupplierPurchase(p.id);
-                                        await ctrl.reloadAll();
+                                        try {
+                                          await ctrl.repo
+                                              .deleteSupplierPurchase(p.id);
+                                          await ctrl.reloadAll();
+                                        } catch (e) {
+                                          if (!context.mounted) return;
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            SnackBar(
+                                              content: Text(e.toString()),
+                                            ),
+                                          );
+                                        }
                                       },
                                       icon: Icon(
                                         Icons.delete_outline,

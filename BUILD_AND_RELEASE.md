@@ -10,22 +10,19 @@
 
 ## 2. Flavors & Edition Separation (`customer` vs `developer`)
 
-| Flavor | Application ID | Purpose | Developer Console (`780mohmmed`) |
-|---|---|---|---|
-| `customer` | `com.aistudio.tofanqat.nxzwmb` | Production end-user app; preserves upgrade path over existing Room v18 Android installs | **Excluded / Hidden** (`APP_EDITION=customer`; `"780mohmmed"` gate opens local Agency Name & Section Permissions only) |
-| `developer` | `com.aistudio.tofanqat.nxzwmb.dev` | Internal vendor/developer issuance build | **Enabled** (`APP_EDITION=developer`; exposes Ed25519 Key Manager & License Signer) |
+| Flavor | Application ID | Entrypoint | Purpose | Developer Console (`780mohmmed`) |
+|---|---|---|---|---|
+| `customer` | `com.aistudio.tofanqat.nxzwmb` | `lib/main_customer.dart` | Production end-user app; preserves upgrade path over existing Room v18 Android installs | **Excluded from binary** (`APP_EDITION=customer`; `"780mohmmed"` gate opens local Agency Name & Section Permissions only; zero `lib/developer/**` imports & no `dev_bootstrap_seed.b64`) |
+| `developer` | `com.aistudio.tofanqat.nxzwmb.dev` | `lib/main_developer.dart` | Internal vendor/developer issuance build | **Enabled** (`APP_EDITION=developer`; exposes Ed25519 Key Manager & License Signer with paired bootstrap seed) |
 
 ---
 
-## 3. Configuring Trusted Ed25519 Public Keys
+## 3. Configuring Trusted Ed25519 Public Keys & Paired Seed
 
-Before building a Customer release APK:
-1. Open the Developer Edition app -> `الإعدادات -> الترخيص والأمان -> وحدة تحكم المطور -> المفاتيح والتدقيق` and copy the **SPKI Base64** public key.
-2. Supply it at build time via EITHER:
-   - Dart define: `--dart-define=QAT_LICENSE_PUBLIC_KEYS="<KEY1_SPKI_B64>,<KEY2_SPKI_B64>"`
-   - Or Gradle property / environment (`-PQAT_LICENSE_PUBLIC_KEYS="..."` or GitHub Secret `QAT_LICENSE_PUBLIC_KEYS`)
-
-Customer builds with an empty `QAT_LICENSE_PUBLIC_KEYS` safely report `untrustedKey` (`مفتاح غير موثوق`) instead of accepting untrusted tokens or crashing. Never place private Ed25519 seeds in `customer` code, `gradle.properties`, Git, or CI logs.
+Before building paired Customer + Developer release APKs:
+1. Optionally set GitHub Secret `QAT_DEV_ED25519_SEED_B64` (32-byte Ed25519 seed as Base64/Hex) so every release uses the same permanent developer signing key. If unset, CI generates a paired Ed25519 keypair per build, masks the private seed, bundles it into `developer` flavor's gitignored `assets/dev_bootstrap_seed.b64`, and embeds the matching public key into both `customer` and `developer` APKs.
+2. You can also append additional historical trusted public keys via GitHub Secret `QAT_LICENSE_PUBLIC_KEYS` (`QLK-XXXXXXXX:<base64UrlRaw32>` or SPKI Base64/PEM, comma-separated). `PlatformBridge.mergePublicKeyLists` merges native `BuildConfig` keys and `--dart-define` keys cleanly without shadowing either source.
+3. Never place private Ed25519 seeds in `customer` code, `gradle.properties`, Git, or CI logs. `android/app/src/developer/assets/dev_bootstrap_seed.b64` is gitignored and deleted immediately after the Developer APK step.
 
 ---
 
@@ -63,13 +60,15 @@ flutter test -r expanded
 
 # 3. Build Customer Release APK
 flutter build apk --release --flavor customer \
+  -t lib/main_customer.dart \
   --dart-define=APP_EDITION=customer \
-  --dart-define=QAT_LICENSE_PUBLIC_KEYS="<SPKI_BASE64>"
+  --dart-define=QAT_LICENSE_PUBLIC_KEYS="<QLK_OR_SPKI_BASE64>"
 
 # 4. Build Developer Release APK
 flutter build apk --release --flavor developer \
+  -t lib/main_developer.dart \
   --dart-define=APP_EDITION=developer \
-  --dart-define=QAT_LICENSE_PUBLIC_KEYS="<SPKI_BASE64>"
+  --dart-define=QAT_LICENSE_PUBLIC_KEYS="<QLK_OR_SPKI_BASE64>"
 ```
 
 Expected output paths after running on a Flutter + Android SDK host:

@@ -275,6 +275,16 @@ void main() {
       expect(verified.isValid, true);
       expect(verified.keyId, infoA.keyId);
 
+      // Verify PEM / hex / Kotlin BuildConfig line cross-compatibility and decodeSeed formats
+      final parsedHex = DeveloperKeyManager.decodeSeed(
+        List.generate(32, (i) => i.toRadixString(16).padLeft(2, '0')).join(),
+      );
+      expect(parsedHex.length, 32);
+      expect(infoA.spkiPem, contains('BEGIN PUBLIC KEY'));
+      expect(infoA.kotlinConfigLine, startsWith(infoA.kotlinKeyId));
+      final registryFromPem = TrustedPublicKeyRegistry.fromCsv(infoA.spkiPem);
+      expect(registryFromPem.findById(infoA.keyId), isNotNull);
+
       await (await dbA.database).close();
       await (await dbB.database).close();
     } finally {

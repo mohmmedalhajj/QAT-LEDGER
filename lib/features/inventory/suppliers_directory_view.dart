@@ -364,11 +364,14 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
     final demarAmountCtrl = TextEditingController(text: '0');
     final demarTypeCtrl = TextEditingController();
     final demarNoCtrl = TextEditingController();
+    final receiverCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
     CurrencyCode cur = ctrl.currencyPolicy.defaultCurrency;
     PaymentType pType = PaymentType.credit;
     String paymentMethod = 'نقداً';
     int purchaseDateMs = DateTime.now().millisecondsSinceEpoch;
+    int? receiverId;
+    int? importWeightId;
 
     List<TextEditingController> allControllers() => [
           paidCtrl,
@@ -377,6 +380,7 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
           demarAmountCtrl,
           demarTypeCtrl,
           demarNoCtrl,
+          receiverCtrl,
           notesCtrl,
           for (final d in lineDrafts) ...[
             d.qatCtrl,
@@ -638,6 +642,87 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
                     ],
                   ),
                   const SizedBox(height: 8),
+                  if (ctrl.inventoryReceivers.isNotEmpty) ...[
+                    DropdownButtonFormField<int?>(
+                      key: ValueKey<String>('pur_recv_${receiverId ?? 'none'}'),
+                      initialValue:
+                          ctrl.inventoryReceivers.any((r) => r.id == receiverId)
+                              ? receiverId
+                              : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'مستلم المخزون (اختياري)',
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('بدون مستلم محدد / إدخال يدوي'),
+                        ),
+                        ...ctrl.inventoryReceivers
+                            .where((r) => r.isActive)
+                            .map(
+                              (r) => DropdownMenuItem<int?>(
+                                value: r.id,
+                                child: Text(r.name),
+                              ),
+                            ),
+                      ],
+                      onChanged: (v) {
+                        setModalState(() => receiverId = v);
+                        if (v != null) {
+                          receiverCtrl.text = ctrl.inventoryReceivers
+                              .firstWhere((r) => r.id == v)
+                              .name;
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  TextField(
+                    controller: receiverCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'اسم مستلم المخزون (اختياري)',
+                    ),
+                  ),
+                  if (ctrl.importWeights.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<int?>(
+                      key: ValueKey<String>(
+                        'pur_wt_${importWeightId ?? 'none'}',
+                      ),
+                      initialValue: ctrl.importWeights
+                              .any((w) => w.id == importWeightId)
+                          ? importWeightId
+                          : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'ربط بسجل وزن وارد (اختياري)',
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('بدون ربط بوزن وارد'),
+                        ),
+                        ...ctrl.importWeights.take(40).map(
+                              (w) => DropdownMenuItem<int?>(
+                                value: w.id,
+                                child: Text(
+                                  '${w.dateIso} • ${QuantityMath.formatMilli(w.weightMilli)} كجم (${w.receiverName})',
+                                ),
+                              ),
+                            ),
+                      ],
+                      onChanged: (v) {
+                        setModalState(() => importWeightId = v);
+                        if (v != null && receiverCtrl.text.trim().isEmpty) {
+                          receiverCtrl.text = ctrl.importWeights
+                              .firstWhere((w) => w.id == v)
+                              .receiverName;
+                        }
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: 8),
                   TextField(
                     controller: notesCtrl,
                     decoration: const InputDecoration(labelText: 'ملاحظات'),
@@ -690,6 +775,9 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
                   demarMinor: Money.parseMinorUnits(demarAmountCtrl.text),
                   demarType: demarTypeCtrl.text,
                   demarNumber: demarNoCtrl.text,
+                  receiverId: receiverId,
+                  receiverName: receiverCtrl.text,
+                  importWeightId: importWeightId,
                   notes: notesCtrl.text,
                   dateMs: purchaseDateMs,
                 );
@@ -800,10 +888,34 @@ class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
                                     ),
                                   ),
                                   IconButton(
+                                    tooltip: 'تعديل',
                                     onPressed: () =>
                                         _openSupplierDialog(ctrl, existing: s),
                                     icon: const Icon(
                                       Icons.edit_outlined,
+                                      size: 18,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'أرشفة المورد',
+                                    onPressed: () async {
+                                      final ok = await showErpConfirmDialog(
+                                        context,
+                                        title: 'أرشفة المورد',
+                                        message:
+                                            'نقل المورد ${s.name} إلى الأرشيف مع حفظ كافة الفواتير والرصيد؟',
+                                        confirmLabel: 'أرشفة',
+                                      );
+                                      if (!ok) return;
+                                      await ctrl.repo.setArchived(
+                                        'suppliers',
+                                        s.id,
+                                        true,
+                                      );
+                                      await ctrl.reloadAll();
+                                    },
+                                    icon: const Icon(
+                                      Icons.archive_outlined,
                                       size: 18,
                                     ),
                                   ),

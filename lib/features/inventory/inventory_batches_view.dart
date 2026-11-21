@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/date_utils.dart';
 import '../../core/money.dart';
+import '../../core/platform_bridge.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../services/pdf_export_service.dart';
@@ -23,9 +24,11 @@ class InventoryBatchesView extends StatefulWidget {
 }
 
 class _InventoryBatchesViewState extends State<InventoryBatchesView> {
-  int _section = 0; // 0 = batches, 1 = import weights, 2 = receivers & daily matching
+  int _section = 0; // 0 = batches, 1 = import weights, 2 = receivers & matching, 3 = worker handoffs
   String _search = '';
   String _weightSearch = '';
+  String _workerSearch = '';
+  WorkerHandoffDirection? _workerDirFilter;
   _StockFilter _stockFilter = _StockFilter.all;
   CurrencyCode? _currencyFilter;
   String _matchFromIso = QatDateUtils.todayIso();
@@ -75,7 +78,24 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final picked =
+                          await PlatformBridge.instance.pickPhoneContact();
+                      if (picked != null) {
+                        if (nameCtrl.text.trim().isEmpty &&
+                            picked.name.trim().isNotEmpty) {
+                          nameCtrl.text = picked.name;
+                        }
+                        phoneCtrl.text = picked.phone;
+                      }
+                    },
+                    icon: const Icon(Icons.contacts_outlined, size: 18),
+                    label: const Text('استيراد من جهات الاتصال'),
+                  ),
+                  const SizedBox(height: 8),
                   TextField(
                     controller: nameCtrl,
                     decoration: const InputDecoration(labelText: 'اسم المستلم *'),
@@ -119,6 +139,203 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                     isActive: isActive,
                   );
                   await ctrl.reloadAll();
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                child: const Text('حفظ'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openWorkerHandoffDialog(
+    AppController ctrl, {
+    WorkerHandoff? existing,
+  }) async {
+    final workerCtrl = TextEditingController(text: existing?.workerName ?? '');
+    final amountCtrl = TextEditingController(
+      text: existing != null && existing.amountMinor > 0
+          ? Money.formatMinor(existing.amountMinor, showZeroDecimals: false)
+              .replaceAll(',', '')
+          : '',
+    );
+    final qtyCtrl = TextEditingController(
+      text: existing != null && existing.qtyMilli > 0
+          ? QuantityMath.formatMilli(existing.qtyMilli)
+          : '0',
+    );
+    final unitCtrl = TextEditingController(text: existing?.unit ?? 'ربطة');
+    final notesCtrl = TextEditingController(text: existing?.notes ?? '');
+    WorkerHandoffDirection direction =
+        existing?.direction ?? WorkerHandoffDirection.toWorker;
+    CurrencyCode currency =
+        existing?.currency ?? ctrl.currencyPolicy.defaultCurrency;
+    int? receiverId = existing?.receiverId;
+    int handoffDateMs =
+        existing?.dateMs ?? DateTime.now().millisecondsSinceEpoch;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [workerCtrl, amountCtrl, qtyCtrl, unitCtrl, notesCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text(
+              existing == null
+                  ? 'تسجيل تسليم / استلام عامل'
+                  : 'تعديل حركة عامل',
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SegmentedButton<WorkerHandoffDirection>(
+                    segments: const [
+                      ButtonSegment<WorkerHandoffDirection>(
+                        value: WorkerHandoffDirection.toWorker,
+                        label: Text('تسليم للعامل'),
+                      ),
+                      ButtonSegment<WorkerHandoffDirection>(
+                        value: WorkerHandoffDirection.fromWorker,
+                        label: Text('استلام من العامل'),
+                      ),
+                    ],
+                    selected: {direction},
+                    onSelectionChanged: (s) =>
+                        setModalState(() => direction = s.first),
+                  ),
+                  const SizedBox(height: 8),
+                  if (existing == null) ...[
+                    ErpDatePickerTile(
+                      label: 'التاريخ',
+                      dateMs: handoffDateMs,
+                      onChanged: (ms) =>
+                          setModalState(() => handoffDateMs = ms),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  CurrencySelectorRow(
+                    policy: ctrl.currencyPolicy,
+                    selected: currency,
+                    onChanged: (c) => setModalState(() => currency = c),
+                  ),
+                  const SizedBox(height: 8),
+                  if (ctrl.inventoryReceivers.isNotEmpty) ...[
+                    DropdownButtonFormField<int?>(
+                      key: ValueKey<String>('wh_rec_${receiverId ?? 'none'}'),
+                      initialValue: ctrl.inventoryReceivers
+                              .any((r) => r.id == receiverId)
+                          ? receiverId
+                          : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'اختيار عامل / مستلم مسجل (اختياري)',
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('إدخال اسم العامل يدوياً'),
+                        ),
+                        ...ctrl.inventoryReceivers.map(
+                          (r) => DropdownMenuItem<int?>(
+                            value: r.id,
+                            child: Text(r.name),
+                          ),
+                        ),
+                      ],
+                      onChanged: (v) {
+                        setModalState(() => receiverId = v);
+                        if (v != null) {
+                          workerCtrl.text = ctrl.inventoryReceivers
+                              .firstWhere((r) => r.id == v)
+                              .name;
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  TextField(
+                    controller: workerCtrl,
+                    decoration: const InputDecoration(labelText: 'اسم العامل *'),
+                  ),
+                  const SizedBox(height: 8),
+                  AccountingNumberField(
+                    controller: amountCtrl,
+                    label: 'المبلغ (${currency.shortSymbol})',
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: AccountingNumberField(
+                          controller: qtyCtrl,
+                          label: 'الكمية (اختياري)',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: unitCtrl,
+                          decoration: const InputDecoration(labelText: 'الوحدة'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: notesCtrl,
+                    decoration: const InputDecoration(labelText: 'البيان / ملاحظات'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final cleanName = workerCtrl.text.trim();
+                  final amt = Money.parseMinorUnits(amountCtrl.text);
+                  final qty = QuantityMath.parseMilli(qtyCtrl.text);
+                  if (cleanName.isEmpty || (amt <= 0 && qty <= 0)) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      const SnackBar(
+                        content: Text('أدخل اسم العامل ومبلغاً أو كمية أكبر من صفر'),
+                      ),
+                    );
+                    return;
+                  }
+                  if (existing == null) {
+                    await ctrl.addWorkerHandoff(
+                      workerName: cleanName,
+                      receiverId: receiverId,
+                      direction: direction,
+                      amountMinor: amt,
+                      currency: currency,
+                      qtyMilli: qty,
+                      unit: unitCtrl.text,
+                      notes: notesCtrl.text,
+                      dateMs: handoffDateMs,
+                    );
+                  } else {
+                    await ctrl.repo.updateWorkerHandoff(
+                      id: existing.id,
+                      workerName: cleanName,
+                      receiverId: receiverId,
+                      direction: direction,
+                      amountMinor: amt,
+                      currency: currency,
+                      qtyMilli: qty,
+                      unit: unitCtrl.text,
+                      notes: notesCtrl.text,
+                    );
+                    await ctrl.reloadAll();
+                  }
                   if (ctx.mounted) Navigator.pop(ctx);
                 },
                 child: const Text('حفظ'),
@@ -545,6 +762,17 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
           w.notes.toLowerCase().contains(q);
     }).toList();
 
+    final filteredHandoffs = ctrl.workerHandoffs.where((h) {
+      if (_workerDirFilter != null && h.direction != _workerDirFilter) {
+        return false;
+      }
+      if (_workerSearch.isEmpty) return true;
+      final q = _workerSearch.toLowerCase();
+      return h.workerName.toLowerCase().contains(q) ||
+          h.notes.toLowerCase().contains(q) ||
+          h.dateIso.contains(q);
+    }).toList();
+
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
@@ -552,15 +780,19 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
             unawaited(_openBatchDialog(ctrl));
           } else if (_section == 1) {
             unawaited(_openImportWeightDialog(ctrl));
-          } else {
+          } else if (_section == 2) {
             unawaited(_openReceiverDialog(ctrl));
+          } else {
+            unawaited(_openWorkerHandoffDialog(ctrl));
           }
         },
         icon: const Icon(Icons.add_box_outlined),
         label: Text(
           _section == 0
               ? 'إضافة دفعة'
-              : (_section == 1 ? 'تسجيل وزن وارد' : 'إضافة مستلم'),
+              : (_section == 1
+                  ? 'تسجيل وزن وارد'
+                  : (_section == 2 ? 'إضافة مستلم' : 'حركة عامل جديدة')),
         ),
       ),
       body: Column(
@@ -570,11 +802,13 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
               'الدفعات (${ctrl.batches.length})',
               'أوزان الوارد (${ctrl.importWeights.length})',
               'المستلمون والمطابقة (${ctrl.inventoryReceivers.length})',
+              'العمال والعهد (${ctrl.workerHandoffs.length})',
             ],
             icons: const [
               Icons.inventory_2_outlined,
               Icons.scale_outlined,
               Icons.people_alt_outlined,
+              Icons.engineering_outlined,
             ],
             selectedIndex: _section,
             onChanged: (idx) {
@@ -582,7 +816,216 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
               if (idx == 2) unawaited(_loadMatching(ctrl));
             },
           ),
-          if (_section == 2) ...[
+          if (_section == 3) ...[
+            ErpSearchFilterBar(
+              searchHint: 'بحث باسم العامل أو البيان...',
+              onSearchChanged: (v) => setState(() => _workerSearch = v.trim()),
+              filters: [
+                ChoiceChip(
+                  label: const Text('الكل'),
+                  selected: _workerDirFilter == null,
+                  onSelected: (_) => setState(() => _workerDirFilter = null),
+                ),
+                ChoiceChip(
+                  label: const Text('تسليم للعامل'),
+                  selected: _workerDirFilter == WorkerHandoffDirection.toWorker,
+                  onSelected: (_) => setState(
+                    () => _workerDirFilter = WorkerHandoffDirection.toWorker,
+                  ),
+                ),
+                ChoiceChip(
+                  label: const Text('استلام من العامل'),
+                  selected:
+                      _workerDirFilter == WorkerHandoffDirection.fromWorker,
+                  onSelected: (_) => setState(
+                    () => _workerDirFilter = WorkerHandoffDirection.fromWorker,
+                  ),
+                ),
+              ],
+            ),
+            Expanded(
+              child: filteredHandoffs.isEmpty
+                  ? EmptyLedgerState(
+                      icon: Icons.engineering_outlined,
+                      title: 'لا توجد حركات تسليم أو استلام للعمال',
+                      subtitle:
+                          'سجل المبالغ أو الكميات المسلمة للعمال والمستلمة منهم لاستخراج كشف حساب دقيق لكل عامل',
+                      actionLabel: 'تسجيل حركة عامل',
+                      onAction: () => _openWorkerHandoffDialog(ctrl),
+                    )
+                  : ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 84),
+                      children: [
+                        for (final cur in ctrl.currencyPolicy.allowedCurrencies)
+                          if (filteredHandoffs.any((h) => h.currency == cur))
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Builder(
+                                builder: (context) {
+                                  final byCur = filteredHandoffs
+                                      .where((h) => h.currency == cur)
+                                      .toList();
+                                  final toW = byCur
+                                      .where((h) =>
+                                          h.direction ==
+                                          WorkerHandoffDirection.toWorker)
+                                      .fold<int>(0, (s, h) => s + h.amountMinor);
+                                  final fromW = byCur
+                                      .where((h) =>
+                                          h.direction ==
+                                          WorkerHandoffDirection.fromWorker)
+                                      .fold<int>(0, (s, h) => s + h.amountMinor);
+                                  final net = toW - fromW;
+                                  return ErpSummaryBar(
+                                    metrics: [
+                                      ErpSummaryMetric(
+                                        label: 'عملة ${cur.code}',
+                                        value: '${byCur.length} حركة',
+                                      ),
+                                      ErpSummaryMetric(
+                                        label: 'مُسلَّم للعمال',
+                                        value: Money(toW, cur).format(),
+                                        toneColor: pal.warning,
+                                      ),
+                                      ErpSummaryMetric(
+                                        label: 'مُستلَم من العمال',
+                                        value: Money(fromW, cur).format(),
+                                        toneColor: pal.success,
+                                      ),
+                                      ErpSummaryMetric(
+                                        label: 'صافي العهدة',
+                                        value: Money(net, cur).format(),
+                                        toneColor: net > 0
+                                            ? pal.danger
+                                            : pal.success,
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                        for (final h in filteredHandoffs)
+                          Card(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          h.workerName,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ),
+                                      CurrencyBadge(currency: h.currency),
+                                      const SizedBox(width: 6),
+                                      StatusPill(
+                                        label: h.direction.arabicLabel,
+                                        bg: h.direction ==
+                                                WorkerHandoffDirection.toWorker
+                                            ? pal.warningSoft
+                                            : pal.successSoft,
+                                        fg: h.direction ==
+                                                WorkerHandoffDirection.toWorker
+                                            ? pal.warning
+                                            : pal.success,
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    [
+                                      if (h.amountMinor > 0)
+                                        Money(h.amountMinor, h.currency).format(),
+                                      if (h.qtyMilli > 0)
+                                        'كمية: ${QuantityMath.formatMilli(h.qtyMilli)} ${h.unit}',
+                                      h.dateIso,
+                                      if (h.notes.isNotEmpty) h.notes,
+                                    ].join(' • '),
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      color: pal.textSecondary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 8,
+                                    children: [
+                                      OutlinedButton.icon(
+                                        onPressed: () => ctrl
+                                            .openStatementForWorker(h.workerName),
+                                        icon: const Icon(
+                                          Icons.table_chart_outlined,
+                                          size: 16,
+                                        ),
+                                        label: const Text('كشف العامل'),
+                                      ),
+                                      OutlinedButton.icon(
+                                        onPressed: () =>
+                                            _openWorkerHandoffDialog(
+                                          ctrl,
+                                          existing: h,
+                                        ),
+                                        icon: const Icon(
+                                          Icons.edit_outlined,
+                                          size: 16,
+                                        ),
+                                        label: const Text('تعديل'),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'أرشفة',
+                                        onPressed: () async {
+                                          await ctrl.repo.setArchived(
+                                            'worker_handoffs',
+                                            h.id,
+                                            true,
+                                          );
+                                          await ctrl.reloadAll();
+                                        },
+                                        icon: const Icon(
+                                          Icons.archive_outlined,
+                                          size: 18,
+                                        ),
+                                      ),
+                                      if (ctrl.canDeleteCurrent)
+                                        IconButton(
+                                          tooltip: 'حذف',
+                                          onPressed: () async {
+                                            final ok =
+                                                await showErpConfirmDialog(
+                                              context,
+                                              title: 'حذف حركة العامل',
+                                              message:
+                                                  'هل تريد حذف حركة "${h.workerName}"؟',
+                                              confirmLabel: 'حذف',
+                                              destructive: true,
+                                            );
+                                            if (!ok) return;
+                                            await ctrl
+                                                .deleteWorkerHandoff(h.id);
+                                          },
+                                          icon: Icon(
+                                            Icons.delete_outline,
+                                            color: pal.danger,
+                                            size: 18,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
+          ] else if (_section == 2) ...[
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 84),
@@ -903,6 +1346,21 @@ class _InventoryBatchesViewState extends State<InventoryBatchesView> {
                                       ctrl,
                                       existing: w,
                                     ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'أرشفة',
+                                    icon: const Icon(
+                                      Icons.archive_outlined,
+                                      size: 18,
+                                    ),
+                                    onPressed: () async {
+                                      await ctrl.repo.setArchived(
+                                        'qat_import_weights',
+                                        w.id,
+                                        true,
+                                      );
+                                      await ctrl.reloadAll();
+                                    },
                                   ),
                                   if (ctrl.canDeleteCurrent)
                                     IconButton(

@@ -5,8 +5,10 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ActivityManager
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -149,6 +151,11 @@ class MainActivity : FlutterActivity() {
                                 runOnUiThread { result.success(decoded) }
                             }.start()
                         }
+                    }
+                    "getDeveloperBootstrapSeedB64" -> {
+                        result.success(
+                            FlavorPlatformDelegate.getDeveloperBootstrapSeedB64(applicationContext)
+                        )
                     }
                     else -> result.notImplemented()
                 }
@@ -328,9 +335,28 @@ class MainActivity : FlutterActivity() {
             return
         }
         val list = adapter.bondedDevices.orEmpty().map { dev: BluetoothDevice ->
+            val btClass = dev.bluetoothClass
+            val majorClass = btClass?.majorDeviceClass ?: BluetoothClass.Device.Major.UNCATEGORIZED
+            val deviceClass = btClass?.deviceClass ?: 0
+            val isImaging = majorClass == BluetoothClass.Device.Major.IMAGING
+            val isAudioOrWearable = majorClass == BluetoothClass.Device.Major.AUDIO_VIDEO ||
+                majorClass == BluetoothClass.Device.Major.WEARABLE ||
+                majorClass == BluetoothClass.Device.Major.HEALTH ||
+                majorClass == BluetoothClass.Device.Major.PHONE ||
+                majorClass == BluetoothClass.Device.Major.TOY
+            val supportsSpp = try {
+                dev.uuids?.any { it.uuid.toString().equals(SPP_UUID, ignoreCase = true) } == true
+            } catch (_: Exception) {
+                false
+            }
             mapOf(
                 "name" to (dev.name ?: "طابعة بلوتوث"),
-                "address" to dev.address
+                "address" to dev.address,
+                "majorDeviceClass" to majorClass,
+                "deviceClass" to deviceClass,
+                "isImagingDevice" to isImaging,
+                "supportsSppUuid" to supportsSpp,
+                "isAudioOrWearable" to isAudioOrWearable
             )
         }
         result.success(list)
@@ -361,9 +387,37 @@ class MainActivity : FlutterActivity() {
             try {
                 adapter.cancelDiscovery()
                 val device = adapter.getRemoteDevice(address)
-                val socket = device.createRfcommSocketToServiceRecord(UUID.fromString(SPP_UUID))
+                val majorClass = device.bluetoothClass?.majorDeviceClass
+                    ?: BluetoothClass.Device.Major.UNCATEGORIZED
+                if (majorClass == BluetoothClass.Device.Major.AUDIO_VIDEO ||
+                    majorClass == BluetoothClass.Device.Major.WEARABLE ||
+                    majorClass == BluetoothClass.Device.Major.PHONE
+                ) {
+                    runOnUiThread {
+                        result.error(
+                            "BT_NOT_PRINTER",
+                            "الجهاز المختار (${device.name ?: address}) مصنف كجهاز صوتي/هاتف وليس طابعة حرارية.",
+                            null
+                        )
+                    }
+                    return@Thread
+                }
+
+                val uuid = UUID.fromString(SPP_UUID)
+                var socket: BluetoothSocket? = null
+                try {
+                    socket = device.createRfcommSocketToServiceRecord(uuid)
+                    socket.connect()
+                } catch (_: Exception) {
+                    try {
+                        socket?.close()
+                    } catch (_: Exception) {
+                    }
+                    socket = device.createInsecureRfcommSocketToServiceRecord(uuid)
+                    socket.connect()
+                }
+
                 socket.use { sock ->
-                    sock.connect()
                     val os = sock.outputStream
                     // Stream in 1KB chunks with brief flush pacing for thermal buffers
                     var offset = 0
@@ -375,12 +429,16 @@ class MainActivity : FlutterActivity() {
                         offset += count
                         Thread.sleep(15)
                     }
-                    Thread.sleep(150)
+                    Thread.sleep(180)
                 }
                 runOnUiThread { result.success(true) }
             } catch (e: Exception) {
                 runOnUiThread {
-                    result.error("BT_PRINT", e.message ?: "فشل الإرسال للطابعة", null)
+                    result.error(
+                        "BT_PRINT",
+                        e.message ?: "تعذر الاتصال بالطابعة عبر منفذ Bluetooth SPP. تأكد من تشغيل الطابعة وتقريبها.",
+                        null
+                    )
                 }
             }
         }.start()
@@ -403,8 +461,13 @@ class MainActivity : FlutterActivity() {
 
     private fun launchContactPicker(result: MethodChannel.Result) {
         pendingContactResult = result
-        val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
-        startActivityForResult(intent, REQ_PICK_CONTACT)
+        try {
+            val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+            startActivityForResult(intent, REQ_PICK_CONTACT)
+        } catch (_: Exception) {
+            pendingContactResult = null
+            result.success(null)
+        }
     }
 
     override fun onRequestPermissionsResult(
@@ -459,9 +522,19 @@ class MainActivity : FlutterActivity() {
             )
             contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    val name = cursor.getString(0).orEmpty()
-                    val phone = cursor.getString(1).orEmpty()
-                    res.success(mapOf("name" to name, "phone" to phone))
+                    val name = cursor.getString(0).orEmpty().trim()
+                    val rawPhone = cursor.getString(1).orEmpty()
+                    val cleanedPhone = buildString {
+                        for (ch in rawPhone) {
+                            when {
+                                ch in '٠'..'٩' -> append(('0'.code + (ch.code - '٠'.code)).toChar())
+                                ch in '۰'..'۹' -> append(('0'.code + (ch.code - '۰'.code)).toChar())
+                                ch in '0'..'9' -> append(ch)
+                                ch == '+' && isEmpty() -> append(ch)
+                            }
+                        }
+                    }
+                    res.success(mapOf("name" to name, "phone" to cleanedPhone))
                 } else {
                     res.success(null)
                 }

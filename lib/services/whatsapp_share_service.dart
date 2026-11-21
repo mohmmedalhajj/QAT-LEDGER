@@ -102,12 +102,24 @@ class WhatsappShareService {
     return sb.toString().trim();
   }
 
-  Future<bool> openWhatsApp({String? phone, required String text}) async {
-    final digits = normalizeDigits(phone ?? '').replaceAll(RegExp(r'[^0-9+]'), '');
+  static Uri buildWhatsAppUri({String? phone, required String text}) {
+    final trimmed = (phone ?? '').trim();
+    var digits = normalizeDigits(trimmed).replaceAll(RegExp(r'[^0-9+]'), '');
+    if (digits.startsWith('00')) {
+      digits = digits.substring(2);
+    }
+    final plainDigits = digits.replaceAll('+', '');
+    final hasCountryCode =
+        trimmed.startsWith('+') || trimmed.startsWith('00') || plainDigits.length >= 11;
     final encoded = Uri.encodeComponent(text);
-    final url = digits.isEmpty
-        ? Uri.parse('https://wa.me/?text=$encoded')
-        : Uri.parse('https://wa.me/${digits.replaceAll('+', '')}?text=$encoded');
+    if (plainDigits.isEmpty || !hasCountryCode) {
+      return Uri.parse('https://wa.me/?text=$encoded');
+    }
+    return Uri.parse('https://wa.me/$plainDigits?text=$encoded');
+  }
+
+  Future<bool> openWhatsApp({String? phone, required String text}) async {
+    final url = buildWhatsAppUri(phone: phone, text: text);
     if (await canLaunchUrl(url)) {
       return launchUrl(url, mode: LaunchMode.externalApplication);
     }

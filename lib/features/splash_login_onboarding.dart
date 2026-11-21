@@ -10,7 +10,6 @@ import '../core/logo_storage.dart';
 import '../core/money.dart';
 import '../core/theme.dart';
 import '../data/models.dart';
-import '../developer/developer_console_sheet.dart';
 import '../state/app_controller.dart';
 import 'widgets/common_widgets.dart';
 import 'widgets/erp_components.dart';
@@ -168,7 +167,8 @@ class _LoginScreenState extends State<LoginScreen> {
     _secretTapCount = 0;
 
     final ctrl = context.read<AppController>();
-    if (ctrl.isDeveloperEdition && ctrl.developerKeyManager != null) {
+    final devBridge = ctrl.developerBridge;
+    if (ctrl.isDeveloperEdition && devBridge != null) {
       final action = await showDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -198,9 +198,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (action == 'dev') {
         await Navigator.of(context).push<void>(
           MaterialPageRoute<void>(
-            builder: (_) => DeveloperConsoleSheet(
-              keyManager: ctrl.developerKeyManager!,
-              devDb: ctrl.developerDb,
+            builder: (_) => devBridge.buildConsoleScreen(
               onKeysUpdated: ctrl.refreshLicense,
             ),
           ),

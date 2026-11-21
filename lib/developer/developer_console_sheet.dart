@@ -998,6 +998,55 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                         ? 'محمي بمخزن المفاتيح (Android Keystore AES-GCM)'
                         : 'تخزين محلي خاص بالتطبيق',
                   ),
+                  if (_keyInfo!.hasBootstrapSeed) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: _keyInfo!.matchesBootstrapSeed
+                            ? pal.successSoft
+                            : pal.warningSoft,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _keyInfo!.matchesBootstrapSeed
+                                ? Icons.verified_outlined
+                                : Icons.warning_amber_rounded,
+                            size: 16,
+                            color: _keyInfo!.matchesBootstrapSeed
+                                ? pal.success
+                                : pal.warning,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              _keyInfo!.matchesBootstrapSeed
+                                  ? 'مفتاح التوقيع متزامن ومتوافق تلقائياً مع نسخة العميل المرفقة'
+                                  : 'تنبيه: تم تغيير/تدوير المفتاح عن مفتاح الإصدار المدمج — قد ترفض نسخة العميل التراخيص الجديدة.',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: _keyInfo!.matchesBootstrapSeed
+                                    ? pal.success
+                                    : pal.warning,
+                              ),
+                            ),
+                          ),
+                          if (!_keyInfo!.matchesBootstrapSeed)
+                            TextButton(
+                              onPressed: () async {
+                                await widget.keyManager.restoreBootstrapSeedIfAvailable();
+                                widget.onKeysUpdated();
+                                await _loadAll();
+                              },
+                              child: const Text('استعادة'),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   const Text('سطر التضمين في gradle.properties:',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),

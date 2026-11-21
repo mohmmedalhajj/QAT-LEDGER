@@ -13,7 +13,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/platform_bridge.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
-import '../../developer/developer_console_sheet.dart';
 import '../../licensing/license_models.dart';
 import '../../services/whatsapp_share_service.dart';
 import '../../state/app_controller.dart';
@@ -261,12 +260,11 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
         ),
       ),
     );
-    if (ok == true && mounted && ctrl.developerKeyManager != null) {
+    final devBridge = ctrl.developerBridge;
+    if (ok == true && mounted && devBridge != null) {
       await Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
-          builder: (_) => DeveloperConsoleSheet(
-            keyManager: ctrl.developerKeyManager!,
-            devDb: ctrl.developerDb,
+          builder: (_) => devBridge.buildConsoleScreen(
             onKeysUpdated: ctrl.refreshLicense,
           ),
         ),
@@ -838,7 +836,7 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
             ),
           ),
         ],
-        if (ctrl.isDeveloperEdition) ...[
+        if (ctrl.isDeveloperEdition && ctrl.developerBridge != null) ...[
           const SizedBox(height: 12),
           Card(
             color: pal.accentSoft,
@@ -877,7 +875,7 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      '+967780961823',
+                      '780961823',
                       textDirection: TextDirection.ltr,
                       style: TextStyle(
                         fontSize: 13,
@@ -899,7 +897,7 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                     FilledButton.icon(
                       onPressed: () async {
                         final messenger = ScaffoldMessenger.of(context);
-                        final dialUri = Uri(scheme: 'tel', path: '+967780961823');
+                        final dialUri = Uri(scheme: 'tel', path: '780961823');
                         try {
                           final launched = await launchUrl(
                             dialUri,
@@ -909,7 +907,7 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                             messenger.showSnackBar(
                               const SnackBar(
                                 content: Text(
-                                  'تعذر بدء الاتصال تلقائياً، الرقم هو: +967780961823',
+                                  'تعذر بدء الاتصال تلقائياً، الرقم هو: 780961823',
                                 ),
                               ),
                             );
@@ -919,7 +917,7 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                           messenger.showSnackBar(
                             const SnackBar(
                               content: Text(
-                                'تعذر بدء الاتصال تلقائياً، الرقم هو: +967780961823',
+                                'تعذر بدء الاتصال تلقائياً، الرقم هو: 780961823',
                               ),
                             ),
                           );
@@ -931,7 +929,7 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                     FilledButton.tonalIcon(
                       onPressed: () async {
                         await WhatsappShareService.instance.openWhatsApp(
-                          phone: '+967780961823',
+                          phone: '780961823',
                           text:
                               'مرحباً، أرغب في تفعيل ترخيص ميزان القات (PRO):\n'
                               'الوكالة: ${ctrl.settings.agencyName}\n'

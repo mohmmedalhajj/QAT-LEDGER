@@ -22,6 +22,7 @@ class ExpensesAndAccountsView extends StatefulWidget {
 class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
   String _search = '';
   CurrencyCode? _currencyFilter;
+  String? _categoryFilter;
 
   Future<void> _openExpenseDialog(
     BuildContext context,
@@ -243,6 +244,10 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
       if (_currencyFilter != null && e.currency != _currencyFilter) {
         return false;
       }
+      if (_categoryFilter != null &&
+          e.category.trim() != _categoryFilter!.trim()) {
+        return false;
+      }
       if (_search.isEmpty) return true;
       final q = _search.toLowerCase();
       return e.description.toLowerCase().contains(q) ||
@@ -286,15 +291,26 @@ class _ExpensesAndAccountsViewState extends State<ExpensesAndAccountsView> {
             ),
           ),
           const SizedBox(height: 6),
+          const ErpStatusBanner(
+            tone: ErpBannerTone.info,
+            title: 'المصروفات التشغيلية اليومية مستقلة عن الضريبة',
+            subtitle:
+                'تشمل: إيجار المفرش، أجور العمال، الكهرباء اليومية، والنقل — وتُخصم من صافي الربح بمعزل تام عن سجل ضريبة القات.',
+          ),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 6,
             runSpacing: 6,
             children: ctrl.accounts
                 .map(
-                  (a) => Chip(
+                  (a) => FilterChip(
                     label: Text(
                       a.name,
                       style: const TextStyle(fontSize: 11.5),
+                    ),
+                    selected: _categoryFilter == a.name,
+                    onSelected: (on) => setState(
+                      () => _categoryFilter = on ? a.name : null,
                     ),
                   ),
                 )

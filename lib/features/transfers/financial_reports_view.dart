@@ -28,6 +28,7 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
   String? _fromIso;
   String? _toIso;
   Map<CurrencyCode, CurrencyDashboardMetrics>? _metrics;
+  Map<CurrencyCode, List<DailyChartPoint>> _chartsByCurrency = {};
   bool _loading = false;
   String? _error;
   bool _wasActive = false;
@@ -173,12 +174,29 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
       _error = null;
     });
     try {
-      final res = await context.read<AppController>().repo.getDashboardMetrics(
-            fromIso: _fromIso,
-            toIso: _toIso,
-          );
+      final repo = context.read<AppController>().repo;
+      final res = await repo.getDashboardMetrics(
+        fromIso: _fromIso,
+        toIso: _toIso,
+      );
+      final yerChart = await repo.getDailyChartSeries(
+        currency: CurrencyCode.yer,
+        fromIso: _fromIso,
+        toIso: _toIso,
+      );
+      final sarChart = await repo.getDailyChartSeries(
+        currency: CurrencyCode.sar,
+        fromIso: _fromIso,
+        toIso: _toIso,
+      );
       if (!mounted) return;
-      setState(() => _metrics = res);
+      setState(() {
+        _metrics = res;
+        _chartsByCurrency = {
+          CurrencyCode.yer: yerChart,
+          CurrencyCode.sar: sarChart,
+        };
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'تعذر تحميل التقرير المالي: $e');
@@ -483,8 +501,15 @@ class _FinancialReportsViewState extends State<FinancialReportsView> {
                 ],
               ),
               const SizedBox(height: 10),
-              if ((ctrl.dailyCharts[cur] ?? const <DailyChartPoint>[]).isNotEmpty)
-                _buildReportChartCard(pal, cur, ctrl.dailyCharts[cur]!),
+              if ((_chartsByCurrency[cur] ??
+                      ctrl.dailyCharts[cur] ??
+                      const <DailyChartPoint>[])
+                  .isNotEmpty)
+                _buildReportChartCard(
+                  pal,
+                  cur,
+                  _chartsByCurrency[cur] ?? ctrl.dailyCharts[cur]!,
+                ),
               const SizedBox(height: 8),
             ],
         if (data != null) ...[

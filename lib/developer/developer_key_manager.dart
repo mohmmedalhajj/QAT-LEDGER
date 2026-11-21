@@ -16,6 +16,8 @@ class DeveloperKeyInfo {
     required this.spkiPem,
     required this.rawPublicBytes,
     required this.hardwareSealed,
+    this.hasBootstrapSeed = false,
+    this.matchesBootstrapSeed = false,
   });
 
   final String keyId;
@@ -25,6 +27,8 @@ class DeveloperKeyInfo {
   final String spkiPem;
   final List<int> rawPublicBytes;
   final bool hardwareSealed;
+  final bool hasBootstrapSeed;
+  final bool matchesBootstrapSeed;
 }
 
 /// Manages Ed25519 signing keys for Developer Edition builds, sealing private seeds
@@ -47,29 +51,43 @@ class DeveloperKeyManager {
     final existing = await loadSigningKeyPair();
     if (existing != null) return existing;
 
+    final bootstrapRaw = await PlatformBridge.instance.getDeveloperBootstrapSeedB64();
+    if (bootstrapRaw != null && bootstrapRaw.trim().isNotEmpty) {
+      try {
+        final seed = decodeSeed(bootstrapRaw);
+        await _persistSeed(seed);
+        return _ed25519.newKeyPairFromSeed(seed);
+      } catch (_) {
+        // Fall back to fresh random seed only if bundled bootstrap seed is malformed.
+      }
+    }
+
     final rnd = Random.secure();
     final seed = List<int>.generate(32, (_) => rnd.nextInt(256));
     await _persistSeed(seed);
     return _ed25519.newKeyPairFromSeed(seed);
   }
 
-  Future<SimpleKeyPair> rotateSigningKeyPair() async {
-    final rnd = Random.secure();
-    final seed = List<int>.generate(32, (_) => rnd.nextInt(256));
+  Future<bool> hasBootstrapSeed() async {
+    final raw = await PlatformBridge.instance.getDeveloperBootstrapSeedB64();
+    if (raw == null || raw.trim().isEmpty) return false;
+    try {
+      decodeSeed(raw);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> restoreBootstrapSeedIfAvailable() async {
+    final raw = await PlatformBridge.instance.getDeveloperBootstrapSeedB64();
+    if (raw == null || raw.trim().isEmpty) return false;
+    final seed = decodeSeed(raw);
     await _persistSeed(seed);
-    return _ed25519.newKeyPairFromSeed(seed);
+    return true;
   }
 
-  /// Exports the 32-byte Ed25519 private seed as Base64 for secure offline backup by the developer.
-  Future<String?> exportSigningSeedB64() async {
-    final seed = await _loadSeedBytes();
-    if (seed == null || seed.length != 32) return null;
-    return base64.encode(seed);
-  }
-
-  /// Imports a 32-byte Ed25519 seed (Base64, Base64Url, or 64-char Hex) so the developer
-  /// can restore or synchronize their signing identity across builds/devices.
-  Future<DeveloperKeyInfo> importSigningSeedB64(String rawSeedInput) async {
+  static List<int> decodeSeed(String rawSeedInput) {
     final clean = rawSeedInput.trim().replaceAll(RegExp(r'\s+'), '');
     if (clean.isEmpty) {
       throw const FormatException('البذرة فارغة');
@@ -97,6 +115,27 @@ class DeveloperKeyManager {
         'طول بذرة Ed25519 يجب أن يكون 32 بايت (تم استلام ${seed.length})',
       );
     }
+    return seed;
+  }
+
+  Future<SimpleKeyPair> rotateSigningKeyPair() async {
+    final rnd = Random.secure();
+    final seed = List<int>.generate(32, (_) => rnd.nextInt(256));
+    await _persistSeed(seed);
+    return _ed25519.newKeyPairFromSeed(seed);
+  }
+
+  /// Exports the 32-byte Ed25519 private seed as Base64 for secure offline backup by the developer.
+  Future<String?> exportSigningSeedB64() async {
+    final seed = await _loadSeedBytes();
+    if (seed == null || seed.length != 32) return null;
+    return base64.encode(seed);
+  }
+
+  /// Imports a 32-byte Ed25519 seed (Base64, Base64Url, or 64-char Hex) so the developer
+  /// can restore or synchronize their signing identity across builds/devices.
+  Future<DeveloperKeyInfo> importSigningSeedB64(String rawSeedInput) async {
+    final seed = decodeSeed(rawSeedInput);
     await _persistSeed(seed);
     final info = await getPublicKeyInfo();
     if (info == null) {
@@ -153,6 +192,24 @@ class DeveloperKeyManager {
       wrapped.writeln(spkiB64.substring(i, end));
     }
     final pem = '-----BEGIN PUBLIC KEY-----\n$wrapped-----END PUBLIC KEY-----';
+    bool hasBootstrap = false;
+    bool matchesBootstrap = false;
+    final bootstrapRaw = await PlatformBridge.instance.getDeveloperBootstrapSeedB64();
+    if (bootstrapRaw != null && bootstrapRaw.trim().isNotEmpty) {
+      try {
+        final bSeed = decodeSeed(bootstrapRaw);
+        hasBootstrap = true;
+        final bKp = await _ed25519.newKeyPairFromSeed(bSeed);
+        final bPub = await bKp.extractPublicKey();
+        matchesBootstrap = bPub.bytes.length == pub.bytes.length &&
+            List<bool>.generate(
+              pub.bytes.length,
+              (i) => pub.bytes[i] == bPub.bytes[i],
+            ).every((e) => e);
+      } catch (_) {
+        hasBootstrap = false;
+      }
+    }
     return DeveloperKeyInfo(
       keyId: keyId,
       kotlinKeyId: kotlinKeyId,
@@ -161,6 +218,8 @@ class DeveloperKeyManager {
       spkiPem: pem,
       rawPublicBytes: pub.bytes,
       hardwareSealed: (_prefs.getString(_prefSealedSeed)?.isNotEmpty ?? false),
+      hasBootstrapSeed: hasBootstrap,
+      matchesBootstrapSeed: matchesBootstrap,
     );
   }
 }

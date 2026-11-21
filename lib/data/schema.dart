@@ -1,7 +1,7 @@
 /// Normalized SQLite v3 DDL for `qat_ledger_v2.db`.
 /// Every financial column uses INTEGER minor units (1/100) and quantities use INTEGER milli units (1/1000).
 abstract final class QatLedgerSchema {
-  static const int currentVersion = 4;
+  static const int currentVersion = 5;
   static const String databaseFileName = 'qat_ledger_v2.db';
 
   static const List<String> createStatements = [
@@ -53,6 +53,7 @@ abstract final class QatLedgerSchema {
       default_currency TEXT NOT NULL DEFAULT 'YER' CHECK(default_currency IN ('YER','SAR')),
       notes TEXT NOT NULL DEFAULT '',
       is_hidden INTEGER NOT NULL DEFAULT 0,
+      is_archived INTEGER NOT NULL DEFAULT 0,
       created_at_ms INTEGER NOT NULL
     )
     ''',
@@ -195,7 +196,10 @@ abstract final class QatLedgerSchema {
       transfer_number TEXT NOT NULL DEFAULT '',
       demar_minor INTEGER NOT NULL DEFAULT 0,
       demar_type TEXT NOT NULL DEFAULT '',
-      demar_number TEXT NOT NULL DEFAULT ''
+      demar_number TEXT NOT NULL DEFAULT '',
+      receiver_id INTEGER,
+      receiver_name TEXT NOT NULL DEFAULT '',
+      import_weight_id INTEGER
     )
     ''',
     '''
@@ -302,7 +306,34 @@ abstract final class QatLedgerSchema {
       phone TEXT NOT NULL DEFAULT '',
       notes TEXT NOT NULL DEFAULT '',
       is_active INTEGER NOT NULL DEFAULT 1,
+      is_archived INTEGER NOT NULL DEFAULT 0,
       created_at_ms INTEGER NOT NULL
+    )
+    ''',
+    '''
+    CREATE TABLE IF NOT EXISTS sale_batch_deductions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+      sale_item_id INTEGER NOT NULL REFERENCES sales_invoice_items(id) ON DELETE CASCADE,
+      inventory_batch_id INTEGER NOT NULL REFERENCES inventory_batches(id) ON DELETE CASCADE,
+      qty_milli INTEGER NOT NULL CHECK(qty_milli > 0),
+      buy_price_minor INTEGER NOT NULL DEFAULT 0
+    )
+    ''',
+    '''
+    CREATE TABLE IF NOT EXISTS worker_handoffs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      worker_name TEXT NOT NULL,
+      receiver_id INTEGER REFERENCES inventory_receivers(id) ON DELETE SET NULL,
+      direction TEXT NOT NULL CHECK(direction IN ('TO_WORKER','FROM_WORKER')),
+      amount_minor INTEGER NOT NULL DEFAULT 0 CHECK(amount_minor >= 0),
+      currency_code TEXT NOT NULL CHECK(currency_code IN ('YER','SAR')),
+      qty_milli INTEGER NOT NULL DEFAULT 0 CHECK(qty_milli >= 0),
+      unit TEXT NOT NULL DEFAULT 'ربطة',
+      date_ms INTEGER NOT NULL,
+      date_iso TEXT NOT NULL,
+      notes TEXT NOT NULL DEFAULT '',
+      is_archived INTEGER NOT NULL DEFAULT 0
     )
     ''',
   ];
@@ -311,6 +342,7 @@ abstract final class QatLedgerSchema {
     'CREATE INDEX IF NOT EXISTS idx_sales_date_iso ON sales(date_iso, is_archived)',
     'CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales(customer_id, currency_code)',
     'CREATE INDEX IF NOT EXISTS idx_sales_items_sale ON sales_invoice_items(sale_id)',
+    'CREATE INDEX IF NOT EXISTS idx_sale_deductions_sale ON sale_batch_deductions(sale_id, inventory_batch_id)',
     'CREATE INDEX IF NOT EXISTS idx_cust_pay_cust ON customer_payments(customer_id, currency_code, date_iso)',
     'CREATE INDEX IF NOT EXISTS idx_sup_purch_sup ON supplier_purchases(supplier_id, currency_code, date_iso)',
     'CREATE INDEX IF NOT EXISTS idx_sup_items_purch ON supplier_purchase_items(purchase_id)',
@@ -321,9 +353,13 @@ abstract final class QatLedgerSchema {
     'CREATE INDEX IF NOT EXISTS idx_transfers_date ON money_transfers(date_iso, is_archived)',
     'CREATE INDEX IF NOT EXISTS idx_inventory_name ON inventory_batches(qat_type_name, is_archived)',
     'CREATE INDEX IF NOT EXISTS idx_import_weights_date ON qat_import_weights(date_iso, is_archived)',
+    'CREATE INDEX IF NOT EXISTS idx_worker_handoffs_worker ON worker_handoffs(worker_name, date_iso, is_archived)',
   ];
 
   static const Map<String, List<String>> v3ColumnMigrations = {
+    'qat_types': [
+      'is_archived INTEGER NOT NULL DEFAULT 0',
+    ],
     'suppliers': [
       "region TEXT NOT NULL DEFAULT ''",
     ],
@@ -333,6 +369,9 @@ abstract final class QatLedgerSchema {
       'receiver_id INTEGER',
       "receiver_name TEXT NOT NULL DEFAULT ''",
       "notes TEXT NOT NULL DEFAULT ''",
+    ],
+    'inventory_receivers': [
+      'is_archived INTEGER NOT NULL DEFAULT 0',
     ],
     'sales': [
       "payment_method TEXT NOT NULL DEFAULT ''",
@@ -344,6 +383,9 @@ abstract final class QatLedgerSchema {
       'demar_minor INTEGER NOT NULL DEFAULT 0',
       "demar_type TEXT NOT NULL DEFAULT ''",
       "demar_number TEXT NOT NULL DEFAULT ''",
+      'receiver_id INTEGER',
+      "receiver_name TEXT NOT NULL DEFAULT ''",
+      'import_weight_id INTEGER',
     ],
     'qat_tax_entries': [
       'stall_outflow_minor INTEGER NOT NULL DEFAULT 0',
@@ -355,6 +397,10 @@ abstract final class QatLedgerSchema {
   };
 
   static const List<Map<String, Object>> defaultLedgerAccounts = [
+    {'code': 'EXP_STALL_RENT', 'name': 'إيجار المفرش', 'category': 'إيجار المفرش', 'is_system': 1},
+    {'code': 'EXP_WORKERS_WAGES', 'name': 'أجور العمال', 'category': 'أجور العمال', 'is_system': 1},
+    {'code': 'EXP_ELECTRICITY', 'name': 'الكهرباء اليومية', 'category': 'الكهرباء اليومية', 'is_system': 1},
+    {'code': 'EXP_OP_OTHER', 'name': 'مصروفات تشغيلية أخرى', 'category': 'مصروفات تشغيلية أخرى', 'is_system': 1},
     {'code': 'EXP_TRANSPORT', 'name': 'نقل ومواصلات', 'category': 'نقل ومواصلات', 'is_system': 1},
     {'code': 'EXP_RENT', 'name': 'إيجار المحل والجمارك', 'category': 'إيجار المحل والجمارك', 'is_system': 1},
     {'code': 'EXP_BAGS', 'name': 'تعبئة وتغليف وعمالة', 'category': 'تعبئة وتغليف وعمالة', 'is_system': 1},

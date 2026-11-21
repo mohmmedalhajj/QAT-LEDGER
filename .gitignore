@@ -26,7 +26,8 @@ android/**/build/
 .DS_Store
 Thumbs.db
 
-# Ephemeral release packaging
+# Ephemeral release packaging & paired dev signing bootstrap asset (CI/local secret only)
 dist/
 *.qbak
 *.qlic
+android/app/src/developer/assets/dev_bootstrap_seed.b64

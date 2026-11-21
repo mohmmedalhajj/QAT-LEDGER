@@ -788,6 +788,29 @@ class _CustomersDirectoryViewState extends State<CustomersDirectoryView> {
                                       size: 18,
                                     ),
                                   ),
+                                  IconButton(
+                                    tooltip: 'أرشفة العميل',
+                                    onPressed: () async {
+                                      final ok = await showErpConfirmDialog(
+                                        context,
+                                        title: 'أرشفة العميل',
+                                        message:
+                                            'نقل العميل ${c.name} إلى الأرشيف مع حفظ كافة الفواتير والرصيد؟',
+                                        confirmLabel: 'أرشفة',
+                                      );
+                                      if (!ok) return;
+                                      await ctrl.repo.setArchived(
+                                        'customers',
+                                        c.id,
+                                        true,
+                                      );
+                                      await ctrl.reloadAll();
+                                    },
+                                    icon: const Icon(
+                                      Icons.archive_outlined,
+                                      size: 18,
+                                    ),
+                                  ),
                                   if (ctrl.canDeleteCurrent)
                                     IconButton(
                                       tooltip: 'حذف العميل',

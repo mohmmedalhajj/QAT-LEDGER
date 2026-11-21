@@ -9,15 +9,8 @@ import 'sales/sales_ledger_view.dart';
 import 'widgets/common_widgets.dart';
 import 'widgets/erp_components.dart';
 
-class SalesCustomersTab extends StatefulWidget {
+class SalesCustomersTab extends StatelessWidget {
   const SalesCustomersTab({super.key});
-
-  @override
-  State<SalesCustomersTab> createState() => _SalesCustomersTabState();
-}
-
-class _SalesCustomersTabState extends State<SalesCustomersTab> {
-  int? _statementCustomerId;
 
   @override
   Widget build(BuildContext context) {
@@ -63,18 +56,15 @@ class _SalesCustomersTabState extends State<SalesCustomersTab> {
               TickerMode(
                 enabled: isTabActive && subTab == 2,
                 child: CustomersDirectoryView(
-                  onOpenStatement: (customerId) {
-                    setState(() => _statementCustomerId = customerId);
-                    ctrl.setSalesSubTab(3);
-                  },
+                  onOpenStatement: ctrl.openStatementForCustomer,
                 ),
               ),
               TickerMode(
                 enabled: isTabActive && subTab == 3,
                 child: AccountStatementView(
-                  preselectedCustomerId:
-                      _statementCustomerId ?? ctrl.statementCustomerId,
+                  preselectedCustomerId: ctrl.statementCustomerId,
                   preselectedSupplierId: ctrl.statementSupplierId,
+                  preselectedWorkerName: ctrl.statementWorkerName,
                 ),
               ),
             ],

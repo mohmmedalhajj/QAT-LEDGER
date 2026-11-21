@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:sqflite/sqflite.dart';
 
@@ -16,6 +17,8 @@ class NewSaleItemInput {
     required this.unit,
     required this.unitPriceMinor,
     required this.buyPriceMinor,
+    this.deductByFifo = false,
+    this.allowOversell = false,
   });
 
   final int? inventoryBatchId;
@@ -24,6 +27,8 @@ class NewSaleItemInput {
   final String unit;
   final int unitPriceMinor;
   final int buyPriceMinor;
+  final bool deductByFifo;
+  final bool allowOversell;
 }
 
 class NewPurchaseItemInput {
@@ -183,11 +188,17 @@ class QatRepository {
   // Qat Types & Inventory Batches
   // ---------------------------------------------------------------------------
 
-  Future<List<QatType>> getQatTypes({bool includeHidden = false}) async {
+  Future<List<QatType>> getQatTypes({
+    bool includeHidden = false,
+    bool includeArchived = false,
+  }) async {
     final db = await _db;
+    final where = <String>[];
+    if (!includeHidden) where.add('is_hidden = 0');
+    if (!includeArchived) where.add('is_archived = 0');
     final rows = await db.query(
       'qat_types',
-      where: includeHidden ? null : 'is_hidden = 0',
+      where: where.isEmpty ? null : where.join(' AND '),
       orderBy: 'name ASC',
     );
     return rows.map(_mapQatType).toList();
@@ -381,11 +392,15 @@ class QatRepository {
 
   Future<List<InventoryReceiver>> getInventoryReceivers({
     bool onlyActive = false,
+    bool includeArchived = false,
   }) async {
     final db = await _db;
+    final where = <String>[];
+    if (onlyActive) where.add('is_active = 1');
+    if (!includeArchived) where.add('is_archived = 0');
     final rows = await db.query(
       'inventory_receivers',
-      where: onlyActive ? 'is_active = 1' : null,
+      where: where.isEmpty ? null : where.join(' AND '),
       orderBy: 'name ASC',
     );
     return rows.map(_mapInventoryReceiver).toList();
@@ -453,6 +468,18 @@ class QatRepository {
     await db.transaction<void>((txn) async {
       await txn.update(
         'inventory_batches',
+        {'receiver_id': null},
+        where: 'receiver_id = ?',
+        whereArgs: [id],
+      );
+      await txn.update(
+        'supplier_purchases',
+        {'receiver_id': null},
+        where: 'receiver_id = ?',
+        whereArgs: [id],
+      );
+      await txn.update(
+        'worker_handoffs',
         {'receiver_id': null},
         where: 'receiver_id = ?',
         whereArgs: [id],
@@ -679,33 +706,10 @@ class QatRepository {
         : effectivePaymentType.arabicLabel;
 
     return db.transaction<int>((txn) async {
-      // 1. Validate and deduct inventory batches atomically
+      // 1. Validate inputs & reserve/prepare FIFO or explicit batch deductions
       for (final item in items) {
         if (item.qtyMilli <= 0) {
           throw ArgumentError('الكمية يجب أن تكون أكبر من صفر.');
-        }
-        if (item.inventoryBatchId != null) {
-          final batchRows = await txn.query(
-            'inventory_batches',
-            where: 'id = ?',
-            whereArgs: [item.inventoryBatchId],
-            limit: 1,
-          );
-          if (batchRows.isEmpty) {
-            throw StateError('دفعة المخزون غير موجودة.');
-          }
-          final avail = (batchRows.first['remaining_qty_milli'] as num).toInt();
-          if (avail < item.qtyMilli) {
-            throw StateError(
-              'الكمية المتوفرة من ${item.qatTypeName} (${QuantityMath.formatMilli(avail)}) أقل من المطلوب (${QuantityMath.formatMilli(item.qtyMilli)}).',
-            );
-          }
-          await txn.update(
-            'inventory_batches',
-            {'remaining_qty_milli': avail - item.qtyMilli},
-            where: 'id = ?',
-            whereArgs: [item.inventoryBatchId],
-          );
         }
       }
 
@@ -735,10 +739,10 @@ class QatRepository {
       final invNo = 'INV-${iso.replaceAll('-', '')}-${saleId.toString().padLeft(4, '0')}';
       await txn.update('sales', {'invoice_number': invNo}, where: 'id = ?', whereArgs: [saleId]);
 
-      // 3. Insert line items
+      // 3. Insert line items & perform exact / FIFO multi-batch deduction tracking
       for (int i = 0; i < items.length; i++) {
         final it = items[i];
-        await txn.insert('sales_invoice_items', {
+        final saleItemId = await txn.insert('sales_invoice_items', {
           'sale_id': saleId,
           'inventory_batch_id': it.inventoryBatchId,
           'qat_type_name': it.qatTypeName,
@@ -749,6 +753,13 @@ class QatRepository {
           'line_total_minor': lineTotals[i],
           'currency_code': currency.code,
         });
+        await _deductInventoryForSaleItem(
+          txn,
+          saleId: saleId,
+          saleItemId: saleItemId,
+          item: it,
+          currency: currency,
+        );
       }
 
       // 4. Update customer balance per currency
@@ -763,6 +774,157 @@ class QatRepository {
 
       return saleId;
     });
+  }
+
+  Future<void> _deductInventoryForSaleItem(
+    DatabaseExecutor txn, {
+    required int saleId,
+    required int saleItemId,
+    required NewSaleItemInput item,
+    required CurrencyCode currency,
+  }) async {
+    int remainingNeed = item.qtyMilli;
+    int weightedCostAccum = 0;
+    int deductedTotal = 0;
+    final usedBatchIds = <int>[];
+
+    if (item.inventoryBatchId != null) {
+      final batchRows = await txn.query(
+        'inventory_batches',
+        where: 'id = ?',
+        whereArgs: [item.inventoryBatchId],
+        limit: 1,
+      );
+      if (batchRows.isEmpty) {
+        throw StateError('دفعة المخزون غير موجودة.');
+      }
+      final b = batchRows.first;
+      final avail = (b['remaining_qty_milli'] as num).toInt();
+      final buyMinor = (b['buy_price_minor'] as num).toInt();
+      if (!item.allowOversell && !item.deductByFifo && avail < remainingNeed) {
+        throw StateError(
+          'الكمية المتوفرة من ${item.qatTypeName} (${QuantityMath.formatMilli(avail)}) أقل من المطلوب (${QuantityMath.formatMilli(item.qtyMilli)}).',
+        );
+      }
+      final take = math.min(avail, remainingNeed);
+      if (take > 0) {
+        await txn.update(
+          'inventory_batches',
+          {'remaining_qty_milli': avail - take},
+          where: 'id = ?',
+          whereArgs: [item.inventoryBatchId],
+        );
+        await txn.insert('sale_batch_deductions', {
+          'sale_id': saleId,
+          'sale_item_id': saleItemId,
+          'inventory_batch_id': item.inventoryBatchId,
+          'qty_milli': take,
+          'buy_price_minor': buyMinor,
+        });
+        remainingNeed -= take;
+        deductedTotal += take;
+        weightedCostAccum += (take * buyMinor / 1000).round();
+        usedBatchIds.add(item.inventoryBatchId!);
+      }
+    }
+
+    if (remainingNeed > 0 && item.deductByFifo) {
+      final candidateBatches = await txn.query(
+        'inventory_batches',
+        where:
+            'is_archived = 0 AND currency_code = ? AND remaining_qty_milli > 0 AND LOWER(TRIM(qat_type_name)) = LOWER(TRIM(?))',
+        whereArgs: [currency.code, item.qatTypeName],
+        orderBy: 'purchase_date_ms ASC, id ASC',
+      );
+      final availAcrossFifo = candidateBatches
+          .where((b) => (b['id'] as num).toInt() != item.inventoryBatchId)
+          .fold<int>(0, (sum, b) => sum + (b['remaining_qty_milli'] as num).toInt());
+
+      if (!item.allowOversell && availAcrossFifo < remainingNeed) {
+        throw StateError(
+          'الكمية المتوفرة من ${item.qatTypeName} (${QuantityMath.formatMilli(deductedTotal + availAcrossFifo)}) أقل من المطلوب (${QuantityMath.formatMilli(item.qtyMilli)}).',
+        );
+      }
+
+      for (final b in candidateBatches) {
+        if (remainingNeed <= 0) break;
+        final batchId = (b['id'] as num).toInt();
+        if (batchId == item.inventoryBatchId) continue;
+        final avail = (b['remaining_qty_milli'] as num).toInt();
+        if (avail <= 0) continue;
+        final buyMinor = (b['buy_price_minor'] as num).toInt();
+        final take = math.min(avail, remainingNeed);
+        await txn.update(
+          'inventory_batches',
+          {'remaining_qty_milli': avail - take},
+          where: 'id = ?',
+          whereArgs: [batchId],
+        );
+        await txn.insert('sale_batch_deductions', {
+          'sale_id': saleId,
+          'sale_item_id': saleItemId,
+          'inventory_batch_id': batchId,
+          'qty_milli': take,
+          'buy_price_minor': buyMinor,
+        });
+        remainingNeed -= take;
+        deductedTotal += take;
+        weightedCostAccum += (take * buyMinor / 1000).round();
+        usedBatchIds.add(batchId);
+      }
+    }
+
+    if (usedBatchIds.isNotEmpty) {
+      final avgBuyMinor = item.buyPriceMinor > 0
+          ? item.buyPriceMinor
+          : (deductedTotal > 0 ? ((weightedCostAccum * 1000) / deductedTotal).round() : 0);
+      await txn.update(
+        'sales_invoice_items',
+        {
+          if (item.inventoryBatchId == null && usedBatchIds.length == 1)
+            'inventory_batch_id': usedBatchIds.first,
+          if (item.buyPriceMinor <= 0 && avgBuyMinor > 0) 'buy_price_minor': avgBuyMinor,
+        },
+        where: 'id = ?',
+        whereArgs: [saleItemId],
+      );
+    }
+  }
+
+  Future<void> _restoreInventoryForSale(DatabaseExecutor txn, int saleId) async {
+    final deductions = await txn.query(
+      'sale_batch_deductions',
+      where: 'sale_id = ?',
+      whereArgs: [saleId],
+    );
+    if (deductions.isNotEmpty) {
+      for (final d in deductions) {
+        final batchId = (d['inventory_batch_id'] as num).toInt();
+        final qtyMilli = (d['qty_milli'] as num).toInt();
+        await txn.rawUpdate(
+          'UPDATE inventory_batches SET remaining_qty_milli = remaining_qty_milli + ? WHERE id = ?',
+          [qtyMilli, batchId],
+        );
+      }
+      await txn.delete('sale_batch_deductions', where: 'sale_id = ?', whereArgs: [saleId]);
+      return;
+    }
+
+    final oldItems = await txn.query(
+      'sales_invoice_items',
+      where: 'sale_id = ?',
+      whereArgs: [saleId],
+    );
+    for (final item in oldItems) {
+      final batchId = (item['inventory_batch_id'] as num?)?.toInt();
+      final qtyMilli = (item['qty_milli'] as num).toInt();
+      if (batchId != null) {
+        await txn.rawUpdate(
+          'UPDATE inventory_batches SET remaining_qty_milli = remaining_qty_milli + ? WHERE id = ?',
+          [qtyMilli, batchId],
+        );
+      }
+    }
   }
 
   /// Direct customer debt entry without deducting inventory (`تسجيل دين مباشر جديد`).
@@ -881,22 +1043,8 @@ class QatRepository {
       final oldCurrency = CurrencyCode.fromRaw(old['currency_code']?.toString());
       final oldRemaining = (old['remaining_amount_minor'] as num).toInt();
 
-      // 1. Restore old inventory quantities
-      final oldItems = await txn.query(
-        'sales_invoice_items',
-        where: 'sale_id = ?',
-        whereArgs: [saleId],
-      );
-      for (final item in oldItems) {
-        final batchId = (item['inventory_batch_id'] as num?)?.toInt();
-        final qtyMilli = (item['qty_milli'] as num).toInt();
-        if (batchId != null) {
-          await txn.rawUpdate(
-            'UPDATE inventory_batches SET remaining_qty_milli = remaining_qty_milli + ? WHERE id = ?',
-            [qtyMilli, batchId],
-          );
-        }
-      }
+      // 1. Restore old inventory quantities (supports multi-batch FIFO deductions)
+      await _restoreInventoryForSale(txn, saleId);
 
       // 2. Reverse old customer balance impact
       if (!isArchived && oldCustId != null && oldRemaining != 0) {
@@ -908,37 +1056,14 @@ class QatRepository {
         );
       }
 
-      // 3. Validate and deduct new inventory quantities
+      // 3. Validate new line quantities
       for (final item in newItems) {
         if (item.qtyMilli <= 0) {
           throw ArgumentError('الكمية يجب أن تكون أكبر من صفر.');
         }
-        if (item.inventoryBatchId != null) {
-          final batchRows = await txn.query(
-            'inventory_batches',
-            where: 'id = ?',
-            whereArgs: [item.inventoryBatchId],
-            limit: 1,
-          );
-          if (batchRows.isEmpty) {
-            throw StateError('دفعة المخزون غير موجودة.');
-          }
-          final avail = (batchRows.first['remaining_qty_milli'] as num).toInt();
-          if (avail < item.qtyMilli) {
-            throw StateError(
-              'الكمية المتوفرة من ${item.qatTypeName} (${QuantityMath.formatMilli(avail)}) أقل من المطلوب (${QuantityMath.formatMilli(item.qtyMilli)}).',
-            );
-          }
-          await txn.update(
-            'inventory_batches',
-            {'remaining_qty_milli': avail - item.qtyMilli},
-            where: 'id = ?',
-            whereArgs: [item.inventoryBatchId],
-          );
-        }
       }
 
-      // 4. Update sale header and replace line items
+      // 4. Update sale header and replace line items + deduct new inventory slices
       final updatedDateMs = dateMs ?? (old['date_ms'] as num).toInt();
       final updatedDateIso = dateMs != null
           ? QatDateUtils.toIsoDate(DateTime.fromMillisecondsSinceEpoch(dateMs))
@@ -970,7 +1095,7 @@ class QatRepository {
       await txn.delete('sales_invoice_items', where: 'sale_id = ?', whereArgs: [saleId]);
       for (int i = 0; i < newItems.length; i++) {
         final it = newItems[i];
-        await txn.insert('sales_invoice_items', {
+        final saleItemId = await txn.insert('sales_invoice_items', {
           'sale_id': saleId,
           'inventory_batch_id': it.inventoryBatchId,
           'qat_type_name': it.qatTypeName,
@@ -981,6 +1106,13 @@ class QatRepository {
           'line_total_minor': lineTotals[i],
           'currency_code': currency.code,
         });
+        await _deductInventoryForSaleItem(
+          txn,
+          saleId: saleId,
+          saleItemId: saleItemId,
+          item: it,
+          currency: currency,
+        );
       }
 
       // 5. Apply new customer debt delta
@@ -1006,17 +1138,7 @@ class QatRepository {
       final currency = CurrencyCode.fromRaw(sale['currency_code']?.toString());
       final remainingMinor = (sale['remaining_amount_minor'] as num).toInt();
 
-      final items = await txn.query('sales_invoice_items', where: 'sale_id = ?', whereArgs: [saleId]);
-      for (final item in items) {
-        final batchId = (item['inventory_batch_id'] as num?)?.toInt();
-        final qtyMilli = (item['qty_milli'] as num).toInt();
-        if (batchId != null) {
-          await txn.rawUpdate(
-            'UPDATE inventory_batches SET remaining_qty_milli = remaining_qty_milli + ? WHERE id = ?',
-            [qtyMilli, batchId],
-          );
-        }
-      }
+      await _restoreInventoryForSale(txn, saleId);
 
       if (!isArchived && customerId != null && remainingMinor != 0) {
         await _adjustCustomerBalance(
@@ -1295,6 +1417,9 @@ class QatRepository {
     int demarMinor = 0,
     String demarType = '',
     String demarNumber = '',
+    int? receiverId,
+    String receiverName = '',
+    int? importWeightId,
     String notes = '',
     bool addToInventory = true,
     int? dateMs,
@@ -1335,7 +1460,24 @@ class QatRepository {
         ? paymentMethod.trim()
         : normType.arabicLabel;
 
+    final int? safeReceiverId = (receiverId != null && receiverId > 0) ? receiverId : null;
+    final int? safeWeightId = (importWeightId != null && importWeightId > 0) ? importWeightId : null;
+
     return db.transaction<int>((txn) async {
+      String resolvedReceiverName = receiverName.trim();
+      if (safeReceiverId != null && resolvedReceiverName.isEmpty) {
+        final recRows = await txn.query(
+          'inventory_receivers',
+          columns: ['name'],
+          where: 'id = ?',
+          whereArgs: [safeReceiverId],
+          limit: 1,
+        );
+        if (recRows.isNotEmpty) {
+          resolvedReceiverName = (recRows.first['name'] ?? '').toString().trim();
+        }
+      }
+
       final purchaseId = await txn.insert('supplier_purchases', {
         'purchase_number': 'TMP-$ts',
         'supplier_id': supplierId,
@@ -1359,6 +1501,9 @@ class QatRepository {
         'demar_minor': demarMinor.clamp(0, 1 << 60).toInt(),
         'demar_type': demarType.trim(),
         'demar_number': demarNumber.trim(),
+        'receiver_id': safeReceiverId,
+        'receiver_name': resolvedReceiverName,
+        'import_weight_id': safeWeightId,
       });
 
       final purNo = 'PUR-${iso.replaceAll('-', '')}-${purchaseId.toString().padLeft(4, '0')}';
@@ -1396,6 +1541,8 @@ class QatRepository {
             'purchase_date_ms': ts,
             'purchase_date_iso': iso,
             'is_archived': 0,
+            'receiver_id': safeReceiverId,
+            'receiver_name': resolvedReceiverName,
           });
         }
       }
@@ -1493,6 +1640,9 @@ class QatRepository {
     int demarMinor = 0,
     String demarType = '',
     String demarNumber = '',
+    int? receiverId,
+    String? receiverName,
+    int? importWeightId,
     String notes = '',
     int? dateMs,
   }) async {
@@ -1561,6 +1711,11 @@ class QatRepository {
           ? QatDateUtils.toIsoDate(DateTime.fromMillisecondsSinceEpoch(dateMs))
           : oldIso;
 
+      final effectiveReceiverId = receiverId ?? (old['receiver_id'] as num?)?.toInt();
+      final effectiveReceiverName =
+          (receiverName ?? old['receiver_name'] ?? '').toString().trim();
+      final effectiveWeightId = importWeightId ?? (old['import_weight_id'] as num?)?.toInt();
+
       await txn.update(
         'supplier_purchases',
         {
@@ -1582,6 +1737,9 @@ class QatRepository {
           'demar_minor': demarMinor.clamp(0, 1 << 60).toInt(),
           'demar_type': demarType.trim(),
           'demar_number': demarNumber.trim(),
+          'receiver_id': effectiveReceiverId,
+          'receiver_name': effectiveReceiverName,
+          'import_weight_id': effectiveWeightId,
         },
         where: 'id = ?',
         whereArgs: [purchaseId],
@@ -1628,6 +1786,8 @@ class QatRepository {
               'currency_code': currency.code,
               'purchase_date_ms': nextDateMs,
               'purchase_date_iso': nextDateIso,
+              'receiver_id': effectiveReceiverId,
+              'receiver_name': effectiveReceiverName,
               if (it.sellPriceMinor > 0) 'sell_price_minor': it.sellPriceMinor,
             },
             where: 'id = ?',
@@ -1648,6 +1808,8 @@ class QatRepository {
             'purchase_date_ms': nextDateMs,
             'purchase_date_iso': nextDateIso,
             'is_archived': 0,
+            'receiver_id': effectiveReceiverId,
+            'receiver_name': effectiveReceiverName,
           });
         }
       }
@@ -1663,7 +1825,10 @@ class QatRepository {
     });
   }
 
-  Future<void> deleteSupplierPurchase(int purchaseId) async {
+  Future<void> deleteSupplierPurchase(
+    int purchaseId, {
+    bool forceIfStockUsed = false,
+  }) async {
     final db = await _db;
     await db.transaction<void>((txn) async {
       final rows = await txn.query(
@@ -1683,6 +1848,7 @@ class QatRepository {
         where: 'purchase_id = ?',
         whereArgs: [purchaseId],
       );
+      final batchAdjustments = <({int batchId, int initialQty, int remainingQty, int qtyMilli, int linkedSales})>[];
       for (final it in items) {
         final qatName = (it['qat_type_name'] ?? '').toString().trim();
         final qtyMilli = (it['qty_milli'] as num).toInt();
@@ -1697,28 +1863,51 @@ class QatRepository {
           final batchId = (b['id'] as num).toInt();
           final initialQty = (b['initial_qty_milli'] as num).toInt();
           final remainingQty = (b['remaining_qty_milli'] as num).toInt();
-          final linkedSales = Sqflite.firstIntValue(
+          final directSales = Sqflite.firstIntValue(
                 await txn.rawQuery(
                   'SELECT COUNT(*) FROM sales_invoice_items WHERE inventory_batch_id = ?',
                   [batchId],
                 ),
               ) ??
               0;
-          if (linkedSales == 0 && remainingQty <= qtyMilli && initialQty <= qtyMilli) {
-            await txn.delete('inventory_batches', where: 'id = ?', whereArgs: [batchId]);
-          } else {
-            final nextInitial = (initialQty - qtyMilli).clamp(0, 1 << 60).toInt();
-            final nextRemaining = (remainingQty - qtyMilli).clamp(0, nextInitial).toInt();
-            await txn.update(
-              'inventory_batches',
-              {
-                'initial_qty_milli': nextInitial,
-                'remaining_qty_milli': nextRemaining,
-              },
-              where: 'id = ?',
-              whereArgs: [batchId],
+          final fifoDeductions = Sqflite.firstIntValue(
+                await txn.rawQuery(
+                  'SELECT COUNT(*) FROM sale_batch_deductions WHERE inventory_batch_id = ?',
+                  [batchId],
+                ),
+              ) ??
+              0;
+          final linkedSales = directSales + fifoDeductions;
+          if (linkedSales > 0 && !forceIfStockUsed) {
+            throw StateError(
+              'لا يمكن حذف فاتورة الشراء لأن كميات من مخزون الصنف ($qatName) تم بيعها في فواتير مبيعات؛ احذف فواتير المبيعات المرتبطة أولاً أو استخدم الأرشفة.',
             );
           }
+          batchAdjustments.add((
+            batchId: batchId,
+            initialQty: initialQty,
+            remainingQty: remainingQty,
+            qtyMilli: qtyMilli,
+            linkedSales: linkedSales,
+          ));
+        }
+      }
+
+      for (final adj in batchAdjustments) {
+        if (adj.linkedSales == 0 && adj.remainingQty <= adj.qtyMilli && adj.initialQty <= adj.qtyMilli) {
+          await txn.delete('inventory_batches', where: 'id = ?', whereArgs: [adj.batchId]);
+        } else {
+          final nextInitial = (adj.initialQty - adj.qtyMilli).clamp(0, 1 << 60).toInt();
+          final nextRemaining = (adj.remainingQty - adj.qtyMilli).clamp(0, nextInitial).toInt();
+          await txn.update(
+            'inventory_batches',
+            {
+              'initial_qty_milli': nextInitial,
+              'remaining_qty_milli': nextRemaining,
+            },
+            where: 'id = ?',
+            whereArgs: [adj.batchId],
+          );
         }
       }
 
@@ -2786,8 +2975,368 @@ class QatRepository {
     return out;
   }
 
+  /// Combined chronological statement across all non-archived customers (`كشف حساب عام للعملاء`).
+  Future<Map<CurrencyCode, List<StatementLine>>> getAllCustomersStatement({
+    String? fromIso,
+    String? toIso,
+  }) async {
+    final allSales = await getSales();
+    final payments = await getCustomerPayments();
+    final out = <CurrencyCode, List<StatementLine>>{};
+    for (final cur in CurrencyCode.values) {
+      final rawEvents = <({int ms, String iso, String ref, String desc, int debit, int credit})>[];
+      for (final s in allSales.where((e) => e.currency == cur)) {
+        final isDebt = _isDirectDebtEntry(s);
+        rawEvents.add((
+          ms: s.dateMs,
+          iso: s.dateIso,
+          ref: s.invoiceNumber,
+          desc: isDebt
+              ? '${s.customerName} — ${s.notes.isNotEmpty ? s.notes : 'دين مباشر'}'
+              : '${s.customerName} — فاتورة مبيعات (${s.effectivePaymentMethodLabel})',
+          debit: s.totalAmountMinor,
+          credit: s.paidAmountMinor,
+        ));
+      }
+      for (final p in payments.where((e) => e.currency == cur)) {
+        rawEvents.add((
+          ms: p.dateMs,
+          iso: p.dateIso,
+          ref: 'RCV-${p.id}',
+          desc: '${p.customerName} — سند قبض (${p.paymentMethod}) ${p.notes}'.trim(),
+          debit: 0,
+          credit: p.amountMinor,
+        ));
+      }
+      if (rawEvents.isEmpty) continue;
+      rawEvents.sort((a, b) => a.ms.compareTo(b.ms));
+      int opening = 0;
+      final lines = <StatementLine>[];
+      for (final ev in rawEvents) {
+        if (fromIso != null && fromIso.isNotEmpty && ev.iso.compareTo(fromIso) < 0) {
+          opening += ev.debit - ev.credit;
+          continue;
+        }
+        if (toIso != null && toIso.isNotEmpty && ev.iso.compareTo(toIso) > 0) {
+          continue;
+        }
+        if (lines.isEmpty && opening != 0 && fromIso != null) {
+          lines.add(StatementLine(
+            dateMs: ev.ms,
+            dateIso: fromIso,
+            reference: 'OPEN',
+            description: 'رصيد سابق مرحّل ما قبل $fromIso',
+            currency: cur,
+            debitMinor: opening > 0 ? opening : 0,
+            creditMinor: opening < 0 ? -opening : 0,
+            runningBalanceMinor: opening,
+          ));
+        }
+        opening += ev.debit - ev.credit;
+        lines.add(StatementLine(
+          dateMs: ev.ms,
+          dateIso: ev.iso,
+          reference: ev.ref,
+          description: ev.desc,
+          currency: cur,
+          debitMinor: ev.debit,
+          creditMinor: ev.credit,
+          runningBalanceMinor: opening,
+        ));
+      }
+      if (lines.isEmpty && opening != 0 && fromIso != null) {
+        lines.add(StatementLine(
+          dateMs: DateTime.now().millisecondsSinceEpoch,
+          dateIso: fromIso,
+          reference: 'OPEN',
+          description: 'رصيد سابق مرحّل ما قبل $fromIso',
+          currency: cur,
+          debitMinor: opening > 0 ? opening : 0,
+          creditMinor: opening < 0 ? -opening : 0,
+          runningBalanceMinor: opening,
+        ));
+      }
+      if (lines.isNotEmpty) out[cur] = lines;
+    }
+    return out;
+  }
+
+  /// Combined chronological statement across all non-archived suppliers (`كشف حساب عام للموردين`).
+  Future<Map<CurrencyCode, List<StatementLine>>> getAllSuppliersStatement({
+    String? fromIso,
+    String? toIso,
+  }) async {
+    final allPurchases = await getSupplierPurchases();
+    final payments = await getSupplierPayments();
+    final out = <CurrencyCode, List<StatementLine>>{};
+    for (final cur in CurrencyCode.values) {
+      final rawEvents = <({int ms, String iso, String ref, String desc, int debit, int credit})>[];
+      for (final p in allPurchases.where((e) => e.currency == cur)) {
+        rawEvents.add((
+          ms: p.dateMs,
+          iso: p.dateIso,
+          ref: p.purchaseNumber,
+          desc: '${p.supplierName} — فاتورة شراء (${p.effectivePaymentMethodLabel})',
+          debit: p.totalAmountMinor,
+          credit: p.paidAmountMinor,
+        ));
+      }
+      for (final p in payments.where((e) => e.currency == cur)) {
+        final isReturn = p.paymentMethod == 'مرتجع';
+        rawEvents.add((
+          ms: p.dateMs,
+          iso: p.dateIso,
+          ref: isReturn ? 'RET-${p.id}' : 'PAY-${p.id}',
+          desc: isReturn
+              ? '${p.supplierName} — ${p.notes.isNotEmpty ? p.notes : 'سند مرتجع لمورد'}'
+              : '${p.supplierName} — سند صرف (${p.paymentMethod}) ${p.notes}'.trim(),
+          debit: 0,
+          credit: p.amountMinor,
+        ));
+      }
+      if (rawEvents.isEmpty) continue;
+      rawEvents.sort((a, b) => a.ms.compareTo(b.ms));
+      int opening = 0;
+      final lines = <StatementLine>[];
+      for (final ev in rawEvents) {
+        if (fromIso != null && fromIso.isNotEmpty && ev.iso.compareTo(fromIso) < 0) {
+          opening += ev.debit - ev.credit;
+          continue;
+        }
+        if (toIso != null && toIso.isNotEmpty && ev.iso.compareTo(toIso) > 0) {
+          continue;
+        }
+        if (lines.isEmpty && opening != 0 && fromIso != null) {
+          lines.add(StatementLine(
+            dateMs: ev.ms,
+            dateIso: fromIso,
+            reference: 'OPEN',
+            description: 'رصيد سابق مرحّل ما قبل $fromIso',
+            currency: cur,
+            debitMinor: opening > 0 ? opening : 0,
+            creditMinor: opening < 0 ? -opening : 0,
+            runningBalanceMinor: opening,
+          ));
+        }
+        opening += ev.debit - ev.credit;
+        lines.add(StatementLine(
+          dateMs: ev.ms,
+          dateIso: ev.iso,
+          reference: ev.ref,
+          description: ev.desc,
+          currency: cur,
+          debitMinor: ev.debit,
+          creditMinor: ev.credit,
+          runningBalanceMinor: opening,
+        ));
+      }
+      if (lines.isEmpty && opening != 0 && fromIso != null) {
+        lines.add(StatementLine(
+          dateMs: DateTime.now().millisecondsSinceEpoch,
+          dateIso: fromIso,
+          reference: 'OPEN',
+          description: 'رصيد سابق مرحّل ما قبل $fromIso',
+          currency: cur,
+          debitMinor: opening > 0 ? opening : 0,
+          creditMinor: opening < 0 ? -opening : 0,
+          runningBalanceMinor: opening,
+        ));
+      }
+      if (lines.isNotEmpty) out[cur] = lines;
+    }
+    return out;
+  }
+
   // ---------------------------------------------------------------------------
-  // Daily Settlement & Inventory Reconciliation Audit Logs
+  // Worker Handoffs & Statements (تسليم واستلام العمال)
+  // ---------------------------------------------------------------------------
+
+  Future<List<WorkerHandoff>> getWorkerHandoffs({
+    bool includeArchived = false,
+    String? workerName,
+    int? receiverId,
+    String? fromIso,
+    String? toIso,
+  }) async {
+    final db = await _db;
+    final where = <String>[];
+    final args = <Object?>[];
+    if (!includeArchived) where.add('is_archived = 0');
+    if (workerName != null && workerName.trim().isNotEmpty) {
+      where.add('LOWER(TRIM(worker_name)) = LOWER(TRIM(?))');
+      args.add(workerName.trim());
+    }
+    if (receiverId != null && receiverId > 0) {
+      where.add('receiver_id = ?');
+      args.add(receiverId);
+    }
+    if (fromIso != null && fromIso.isNotEmpty) {
+      where.add('date_iso >= ?');
+      args.add(fromIso);
+    }
+    if (toIso != null && toIso.isNotEmpty) {
+      where.add('date_iso <= ?');
+      args.add(toIso);
+    }
+    final rows = await db.query(
+      'worker_handoffs',
+      where: where.isEmpty ? null : where.join(' AND '),
+      whereArgs: args,
+      orderBy: 'date_ms DESC, id DESC',
+    );
+    return rows.map(_mapWorkerHandoff).toList();
+  }
+
+  Future<int> addWorkerHandoff({
+    required String workerName,
+    int? receiverId,
+    required WorkerHandoffDirection direction,
+    required int amountMinor,
+    required CurrencyCode currency,
+    int qtyMilli = 0,
+    String unit = 'ربطة',
+    String notes = '',
+    int? dateMs,
+  }) async {
+    final cleanWorker = workerName.trim();
+    if (cleanWorker.isEmpty) throw ArgumentError('اسم العامل مطلوب.');
+    if (amountMinor <= 0 && qtyMilli <= 0) {
+      throw ArgumentError('يجب إدخال مبلغ أو كمية أكبر من صفر.');
+    }
+    final db = await _db;
+    final ts = dateMs ?? DateTime.now().millisecondsSinceEpoch;
+    final iso = QatDateUtils.toIsoDate(DateTime.fromMillisecondsSinceEpoch(ts));
+    return db.insert('worker_handoffs', {
+      'worker_name': cleanWorker,
+      'receiver_id': (receiverId != null && receiverId > 0) ? receiverId : null,
+      'direction': direction.code,
+      'amount_minor': amountMinor.clamp(0, 1 << 60).toInt(),
+      'currency_code': currency.code,
+      'qty_milli': qtyMilli.clamp(0, 1 << 60).toInt(),
+      'unit': unit.trim().isEmpty ? 'ربطة' : unit.trim(),
+      'date_ms': ts,
+      'date_iso': iso,
+      'notes': notes.trim(),
+      'is_archived': 0,
+    });
+  }
+
+  Future<void> updateWorkerHandoff({
+    required int id,
+    required String workerName,
+    int? receiverId,
+    required WorkerHandoffDirection direction,
+    required int amountMinor,
+    required CurrencyCode currency,
+    int qtyMilli = 0,
+    String unit = 'ربطة',
+    String notes = '',
+  }) async {
+    final cleanWorker = workerName.trim();
+    if (cleanWorker.isEmpty) throw ArgumentError('اسم العامل مطلوب.');
+    final db = await _db;
+    await db.update(
+      'worker_handoffs',
+      {
+        'worker_name': cleanWorker,
+        'receiver_id': (receiverId != null && receiverId > 0) ? receiverId : null,
+        'direction': direction.code,
+        'amount_minor': amountMinor.clamp(0, 1 << 60).toInt(),
+        'currency_code': currency.code,
+        'qty_milli': qtyMilli.clamp(0, 1 << 60).toInt(),
+        'unit': unit.trim().isEmpty ? 'ربطة' : unit.trim(),
+        'notes': notes.trim(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> deleteWorkerHandoff(int id) async {
+    final db = await _db;
+    await db.delete('worker_handoffs', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<String>> getDistinctWorkerNames() async {
+    final receivers = await getInventoryReceivers();
+    final handoffs = await getWorkerHandoffs();
+    final names = <String>{
+      for (final r in receivers)
+        if (r.name.trim().isNotEmpty) r.name.trim(),
+      for (final h in handoffs)
+        if (h.workerName.trim().isNotEmpty) h.workerName.trim(),
+    }.toList()
+      ..sort();
+    return names;
+  }
+
+  Future<Map<CurrencyCode, List<StatementLine>>> getWorkerStatement(
+    String workerName, {
+    String? fromIso,
+    String? toIso,
+  }) async {
+    final handoffs = await getWorkerHandoffs(workerName: workerName);
+    final out = <CurrencyCode, List<StatementLine>>{};
+    for (final cur in CurrencyCode.values) {
+      final list = handoffs.where((h) => h.currency == cur).toList()
+        ..sort((a, b) => a.dateMs.compareTo(b.dateMs));
+      if (list.isEmpty) continue;
+      int opening = 0;
+      final lines = <StatementLine>[];
+      for (final h in list) {
+        final debit = h.direction == WorkerHandoffDirection.toWorker ? h.amountMinor : 0;
+        final credit = h.direction == WorkerHandoffDirection.fromWorker ? h.amountMinor : 0;
+        if (fromIso != null && fromIso.isNotEmpty && h.dateIso.compareTo(fromIso) < 0) {
+          opening += debit - credit;
+          continue;
+        }
+        if (toIso != null && toIso.isNotEmpty && h.dateIso.compareTo(toIso) > 0) {
+          continue;
+        }
+        if (lines.isEmpty && opening != 0 && fromIso != null) {
+          lines.add(StatementLine(
+            dateMs: h.dateMs,
+            dateIso: fromIso,
+            reference: 'OPEN',
+            description: 'رصيد سابق للعامل ما قبل $fromIso',
+            currency: cur,
+            debitMinor: opening > 0 ? opening : 0,
+            creditMinor: opening < 0 ? -opening : 0,
+            runningBalanceMinor: opening,
+          ));
+        }
+        opening += debit - credit;
+        final qtyInfo = h.qtyMilli > 0
+            ? ' — كمية: ${QuantityMath.formatMilli(h.qtyMilli)} ${h.unit}'
+            : '';
+        lines.add(StatementLine(
+          dateMs: h.dateMs,
+          dateIso: h.dateIso,
+          reference: 'WH-${h.id}',
+          description:
+              '${h.direction.arabicLabel}$qtyInfo${h.notes.isNotEmpty ? ' (${h.notes})' : ''}',
+          currency: cur,
+          debitMinor: debit,
+          creditMinor: credit,
+          runningBalanceMinor: opening,
+        ));
+      }
+      if (lines.isEmpty && opening != 0 && fromIso != null) {
+        lines.add(StatementLine(
+          dateMs: DateTime.now().millisecondsSinceEpoch,
+          dateIso: fromIso,
+          reference: 'OPEN',
+          description: 'رصيد سابق للعامل ما قبل $fromIso',
+          currency: cur,
+          debitMinor: opening > 0 ? opening : 0,
+          creditMinor: opening < 0 ? -opening : 0,
+          runningBalanceMinor: opening,
+        ));
+      }
+      if (lines.isNotEmpty) out[cur] = lines;
+    }
+    return out;
+  }
   // ---------------------------------------------------------------------------
 
   Future<List<DailySettlementSnapshot>> getDailySettlements() async {
@@ -2908,25 +3457,34 @@ class QatRepository {
   // Archive Operations
   // ---------------------------------------------------------------------------
 
+  static const Set<String> archiveSupportedTables = {
+    'sales',
+    'customer_payments',
+    'supplier_purchases',
+    'supplier_payments',
+    'expenses',
+    'qat_tax_entries',
+    'money_transfers',
+    'inventory_batches',
+    'qat_import_weights',
+    'customers',
+    'suppliers',
+    'worker_handoffs',
+    'qat_types',
+    'inventory_receivers',
+  };
+
   Future<void> setArchived(String tableName, int id, bool archived) async {
-    const allowed = {
-      'sales',
-      'customer_payments',
-      'supplier_purchases',
-      'supplier_payments',
-      'expenses',
-      'qat_tax_entries',
-      'money_transfers',
-      'inventory_batches',
-    };
-    if (!allowed.contains(tableName)) throw ArgumentError('جدول غير مدعوم للأرشفة: $tableName');
+    if (!archiveSupportedTables.contains(tableName)) {
+      throw ArgumentError('جدول غير مدعوم للأرشفة: $tableName');
+    }
     final db = await _db;
 
     await db.transaction<void>((txn) async {
       final rows = await txn.query(tableName, where: 'id = ?', whereArgs: [id], limit: 1);
       if (rows.isEmpty) return;
       final r = rows.first;
-      final currentlyArchived = (r['is_archived'] as num).toInt() == 1;
+      final currentlyArchived = ((r['is_archived'] as num?) ?? 0).toInt() == 1;
       if (currentlyArchived == archived) return;
 
       await txn.update(tableName, {'is_archived': archived ? 1 : 0},
@@ -2971,17 +3529,29 @@ class QatRepository {
 
   /// Permanently deletes an already-archived row (never re-adjusts balances if archived).
   Future<void> deletePermanently(String tableName, int id) async {
-    const allowed = {
-      'sales',
-      'customer_payments',
-      'supplier_purchases',
-      'supplier_payments',
-      'expenses',
-      'qat_tax_entries',
-      'money_transfers',
-      'inventory_batches',
-    };
-    if (!allowed.contains(tableName)) throw ArgumentError('جدول غير مدعوم: $tableName');
+    if (!archiveSupportedTables.contains(tableName)) {
+      throw ArgumentError('جدول غير مدعوم: $tableName');
+    }
+    if (tableName == 'sales') {
+      await deleteSale(id);
+      return;
+    }
+    if (tableName == 'supplier_purchases') {
+      await deleteSupplierPurchase(id, forceIfStockUsed: true);
+      return;
+    }
+    if (tableName == 'customers') {
+      await deleteCustomer(id);
+      return;
+    }
+    if (tableName == 'suppliers') {
+      await deleteSupplier(id);
+      return;
+    }
+    if (tableName == 'inventory_receivers') {
+      await deleteInventoryReceiver(id);
+      return;
+    }
     await setArchived(tableName, id, true);
     final db = await _db;
     await db.delete(tableName, where: 'id = ?', whereArgs: [id]);
@@ -3052,6 +3622,7 @@ class QatRepository {
         notes: (r['notes'] ?? '').toString(),
         isHidden: (r['is_hidden'] as num).toInt() == 1,
         createdAtMs: (r['created_at_ms'] as num).toInt(),
+        isArchived: ((r['is_archived'] as num?) ?? 0).toInt() == 1,
       );
 
   InventoryBatch _mapBatch(Map<String, Object?> r) => InventoryBatch(
@@ -3094,6 +3665,22 @@ class QatRepository {
         notes: (r['notes'] ?? '').toString(),
         isActive: ((r['is_active'] as num?) ?? 1).toInt() == 1,
         createdAtMs: ((r['created_at_ms'] as num?) ?? 0).toInt(),
+        isArchived: ((r['is_archived'] as num?) ?? 0).toInt() == 1,
+      );
+
+  WorkerHandoff _mapWorkerHandoff(Map<String, Object?> r) => WorkerHandoff(
+        id: (r['id'] as num).toInt(),
+        workerName: (r['worker_name'] ?? '').toString(),
+        receiverId: (r['receiver_id'] as num?)?.toInt(),
+        direction: WorkerHandoffDirection.fromRaw(r['direction']?.toString()),
+        amountMinor: (r['amount_minor'] as num).toInt(),
+        currency: CurrencyCode.fromRaw(r['currency_code']?.toString()),
+        qtyMilli: ((r['qty_milli'] as num?) ?? 0).toInt(),
+        unit: (r['unit'] ?? 'ربطة').toString(),
+        dateMs: (r['date_ms'] as num).toInt(),
+        dateIso: (r['date_iso'] ?? '').toString(),
+        notes: (r['notes'] ?? '').toString(),
+        isArchived: ((r['is_archived'] as num?) ?? 0).toInt() == 1,
       );
 
   Customer _mapCustomer(Map<String, Object?> r, Map<CurrencyCode, int> bals) => Customer(
@@ -3204,6 +3791,9 @@ class QatRepository {
         demarMinor: ((r['demar_minor'] as num?) ?? 0).toInt(),
         demarType: (r['demar_type'] ?? '').toString(),
         demarNumber: (r['demar_number'] ?? '').toString(),
+        receiverId: (r['receiver_id'] as num?)?.toInt(),
+        receiverName: (r['receiver_name'] ?? '').toString(),
+        importWeightId: (r['import_weight_id'] as num?)?.toInt(),
         items: items,
       );
 

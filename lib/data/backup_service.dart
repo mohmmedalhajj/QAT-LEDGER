@@ -625,4 +625,77 @@ class BackupService {
     }
     return out;
   }
+
+  /// Creates an automatic `.qatbackup` snapshot in [rollbackDir], then clears all
+  /// operational accounting ledgers atomically. Preserves agency branding/users unless
+  /// [fullFactoryReset] is true; never touches device-bound license activation.
+  Future<BackupResult> resetAllAccountingData({
+    required String rollbackDir,
+    String appEdition = 'customer',
+    String? agencyLogoPath,
+    bool fullFactoryReset = false,
+  }) async {
+    final rollback = await createAtomicBackup(
+      outputDir: rollbackDir,
+      appEdition: appEdition,
+      agencyLogoPath: agencyLogoPath,
+    );
+
+    final db = await dbService.database;
+    await db.transaction<void>((txn) async {
+      const operationalTables = [
+        'sale_batch_deductions',
+        'sales_invoice_items',
+        'sales',
+        'customer_payments',
+        'customer_balances',
+        'customers',
+        'supplier_purchase_items',
+        'supplier_purchases',
+        'supplier_payments',
+        'supplier_balances',
+        'suppliers',
+        'worker_handoffs',
+        'inventory_batches',
+        'qat_import_weights',
+        'inventory_receivers',
+        'qat_types',
+        'expenses',
+        'qat_tax_entries',
+        'money_transfers',
+        'transfer_recipients',
+      ];
+      for (final table in operationalTables) {
+        final exists = await txn.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+          [table],
+        );
+        if (exists.isNotEmpty) {
+          await txn.delete(table);
+        }
+      }
+
+      if (fullFactoryReset) {
+        await txn.delete('app_settings');
+        await txn.delete('ledger_accounts');
+        final batch = txn.batch();
+        for (final acc in QatLedgerSchema.defaultLedgerAccounts) {
+          batch.insert(
+            'ledger_accounts',
+            acc,
+            conflictAlgorithm: ConflictAlgorithm.ignore,
+          );
+        }
+        await batch.commit(noResult: true);
+      } else {
+        await txn.delete(
+          'app_settings',
+          where: 'key IN (?, ?)',
+          whereArgs: ['daily_settlements_v1', 'inventory_reconciliation_v1'],
+        );
+      }
+    });
+
+    return rollback;
+  }
 }

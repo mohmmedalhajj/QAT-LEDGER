@@ -7,7 +7,6 @@ import 'package:provider/provider.dart';
 
 import 'core/money.dart';
 import 'core/theme.dart';
-import 'developer/developer_console_sheet.dart';
 import 'features/dashboard_tab.dart';
 import 'features/expenses_settings_tab.dart';
 import 'features/inventory_suppliers_tab.dart';
@@ -567,18 +566,18 @@ class _ErpCategorizedDrawer extends StatelessWidget {
               selected: ctrl.activeRoute == AppScreenRoute.settings,
               onTap: () => go(AppScreenRoute.settings),
             ),
-            if (ctrl.isDeveloperEdition && ctrl.developerKeyManager != null)
+            if (ctrl.isDeveloperEdition && ctrl.developerBridge != null)
               ListTile(
                 dense: true,
                 leading: Icon(Icons.developer_mode, color: pal.accent),
                 title: const Text('لوحة تحكم المطور (الإصدار الخاص)'),
                 onTap: () async {
                   onClose();
+                  final bridge = ctrl.developerBridge;
+                  if (bridge == null) return;
                   await Navigator.of(context).push<void>(
                     MaterialPageRoute<void>(
-                      builder: (_) => DeveloperConsoleSheet(
-                        keyManager: ctrl.developerKeyManager!,
-                        devDb: ctrl.developerDb,
+                      builder: (_) => bridge.buildConsoleScreen(
                         onKeysUpdated: ctrl.refreshLicense,
                       ),
                     ),

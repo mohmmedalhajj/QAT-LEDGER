@@ -16,23 +16,30 @@ import '../transfers/recipients_reports_view.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/erp_components.dart';
 
+enum _StatementPartyMode { customer, supplier, worker }
+
 class AccountStatementView extends StatefulWidget {
   const AccountStatementView({
     super.key,
     this.preselectedCustomerId,
     this.preselectedSupplierId,
+    this.preselectedWorkerName,
   });
 
   final int? preselectedCustomerId;
   final int? preselectedSupplierId;
+  final String? preselectedWorkerName;
 
   @override
   State<AccountStatementView> createState() => _AccountStatementViewState();
 }
 
 class _AccountStatementViewState extends State<AccountStatementView> {
-  bool _isCustomer = true;
+  static const int _allPartiesSentinelId = -1;
+
+  _StatementPartyMode _mode = _StatementPartyMode.customer;
   int? _partyId;
+  String? _workerName;
   ReportPeriodPreset _preset = ReportPeriodPreset.all;
   String? _fromIso;
   String? _toIso;
@@ -46,16 +53,28 @@ class _AccountStatementViewState extends State<AccountStatementView> {
       if (!mounted) return;
       final ctrl = context.read<AppController>();
       if (widget.preselectedCustomerId != null) {
-        _isCustomer = true;
+        _mode = _StatementPartyMode.customer;
         _partyId = widget.preselectedCustomerId;
         unawaited(_loadStatement(ctrl));
+      } else if (widget.preselectedSupplierId != null) {
+        _mode = _StatementPartyMode.supplier;
+        _partyId = widget.preselectedSupplierId;
+        unawaited(_loadStatement(ctrl));
+      } else if (widget.preselectedWorkerName != null) {
+        _mode = _StatementPartyMode.worker;
+        _workerName = widget.preselectedWorkerName;
+        unawaited(_loadStatement(ctrl));
       } else if (ctrl.statementCustomerId != null) {
-        _isCustomer = true;
+        _mode = _StatementPartyMode.customer;
         _partyId = ctrl.statementCustomerId;
         unawaited(_loadStatement(ctrl));
       } else if (ctrl.statementSupplierId != null) {
-        _isCustomer = false;
+        _mode = _StatementPartyMode.supplier;
         _partyId = ctrl.statementSupplierId;
+        unawaited(_loadStatement(ctrl));
+      } else if (ctrl.statementWorkerName != null) {
+        _mode = _StatementPartyMode.worker;
+        _workerName = ctrl.statementWorkerName;
         unawaited(_loadStatement(ctrl));
       }
     });
@@ -64,18 +83,28 @@ class _AccountStatementViewState extends State<AccountStatementView> {
   @override
   void didUpdateWidget(AccountStatementView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.preselectedSupplierId != null &&
+    if (widget.preselectedWorkerName != null &&
+        widget.preselectedWorkerName != oldWidget.preselectedWorkerName) {
+      setState(() {
+        _mode = _StatementPartyMode.worker;
+        _workerName = widget.preselectedWorkerName;
+        _partyId = null;
+      });
+      unawaited(_loadStatement(context.read<AppController>()));
+    } else if (widget.preselectedSupplierId != null &&
         widget.preselectedSupplierId != oldWidget.preselectedSupplierId) {
       setState(() {
-        _isCustomer = false;
+        _mode = _StatementPartyMode.supplier;
         _partyId = widget.preselectedSupplierId;
+        _workerName = null;
       });
       unawaited(_loadStatement(context.read<AppController>()));
     } else if (widget.preselectedCustomerId != null &&
         widget.preselectedCustomerId != oldWidget.preselectedCustomerId) {
       setState(() {
-        _isCustomer = true;
+        _mode = _StatementPartyMode.customer;
         _partyId = widget.preselectedCustomerId;
+        _workerName = null;
       });
       unawaited(_loadStatement(context.read<AppController>()));
     }
@@ -110,23 +139,57 @@ class _AccountStatementViewState extends State<AccountStatementView> {
   }
 
   Future<void> _loadStatement(AppController ctrl) async {
+    if (_mode == _StatementPartyMode.worker) {
+      final w = (_workerName ?? '').trim();
+      if (w.isEmpty) {
+        setState(() => _lines = {});
+        return;
+      }
+      setState(() => _loading = true);
+      try {
+        final res = await ctrl.repo.getWorkerStatement(
+          w,
+          fromIso: _fromIso,
+          toIso: _toIso,
+        );
+        if (!mounted) return;
+        setState(() => _lines = res);
+      } finally {
+        if (mounted) setState(() => _loading = false);
+      }
+      return;
+    }
+
     if (_partyId == null) {
       setState(() => _lines = {});
       return;
     }
     setState(() => _loading = true);
     try {
-      final res = _isCustomer
-          ? await ctrl.repo.getCustomerStatement(
-              _partyId!,
-              fromIso: _fromIso,
-              toIso: _toIso,
-            )
-          : await ctrl.repo.getSupplierStatement(
-              _partyId!,
-              fromIso: _fromIso,
-              toIso: _toIso,
-            );
+      final Map<CurrencyCode, List<StatementLine>> res;
+      if (_mode == _StatementPartyMode.customer) {
+        res = _partyId == _allPartiesSentinelId
+            ? await ctrl.repo.getAllCustomersStatement(
+                fromIso: _fromIso,
+                toIso: _toIso,
+              )
+            : await ctrl.repo.getCustomerStatement(
+                _partyId!,
+                fromIso: _fromIso,
+                toIso: _toIso,
+              );
+      } else {
+        res = _partyId == _allPartiesSentinelId
+            ? await ctrl.repo.getAllSuppliersStatement(
+                fromIso: _fromIso,
+                toIso: _toIso,
+              )
+            : await ctrl.repo.getSupplierStatement(
+                _partyId!,
+                fromIso: _fromIso,
+                toIso: _toIso,
+              );
+      }
       if (!mounted) return;
       setState(() => _lines = res);
     } finally {
@@ -140,15 +203,48 @@ class _AccountStatementViewState extends State<AccountStatementView> {
   Widget build(BuildContext context) {
     final ctrl = context.watch<AppController>();
     final pal = context.pal;
-    final partyList = _isCustomer
+    final partyList = _mode == _StatementPartyMode.customer
         ? ctrl.customers.map((c) => (id: c.id, name: c.name, phone: c.phone)).toList()
-        : ctrl.suppliers.map((s) => (id: s.id, name: s.name, phone: s.phone)).toList();
+        : (_mode == _StatementPartyMode.supplier
+            ? ctrl.suppliers
+                .map((s) => (id: s.id, name: s.name, phone: s.phone))
+                .toList()
+            : const <({int id, String name, String phone})>[]);
 
+    final workerNames = <String>{
+      for (final r in ctrl.inventoryReceivers)
+        if (r.name.trim().isNotEmpty) r.name.trim(),
+      for (final h in ctrl.workerHandoffs)
+        if (h.workerName.trim().isNotEmpty) h.workerName.trim(),
+    }.toList()
+      ..sort();
+
+    final isAggregate =
+        _mode != _StatementPartyMode.worker && _partyId == _allPartiesSentinelId;
     final selectedMatches = partyList.where((e) => e.id == _partyId).toList();
-    final selectedPartyName =
-        selectedMatches.isEmpty ? '' : selectedMatches.first.name;
-    final selectedPartyPhone =
-        selectedMatches.isEmpty ? '' : selectedMatches.first.phone;
+    final String selectedPartyTitle = switch (_mode) {
+      _StatementPartyMode.customer =>
+        isAggregate ? 'عام للعملاء' : 'العميل',
+      _StatementPartyMode.supplier =>
+        isAggregate ? 'عام للموردين' : 'المورد',
+      _StatementPartyMode.worker => 'العامل',
+    };
+    final String selectedPartyName = switch (_mode) {
+      _StatementPartyMode.customer => isAggregate
+          ? 'كافة العملاء'
+          : (selectedMatches.isEmpty ? '' : selectedMatches.first.name),
+      _StatementPartyMode.supplier => isAggregate
+          ? 'كافة الموردين'
+          : (selectedMatches.isEmpty ? '' : selectedMatches.first.name),
+      _StatementPartyMode.worker => _workerName ?? '',
+    };
+    final String selectedPartyPhone =
+        (_mode != _StatementPartyMode.worker && selectedMatches.isNotEmpty)
+            ? selectedMatches.first.phone
+            : '';
+    final bool hasSelection = _mode == _StatementPartyMode.worker
+        ? (_workerName != null && _workerName!.trim().isNotEmpty)
+        : _partyId != null;
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -160,52 +256,96 @@ class _AccountStatementViewState extends State<AccountStatementView> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const ErpSectionHeader(
-                  title: 'استخراج كشف حساب تفصيلي',
+                  title: 'استخراج كشف حساب تفصيلي أو شامل',
                   icon: Icons.table_chart_outlined,
                 ),
                 const SizedBox(height: 12),
-                SegmentedButton<bool>(
+                SegmentedButton<_StatementPartyMode>(
                   segments: const [
-                    ButtonSegment<bool>(
-                      value: true,
-                      label: Text('كشف حساب عميل'),
+                    ButtonSegment<_StatementPartyMode>(
+                      value: _StatementPartyMode.customer,
+                      label: Text('العملاء'),
                     ),
-                    ButtonSegment<bool>(
-                      value: false,
-                      label: Text('كشف حساب مورد'),
+                    ButtonSegment<_StatementPartyMode>(
+                      value: _StatementPartyMode.supplier,
+                      label: Text('الموردون'),
+                    ),
+                    ButtonSegment<_StatementPartyMode>(
+                      value: _StatementPartyMode.worker,
+                      label: Text('العمال'),
                     ),
                   ],
-                  selected: {_isCustomer},
+                  selected: {_mode},
                   onSelectionChanged: (s) {
                     setState(() {
-                      _isCustomer = s.first;
+                      _mode = s.first;
                       _partyId = null;
+                      _workerName = null;
                       _lines = {};
                     });
                   },
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<int>(
-                  key: ValueKey<String>('stmt_party_${_isCustomer}_$_partyId'),
-                  initialValue:
-                      partyList.any((e) => e.id == _partyId) ? _partyId : null,
-                  isExpanded: true,
-                  decoration: InputDecoration(
-                    labelText: _isCustomer ? 'اختر العميل' : 'اختر المورد',
-                  ),
-                  items: partyList
-                      .map(
+                if (_mode == _StatementPartyMode.worker)
+                  DropdownButtonFormField<String>(
+                    key: ValueKey<String>('stmt_worker_$_workerName'),
+                    initialValue:
+                        workerNames.contains(_workerName) ? _workerName : null,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'اختر العامل',
+                    ),
+                    items: workerNames
+                        .map(
+                          (w) => DropdownMenuItem<String>(
+                            value: w,
+                            child: Text(w),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) {
+                      setState(() => _workerName = v);
+                      unawaited(_loadStatement(ctrl));
+                    },
+                  )
+                else
+                  DropdownButtonFormField<int>(
+                    key: ValueKey<String>('stmt_party_${_mode}_$_partyId'),
+                    initialValue: (_partyId == _allPartiesSentinelId ||
+                            partyList.any((e) => e.id == _partyId))
+                        ? _partyId
+                        : null,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: _mode == _StatementPartyMode.customer
+                          ? 'اختر العميل أو كشفاً شاملاً'
+                          : 'اختر المورد أو كشفاً شاملاً',
+                    ),
+                    items: [
+                      DropdownMenuItem<int>(
+                        value: _allPartiesSentinelId,
+                        child: Text(
+                          _mode == _StatementPartyMode.customer
+                              ? 'كافة العملاء — كشف حساب إجمالي'
+                              : 'كافة الموردين — كشف حساب إجمالي',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: pal.brand,
+                          ),
+                        ),
+                      ),
+                      ...partyList.map(
                         (e) => DropdownMenuItem<int>(
                           value: e.id,
                           child: Text(e.name),
                         ),
-                      )
-                      .toList(),
-                  onChanged: (v) {
-                    setState(() => _partyId = v);
-                    unawaited(_loadStatement(ctrl));
-                  },
-                ),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      setState(() => _partyId = v);
+                      unawaited(_loadStatement(ctrl));
+                    },
+                  ),
                 const SizedBox(height: 10),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -222,7 +362,7 @@ class _AccountStatementViewState extends State<AccountStatementView> {
                     ],
                   ),
                 ),
-                if (_partyId != null && _lines.isNotEmpty) ...[
+                if (hasSelection && _lines.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 8,
@@ -233,13 +373,13 @@ class _AccountStatementViewState extends State<AccountStatementView> {
                           final bytes = await PdfExportService.instance
                               .buildStatementPdf(
                             agency: ctrl.settings,
-                            partyTitle: _isCustomer ? 'العميل' : 'المورد',
+                            partyTitle: selectedPartyTitle,
                             partyName: selectedPartyName,
                             linesByCurrency: _lines,
                           );
                           await Printing.layoutPdf(
                             name: PdfExportService.buildArabicPdfFileName(
-                              'كشف_${_isCustomer ? 'العميل' : 'المورد'}_$selectedPartyName',
+                              'كشف_${selectedPartyTitle}_$selectedPartyName',
                             ),
                             onLayout: (_) async => bytes,
                           );
@@ -255,7 +395,7 @@ class _AccountStatementViewState extends State<AccountStatementView> {
                           final txt =
                               ThermalReceiptFormatter.buildStatementReceiptText(
                             ctrl.settings,
-                            partyTitle: _isCustomer ? 'العميل' : 'المورد',
+                            partyTitle: selectedPartyTitle,
                             partyName: selectedPartyName,
                             linesByCurrency: _lines,
                           );
@@ -270,24 +410,26 @@ class _AccountStatementViewState extends State<AccountStatementView> {
                         icon: const Icon(Icons.print_outlined, size: 18),
                         label: const Text('طباعة حرارية 58/80mm'),
                       ),
-                      if (selectedPartyPhone.isNotEmpty) ...[
-                        OutlinedButton.icon(
-                          onPressed: () async {
-                            final summaryLines = _lines.entries.map((e) {
-                              final endBal = e.value.isEmpty
-                                  ? 0
-                                  : e.value.last.runningBalanceMinor;
-                              return '${e.key.arabicName}: ${Money(endBal, e.key).format()}';
-                            }).join('\n');
-                            await WhatsappShareService.instance.openWhatsApp(
-                              phone: selectedPartyPhone,
-                              text:
-                                  'كشف حساب $selectedPartyName لدى ${ctrl.settings.agencyName}:\n$summaryLines',
-                            );
-                          },
-                          icon: const Icon(Icons.chat_outlined, size: 17),
-                          label: const Text('واتساب'),
-                        ),
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final summaryLines = _lines.entries.map((e) {
+                            final endBal = e.value.isEmpty
+                                ? 0
+                                : e.value.last.runningBalanceMinor;
+                            return '${e.key.arabicName}: ${Money(endBal, e.key).format()}';
+                          }).join('\n');
+                          await WhatsappShareService.instance.openWhatsApp(
+                            phone: selectedPartyPhone.isNotEmpty
+                                ? selectedPartyPhone
+                                : null,
+                            text:
+                                'كشف حساب $selectedPartyName لدى ${ctrl.settings.agencyName}:\n$summaryLines',
+                          );
+                        },
+                        icon: const Icon(Icons.chat_outlined, size: 17),
+                        label: const Text('واتساب'),
+                      ),
+                      if (selectedPartyPhone.isNotEmpty)
                         OutlinedButton.icon(
                           onPressed: () async {
                             final summaryLines = _lines.entries.map((e) {
@@ -305,7 +447,6 @@ class _AccountStatementViewState extends State<AccountStatementView> {
                           icon: const Icon(Icons.sms_outlined, size: 17),
                           label: const Text('SMS'),
                         ),
-                      ],
                     ],
                   ),
                 ],
@@ -321,11 +462,12 @@ class _AccountStatementViewState extends State<AccountStatementView> {
               child: CircularProgressIndicator(),
             ),
           )
-        else if (_partyId == null)
+        else if (!hasSelection)
           const EmptyLedgerState(
             icon: Icons.article_outlined,
-            title: 'اختر عميلاً أو مورداً',
-            subtitle: 'سيتم عرض جدول القيود المحاسبية مع فصل العملات تلقائياً',
+            title: 'اختر عميلاً أو مورداً أو عاملاً',
+            subtitle:
+                'يدعم كشف الحساب التفصيلي، الكشف الإجمالي، وفصل العملات تلقائياً',
           )
         else if (_lines.isEmpty)
           const EmptyLedgerState(

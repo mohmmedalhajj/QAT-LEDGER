@@ -1,14 +1,18 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:qat_ledger/core/money.dart';
+import 'package:qat_ledger/core/platform_bridge.dart';
 import 'package:qat_ledger/core/theme.dart';
 import 'package:qat_ledger/data/models.dart';
 import 'package:qat_ledger/services/esc_pos_service.dart';
 import 'package:qat_ledger/services/pdf_export_service.dart';
 import 'package:qat_ledger/services/spreadsheet_export_service.dart';
+import 'package:qat_ledger/services/whatsapp_share_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -180,6 +184,10 @@ void main() {
       final xlsxBytes = await File(xlsxPath).readAsBytes();
       final decodedZip = ZipDecoder().decodeBytes(xlsxBytes, verify: true);
       expect(decodedZip.findFile('xl/workbook.xml'), isNotNull);
+      final sheet1 = decodedZip.findFile('xl/worksheets/sheet1.xml');
+      expect(sheet1, isNotNull);
+      final sheet1Xml = utf8.decode(sheet1!.content as List<int>);
+      expect(sheet1Xml, contains('rightToLeft="1"'));
 
       final csvPath = await SpreadsheetExportService.instance.exportTransfersCsv(
         transfers,
@@ -198,6 +206,37 @@ void main() {
       expect(pkt58.sublist(0, 6), [0x1B, 0x40, 0x1D, 0x76, 0x30, 0x00]); // ESC @ + GS v 0 m=0
       expect(pkt58[6], 48); // xL = 384 / 8 = 48 bytes per line
       expect(pkt80[6], 72); // xL = 576 / 8 = 72 bytes per line
+
+      // Blank printer address throws a clear StateError before touching Bluetooth
+      await expectLater(
+        () => EscPosService.instance.printPdfBytes(
+          pdfBytes: Uint8List.fromList([1, 2, 3]),
+          printerAddress: '   ',
+        ),
+        throwsStateError,
+      );
+
+      // WhatsApp URI builder does not invent a fixed country code for local numbers
+      final localWa = WhatsappShareService.buildWhatsAppUri(
+        phone: '777123456',
+        text: 'مرحبا',
+      );
+      expect(localWa.toString(), 'https://wa.me/?text=%D9%85%D8%B1%D8%AD%D8%A8%D8%A7');
+      final intlWa = WhatsappShareService.buildWhatsAppUri(
+        phone: '+967 777-123-456',
+        text: 'مرحبا',
+      );
+      expect(intlWa.toString(), startsWith('https://wa.me/967777123456?text='));
+
+      // Phone picker sanitization converts Arabic-Indic digits cleanly
+      expect(
+        PlatformBridge.sanitizePickedPhone('＋٠٧٧١-٢٣٤-٥٦٧'.replaceAll('＋', '+')),
+        '+0771234567',
+      );
+      expect(
+        PlatformBridge.sanitizePickedPhone('٠٥٥١٢٣٤٥٦٧'),
+        '0551234567',
+      );
     } finally {
       await tempDir.delete(recursive: true);
     }

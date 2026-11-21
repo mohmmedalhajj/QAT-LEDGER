@@ -67,24 +67,40 @@ class EscPosService {
     required String printerAddress,
     int paperMm = 80,
   }) async {
+    final addr = printerAddress.trim();
+    if (addr.isEmpty) {
+      throw StateError(
+        'لم يتم اختيار طابعة حرارية. يرجى اختيار طابعة من إعدادات النسخ والطباعة أولاً.',
+      );
+    }
     final targetWidthPx = paperMm <= 58 ? 384 : 576;
-    final escPosBuilder = BytesBuilder();
+    final pages = <Uint8List>[];
 
     await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
       final pngBytes = await page.toPng();
       final decoded = img.decodePng(pngBytes);
       if (decoded != null) {
-        escPosBuilder.add(
+        pages.add(
           encodeImageToEscPosRaster(decoded, targetWidthPx: targetWidthPx),
         );
       }
     }
 
-    final payload = escPosBuilder.toBytes();
-    if (payload.isEmpty) {
+    if (pages.isEmpty) {
       throw StateError('فشل تجهيز بيانات الطباعة الحرارية.');
     }
-    return PlatformBridge.instance.printEscPosBytes(printerAddress, payload);
+    if (pages.length == 1) {
+      return PlatformBridge.instance.printEscPosBytes(addr, pages.first);
+    }
+    var ok = true;
+    for (int i = 0; i < pages.length; i++) {
+      final sent = await PlatformBridge.instance.printEscPosBytes(addr, pages[i]);
+      ok = ok && sent;
+      if (i + 1 < pages.length) {
+        await Future<void>.delayed(const Duration(milliseconds: 140));
+      }
+    }
+    return ok;
   }
 
   Future<bool> printSaleReceipt({

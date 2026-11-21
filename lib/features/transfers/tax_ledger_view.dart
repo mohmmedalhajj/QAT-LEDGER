@@ -40,25 +40,23 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
               .replaceAll(',', '')
           : '',
     );
-    final stallCtrl = TextEditingController(
-      text: existing != null
-          ? Money.formatMinor(
-              existing.stallOutflowMinor,
-              showZeroDecimals: false,
-            ).replaceAll(',', '')
-          : '0',
-    );
-    final laborCtrl = TextEditingController(
-      text: existing != null
-          ? Money.formatMinor(
-              existing.laborOutflowMinor,
-              showZeroDecimals: false,
-            ).replaceAll(',', '')
-          : '0',
-    );
     final notesCtrl = TextEditingController(text: existing?.notes ?? '');
     CurrencyCode cur = existing?.currency ?? ctrl.currencyPolicy.defaultCurrency;
     int taxDateMs = existing?.dateMs ?? DateTime.now().millisecondsSinceEpoch;
+
+    void tryAutoCalcTax() {
+      final qtyMilli = QuantityMath.parseMilli(qtyCtrl.text);
+      final rateMinor = Money.parseMinorUnits(rateCtrl.text);
+      if (qtyMilli > 0 && rateMinor > 0) {
+        final computed = InvoiceMath.lineTotalMinor(
+          qtyMilli: qtyMilli,
+          unitPriceMinor: rateMinor,
+        );
+        amountCtrl.text =
+            Money.formatMinor(computed, showZeroDecimals: false)
+                .replaceAll(',', '');
+      }
+    }
 
     await showDialog<void>(
       context: context,
@@ -67,16 +65,14 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
           qtyCtrl,
           rateCtrl,
           amountCtrl,
-          stallCtrl,
-          laborCtrl,
           notesCtrl,
         ],
         child: StatefulBuilder(
           builder: (ctx, setModalState) => AlertDialog(
             title: Text(
               existing == null
-                  ? 'قيد ضريبة ومصاريف السوق اليومية'
-                  : 'تعديل قيد الضريبة ومصاريف السوق',
+                  ? 'قيد ضريبة القات اليومية'
+                  : 'تعديل قيد ضريبة القات',
             ),
           content: SingleChildScrollView(
             child: Column(
@@ -85,7 +81,7 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
               children: [
                 if (existing == null) ...[
                   ErpDatePickerTile(
-                    label: 'تاريخ القيد',
+                    label: 'تاريخ الضريبة',
                     dateMs: taxDateMs,
                     onChanged: (ms) => setModalState(() => taxDateMs = ms),
                   ),
@@ -98,41 +94,25 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
                   const SizedBox(height: 8),
                   AccountingNumberField(
                     controller: qtyCtrl,
-                    label: 'الكمية الإجمالية',
+                    label: 'الكمية الإجمالية الخاضعة للضريبة',
+                    onChanged: (_) => tryAutoCalcTax(),
                   ),
                   const SizedBox(height: 8),
                   AccountingNumberField(
                     controller: rateCtrl,
-                    label: 'فئة الضريبة',
+                    label: 'فئة الضريبة للوحدة (اختياري)',
+                    onChanged: (_) => tryAutoCalcTax(),
                   ),
                   const SizedBox(height: 8),
                 ],
                 AccountingNumberField(
                   controller: amountCtrl,
-                  label: 'مبلغ الضريبة (${cur.shortSymbol})',
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: AccountingNumberField(
-                        controller: stallCtrl,
-                        label: 'مصروف القعادة / المحل',
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: AccountingNumberField(
-                        controller: laborCtrl,
-                        label: 'حساب العمال',
-                      ),
-                    ),
-                  ],
+                  label: 'مبلغ ضريبة القات (${cur.shortSymbol}) *',
                 ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: notesCtrl,
-                  decoration: const InputDecoration(labelText: 'ملاحظات'),
+                  decoration: const InputDecoration(labelText: 'ملاحظات الضريبة'),
                 ),
               ],
             ),
@@ -145,16 +125,18 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
             FilledButton(
               onPressed: () async {
                 final taxMinor = Money.parseMinorUnits(amountCtrl.text);
-                final stallMinor = Money.parseMinorUnits(stallCtrl.text);
-                final laborMinor = Money.parseMinorUnits(laborCtrl.text);
-                if (taxMinor <= 0 && stallMinor <= 0 && laborMinor <= 0) return;
+                if (taxMinor <= 0 &&
+                    (existing?.stallOutflowMinor ?? 0) <= 0 &&
+                    (existing?.laborOutflowMinor ?? 0) <= 0) {
+                  return;
+                }
                 if (existing == null) {
                   await ctrl.repo.addTaxEntry(
                     totalQtyMilli: QuantityMath.parseMilli(qtyCtrl.text),
                     taxRateMinor: Money.parseMinorUnits(rateCtrl.text),
                     taxAmountMinor: taxMinor,
-                    stallOutflowMinor: stallMinor,
-                    laborOutflowMinor: laborMinor,
+                    stallOutflowMinor: 0,
+                    laborOutflowMinor: 0,
                     currency: cur,
                     notes: notesCtrl.text,
                     dateMs: taxDateMs,
@@ -163,8 +145,8 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
                   await ctrl.repo.updateTaxEntry(
                     id: existing.id,
                     taxAmountMinor: taxMinor,
-                    stallOutflowMinor: stallMinor,
-                    laborOutflowMinor: laborMinor,
+                    stallOutflowMinor: existing.stallOutflowMinor,
+                    laborOutflowMinor: existing.laborOutflowMinor,
                     notes: notesCtrl.text,
                   );
                 }
@@ -216,6 +198,19 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
       ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: ErpStatusBanner(
+              tone: ErpBannerTone.info,
+              title: 'دفتر ضريبة القات مفصول عن المصروفات اليومية',
+              subtitle:
+                  'يُخصّص هذا السجل لضريبة القات فقط. مصروفات إيجار المفرش وأجور العمال والكهرباء تُسجَّل في تبويب المصاريف التشغيلية.',
+              trailing: TextButton(
+                onPressed: () => ctrl.setSection(4, subTab: 0),
+                child: const Text('فتح المصاريف'),
+              ),
+            ),
+          ),
           if (ctrl.currencyPolicy.canSwitchCurrency)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),

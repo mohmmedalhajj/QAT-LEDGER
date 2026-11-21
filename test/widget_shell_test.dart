@@ -103,6 +103,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('المطابقة اليومية الشاملة للكميات والمبيعات'), findsOneWidget);
 
+    final workerSeg = find.textContaining('العمال والعهد');
+    expect(workerSeg, findsOneWidget);
+    await tester.ensureVisible(workerSeg);
+    await tester.tap(workerSeg);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('تسليم أو استلام'), findsOneWidget);
+
     controller.setSection(2, subTab: 2); // Reconciliation & Settlement
     await tester.pumpAndSettle();
     expect(find.text('جرد المخزون والمطابقة'), findsOneWidget);

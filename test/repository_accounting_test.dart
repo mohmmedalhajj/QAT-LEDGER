@@ -489,6 +489,133 @@ void main() {
           .toList();
       expect(batchesAfterDel, isEmpty);
 
+      // 10. FIFO multi-batch deduction + restore, receiver/importWeight purchase link,
+      //     worker handoffs + worker statement, aggregate statements, and 14-table archiving.
+      final fifoSupId = await repo.upsertSupplier(name: 'مورد الدفعات المتتابعة');
+      final fifoRecvId = await repo.upsertInventoryReceiver(
+        name: 'أمين مستلم ١',
+        phone: '777001122',
+      );
+      final fifoWeightId = await repo.addImportWeight(
+        weightMilli: 25000,
+        receiverName: 'أمين مستلم ١',
+      );
+      final fifoPurId = await repo.makeSupplierPurchase(
+        supplierId: fifoSupId,
+        supplierName: 'مورد الدفعات المتتابعة',
+        receiverId: fifoRecvId,
+        receiverName: 'أمين مستلم ١',
+        importWeightId: fifoWeightId,
+        items: const [
+          NewPurchaseItemInput(
+            qatTypeName: 'صنف فيفو',
+            qtyMilli: 3000,
+            unit: 'ربطة',
+            buyPriceMinor: 100000,
+            sellPriceMinor: 150000,
+          ),
+        ],
+        currency: CurrencyCode.yer,
+        paymentType: PaymentType.credit,
+        dateMs: DateTime(2026, 11, 1).millisecondsSinceEpoch,
+      );
+      final secondBatchId = await repo.addInventoryBatch(
+        qatTypeName: 'صنف فيفو',
+        qtyMilli: 4000,
+        unit: 'ربطة',
+        buyPriceMinor: 110000,
+        sellPriceMinor: 150000,
+        currency: CurrencyCode.yer,
+        supplierId: fifoSupId,
+        supplierName: 'مورد الدفعات المتتابعة',
+        purchaseDateMs: DateTime(2026, 11, 2).millisecondsSinceEpoch,
+      );
+      // Sell 5.000 bundles via automatic FIFO (deducts 3.000 from oldest batch + 2.000 from second batch)
+      final fifoSaleId = await repo.makeSale(
+        customerId: freshCustId,
+        customerName: 'عميل الدين المباشر',
+        items: const [
+          NewSaleItemInput(
+            inventoryBatchId: null,
+            deductByFifo: true,
+            qatTypeName: 'صنف فيفو',
+            qtyMilli: 5000,
+            unit: 'ربطة',
+            unitPriceMinor: 150000,
+            buyPriceMinor: 0,
+          ),
+        ],
+        currency: CurrencyCode.yer,
+        paymentType: PaymentType.paid,
+        paidAmountMinor: 750000,
+      );
+      final batchesAfterFifo = (await repo.getInventoryBatches())
+          .where((b) => b.qatTypeName == 'صنف فيفو')
+          .toList()
+        ..sort((a, b) => a.purchaseDateMs.compareTo(b.purchaseDateMs));
+      expect(batchesAfterFifo[0].remainingQtyMilli, 0);
+      expect(batchesAfterFifo[1].id, secondBatchId);
+      expect(batchesAfterFifo[1].remainingQtyMilli, 2000);
+
+      // Deleting purchase linked to a batch that already has retail sales must throw StateError
+      await expectLater(
+        () => repo.deleteSupplierPurchase(fifoPurId),
+        throwsStateError,
+      );
+
+      // Deleting the FIFO sale restores exact deductions across both batches!
+      await repo.deleteSale(fifoSaleId);
+      final batchesRestored = (await repo.getInventoryBatches())
+          .where((b) => b.qatTypeName == 'صنف فيفو')
+          .toList()
+        ..sort((a, b) => a.purchaseDateMs.compareTo(b.purchaseDateMs));
+      expect(batchesRestored[0].remainingQtyMilli, 3000);
+      expect(batchesRestored[1].remainingQtyMilli, 4000);
+
+      // Worker handoffs & worker statement
+      final wh1 = await repo.addWorkerHandoff(
+        workerName: 'نبيل العامل',
+        receiverId: fifoRecvId,
+        direction: WorkerHandoffDirection.toWorker,
+        amountMinor: 500000,
+        currency: CurrencyCode.yer,
+        notes: 'عهدة صباحية',
+      );
+      final wh2 = await repo.addWorkerHandoff(
+        workerName: 'نبيل العامل',
+        receiverId: fifoRecvId,
+        direction: WorkerHandoffDirection.fromWorker,
+        amountMinor: 350000,
+        currency: CurrencyCode.yer,
+        notes: 'توريد مبيعات',
+      );
+      expect(await repo.getDistinctWorkerNames(), contains('نبيل العامل'));
+      final workerStmt = await repo.getWorkerStatement('نبيل العامل');
+      expect(workerStmt[CurrencyCode.yer]?.last.runningBalanceMinor, 150000);
+
+      // Aggregate statements across all customers & all suppliers
+      final allCustStmt = await repo.getAllCustomersStatement();
+      final allSupStmt = await repo.getAllSuppliersStatement();
+      expect(allCustStmt[CurrencyCode.yer], isNotEmpty);
+      expect(allSupStmt[CurrencyCode.yer], isNotEmpty);
+
+      // Archive support across newly expanded entities (worker_handoffs, inventory_receivers, customers)
+      await repo.setArchived('worker_handoffs', wh1, true);
+      expect((await repo.getWorkerHandoffs(includeArchived: false)).length, 1);
+      await repo.setArchived('worker_handoffs', wh1, false);
+      expect((await repo.getWorkerHandoffs(includeArchived: false)).length, 2);
+      await repo.deleteWorkerHandoff(wh2);
+      expect((await repo.getWorkerHandoffs(includeArchived: false)).length, 1);
+
+      // BackupService.resetAllAccountingData wipes transactional tables while keeping safety snapshot
+      final resetSafety = await backupService.resetAllAccountingData(
+        safetyOutputDir: p.join(tempDir.path, 'safety_resets'),
+        fullFactoryReset: false,
+      );
+      expect(File(resetSafety.filePath).existsSync(), true);
+      expect(await repo.getSales(), isEmpty);
+      expect(await repo.getWorkerHandoffs(includeArchived: true), isEmpty);
+
       await dbService.close();
     } finally {
       await tempDir.delete(recursive: true);

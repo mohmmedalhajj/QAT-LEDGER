@@ -154,6 +154,71 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
         subtitle: b.purchaseDateIso,
       ));
     }
+    final weights = await ctrl.repo.getImportWeights(includeArchived: true);
+    for (final w in weights.where((e) => e.isArchived)) {
+      items.add((
+        table: 'qat_import_weights',
+        categoryLabel: 'أوزان الوارد',
+        id: w.id,
+        title: 'وزن وارد: ${w.receiverName}',
+        subtitle:
+            '${w.dateIso} • ${QuantityMath.formatMilli(w.weightMilli)} كجم',
+      ));
+    }
+    final customers = await ctrl.repo.getCustomers(includeArchived: true);
+    for (final c in customers.where((e) => e.isArchived)) {
+      items.add((
+        table: 'customers',
+        categoryLabel: 'عملاء',
+        id: c.id,
+        title: 'عميل: ${c.name}',
+        subtitle: c.phone.isNotEmpty ? c.phone : 'عميل مؤرشف',
+      ));
+    }
+    final suppliers = await ctrl.repo.getSuppliers(includeArchived: true);
+    for (final s in suppliers.where((e) => e.isArchived)) {
+      items.add((
+        table: 'suppliers',
+        categoryLabel: 'موردون',
+        id: s.id,
+        title: 'مورد: ${s.name}',
+        subtitle: s.phone.isNotEmpty ? s.phone : 'مورد مؤرشف',
+      ));
+    }
+    final handoffs = await ctrl.repo.getWorkerHandoffs(includeArchived: true);
+    for (final h in handoffs.where((e) => e.isArchived)) {
+      items.add((
+        table: 'worker_handoffs',
+        categoryLabel: 'عهد العمال',
+        id: h.id,
+        title: '${h.direction.arabicLabel}: ${h.workerName}',
+        subtitle:
+            '${h.dateIso} • ${Money(h.amountMinor, h.currency).format()}',
+      ));
+    }
+    final qatTypes = await ctrl.repo
+        .getQatTypes(includeHidden: true, includeArchived: true);
+    for (final q in qatTypes.where((e) => e.isArchived)) {
+      items.add((
+        table: 'qat_types',
+        categoryLabel: 'الأصناف',
+        id: q.id,
+        title: 'صنف: ${q.name}',
+        subtitle:
+            'بيع افتراضي: ${Money(q.defaultSellPriceMinor, q.defaultCurrency).format()}',
+      ));
+    }
+    final receivers =
+        await ctrl.repo.getInventoryReceivers(includeArchived: true);
+    for (final r in receivers.where((e) => e.isArchived)) {
+      items.add((
+        table: 'inventory_receivers',
+        categoryLabel: 'المستلمون',
+        id: r.id,
+        title: 'مستلم: ${r.name}',
+        subtitle: r.phone.isNotEmpty ? r.phone : 'مستلم مؤرشف',
+      ));
+    }
     return items;
   }
 
@@ -200,6 +265,12 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
       ('expenses', 'مصاريف'),
       ('money_transfers', 'حوالات'),
       ('inventory_batches', 'مخزون'),
+      ('qat_import_weights', 'أوزان الوارد'),
+      ('customers', 'عملاء'),
+      ('suppliers', 'موردون'),
+      ('worker_handoffs', 'عهد العمال'),
+      ('qat_types', 'الأصناف'),
+      ('inventory_receivers', 'المستلمون'),
       ('qat_tax_entries', 'ضرائب'),
     ];
 
@@ -339,13 +410,23 @@ class _ArchiveCenterViewState extends State<ArchiveCenterView> {
                                             destructive: true,
                                           );
                                           if (!ok) return;
-                                          await ctrl.repo.deletePermanently(
-                                            item.table,
-                                            item.id,
-                                          );
-                                          await ctrl.reloadAll();
-                                          if (mounted) {
-                                            await _refreshArchived(ctrl);
+                                          try {
+                                            await ctrl.repo.deletePermanently(
+                                              item.table,
+                                              item.id,
+                                            );
+                                            await ctrl.reloadAll();
+                                            if (mounted) {
+                                              await _refreshArchived(ctrl);
+                                            }
+                                          } catch (e) {
+                                            if (!context.mounted) return;
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(
+                                              SnackBar(
+                                                content: Text(e.toString()),
+                                              ),
+                                            );
                                           }
                                         },
                                         icon: Icon(

@@ -3,6 +3,7 @@ import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/money.dart';
+import '../../core/platform_bridge.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../data/qat_repository.dart';
@@ -20,11 +21,15 @@ class PosInvoiceBuilderView extends StatefulWidget {
   State<PosInvoiceBuilderView> createState() => _PosInvoiceBuilderViewState();
 }
 
+enum _PosStockMode { fifo, specificBatch, manual }
+
 class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
   CurrencyCode? _currency;
   int? _customerId;
   bool _createNewCustomer = false;
+  _PosStockMode _stockMode = _PosStockMode.specificBatch;
   int? _selectedBatchId;
+  String? _selectedFifoType;
   String _customUnit = 'ربطة';
   PaymentType _paymentType = PaymentType.paid;
   String _paymentMethod = 'نقداً';
@@ -91,8 +96,85 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
       return;
     }
 
+    if (_stockMode == _PosStockMode.fifo) {
+      final typeName = (_selectedFifoType ?? '').trim();
+      if (typeName.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('اختر صنفاً للخصم التلقائي (FIFO)')),
+        );
+        return;
+      }
+      final activeCur =
+          (_currency != null && ctrl.currencyPolicy.allowedCurrencies.contains(_currency))
+              ? _currency!
+              : ctrl.currencyPolicy.defaultCurrency;
+      final matchingBatches = ctrl.batches
+          .where((b) =>
+              b.currency == activeCur &&
+              b.remainingQtyMilli > 0 &&
+              b.qatTypeName.trim().toLowerCase() == typeName.toLowerCase())
+          .toList();
+      final totalAvail =
+          matchingBatches.fold<int>(0, (s, b) => s + b.remainingQtyMilli);
+      final alreadyInCart = _cart
+          .where((item) =>
+              item.deductByFifo &&
+              item.qatTypeName.trim().toLowerCase() == typeName.toLowerCase())
+          .fold<int>(0, (s, item) => s + item.qtyMilli);
+      if (qtyMilli + alreadyInCart > totalAvail) {
+        final left = (totalAvail - alreadyInCart).clamp(0, 1 << 60).toInt();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'الكمية تتجاوز المتاح في المخزون لهذا الصنف (المتاح الإضافي: ${QuantityMath.formatMilli(left)})',
+            ),
+          ),
+        );
+        return;
+      }
+      final unit = matchingBatches.isNotEmpty ? matchingBatches.first.unit : _customUnit;
+      final avgBuy = matchingBatches.isNotEmpty
+          ? (matchingBatches.fold<int>(0, (s, b) => s + b.buyPriceMinor) ~/
+              matchingBatches.length)
+          : 0;
+      setState(() {
+        final existingIdx = _cart.indexWhere((item) =>
+            item.deductByFifo &&
+            item.inventoryBatchId == null &&
+            item.qatTypeName.toLowerCase() == typeName.toLowerCase() &&
+            item.unitPriceMinor == unitPriceMinor &&
+            item.unit == unit);
+        if (existingIdx >= 0) {
+          final prev = _cart[existingIdx];
+          _cart[existingIdx] = NewSaleItemInput(
+            inventoryBatchId: null,
+            qatTypeName: prev.qatTypeName,
+            qtyMilli: prev.qtyMilli + qtyMilli,
+            unit: prev.unit,
+            unitPriceMinor: prev.unitPriceMinor,
+            buyPriceMinor: prev.buyPriceMinor,
+            deductByFifo: true,
+          );
+        } else {
+          _cart.add(
+            NewSaleItemInput(
+              inventoryBatchId: null,
+              qatTypeName: typeName,
+              qtyMilli: qtyMilli,
+              unit: unit,
+              unitPriceMinor: unitPriceMinor,
+              buyPriceMinor: avgBuy,
+              deductByFifo: true,
+            ),
+          );
+        }
+        _qtyCtrl.text = '1';
+      });
+      return;
+    }
+
     InventoryBatch? batch;
-    if (_selectedBatchId != null) {
+    if (_stockMode == _PosStockMode.specificBatch && _selectedBatchId != null) {
       for (final b in ctrl.batches) {
         if (b.id == _selectedBatchId) {
           batch = b;
@@ -132,6 +214,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
     setState(() {
       final existingIdx = _cart.indexWhere(
         (item) =>
+            !item.deductByFifo &&
             item.inventoryBatchId == batch?.id &&
             item.qatTypeName == qatName &&
             item.unitPriceMinor == unitPriceMinor &&
@@ -494,7 +577,24 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                           controller: _newCustPhoneCtrl,
                           textDirection: TextDirection.ltr,
                           keyboardType: TextInputType.phone,
-                          decoration: const InputDecoration(labelText: 'الهاتف'),
+                          decoration: InputDecoration(
+                            labelText: 'الهاتف',
+                            suffixIcon: IconButton(
+                              tooltip: 'من جهات الاتصال',
+                              icon: const Icon(Icons.contacts_outlined, size: 18),
+                              onPressed: () async {
+                                final picked = await PlatformBridge.instance
+                                    .pickPhoneContact();
+                                if (picked != null && mounted) {
+                                  if (_newCustNameCtrl.text.trim().isEmpty &&
+                                      picked.name.trim().isNotEmpty) {
+                                    _newCustNameCtrl.text = picked.name;
+                                  }
+                                  _newCustPhoneCtrl.text = picked.phone;
+                                }
+                              },
+                            ),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -568,57 +668,132 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                   icon: Icons.add_shopping_cart,
                 ),
                 const SizedBox(height: 10),
-                if (ctrl.batches.length > 4) ...[
-                  TextField(
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      prefixIcon: Icon(Icons.search, size: 18),
-                      hintText: 'بحث في دفعات المخزون...',
+                SegmentedButton<_PosStockMode>(
+                  segments: const [
+                    ButtonSegment<_PosStockMode>(
+                      value: _PosStockMode.specificBatch,
+                      label: Text('دفعة محددة'),
                     ),
-                    onChanged: (v) => setState(() => _batchSearch = v.trim()),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                DropdownButtonFormField<int?>(
-                  key: ValueKey<String>(
-                    'pos_batch_${activeCur.code}_${filteredBatches.any((b) => b.id == _selectedBatchId) ? _selectedBatchId : 'none'}',
-                  ),
-                  initialValue:
-                      filteredBatches.any((b) => b.id == _selectedBatchId)
-                          ? _selectedBatchId
-                          : null,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'دفعة المخزون'),
-                  items: [
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('إدخال يدوي بدون خصم مخزون'),
+                    ButtonSegment<_PosStockMode>(
+                      value: _PosStockMode.fifo,
+                      label: Text('تلقائي FIFO'),
                     ),
-                    ...filteredBatches.map(
-                      (b) => DropdownMenuItem<int?>(
-                        value: b.id,
-                        child: Text(
-                          '${b.qatTypeName} • متاح ${QuantityMath.formatMilli(b.remainingQtyMilli)} ${b.unit}',
-                        ),
-                      ),
+                    ButtonSegment<_PosStockMode>(
+                      value: _PosStockMode.manual,
+                      label: Text('يدوي'),
                     ),
                   ],
-                  onChanged: (v) {
-                    setState(() {
-                      _selectedBatchId = v;
-                      if (v != null) {
-                        final b =
-                            filteredBatches.firstWhere((e) => e.id == v);
-                        _priceCtrl.text = Money.formatMinor(
-                          b.sellPriceMinor,
-                          showZeroDecimals: false,
-                        ).replaceAll(',', '');
-                      }
-                    });
-                  },
+                  selected: {_stockMode},
+                  onSelectionChanged: (s) => setState(() {
+                    _stockMode = s.first;
+                    if (_stockMode != _PosStockMode.specificBatch) {
+                      _selectedBatchId = null;
+                    }
+                  }),
                 ),
-                if (_selectedBatchId == null) ...[
-                  const SizedBox(height: 10),
+                const SizedBox(height: 10),
+                if (_stockMode == _PosStockMode.fifo) ...[
+                  Builder(
+                    builder: (context) {
+                      final fifoTotals = <String, ({int qty, int sellMinor, String unit})>{};
+                      for (final b in ctrl.batches.where(
+                          (b) => b.currency == activeCur && b.remainingQtyMilli > 0)) {
+                        final key = b.qatTypeName.trim();
+                        final prev = fifoTotals[key];
+                        fifoTotals[key] = (
+                          qty: (prev?.qty ?? 0) + b.remainingQtyMilli,
+                          sellMinor: prev?.sellMinor ?? b.sellPriceMinor,
+                          unit: prev?.unit ?? b.unit,
+                        );
+                      }
+                      final keys = fifoTotals.keys.toList()..sort();
+                      final selectedValid =
+                          _selectedFifoType != null && fifoTotals.containsKey(_selectedFifoType);
+                      return DropdownButtonFormField<String?>(
+                        key: ValueKey<String>(
+                          'pos_fifo_${activeCur.code}_${selectedValid ? _selectedFifoType : 'none'}',
+                        ),
+                        initialValue: selectedValid ? _selectedFifoType : null,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'الصنف (خصم تلقائي من الأقدم أولاً)',
+                        ),
+                        items: keys
+                            .map(
+                              (k) => DropdownMenuItem<String?>(
+                                value: k,
+                                child: Text(
+                                  '$k • إجمالي متاح ${QuantityMath.formatMilli(fifoTotals[k]!.qty)} ${fifoTotals[k]!.unit}',
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (v) {
+                          setState(() {
+                            _selectedFifoType = v;
+                            if (v != null && fifoTotals[v] != null) {
+                              _priceCtrl.text = Money.formatMinor(
+                                fifoTotals[v]!.sellMinor,
+                                showZeroDecimals: false,
+                              ).replaceAll(',', '');
+                            }
+                          });
+                        },
+                      );
+                    },
+                  ),
+                ] else if (_stockMode == _PosStockMode.specificBatch) ...[
+                  if (ctrl.batches.length > 4) ...[
+                    TextField(
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        prefixIcon: Icon(Icons.search, size: 18),
+                        hintText: 'بحث في دفعات المخزون...',
+                      ),
+                      onChanged: (v) => setState(() => _batchSearch = v.trim()),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  DropdownButtonFormField<int?>(
+                    key: ValueKey<String>(
+                      'pos_batch_${activeCur.code}_${filteredBatches.any((b) => b.id == _selectedBatchId) ? _selectedBatchId : 'none'}',
+                    ),
+                    initialValue:
+                        filteredBatches.any((b) => b.id == _selectedBatchId)
+                            ? _selectedBatchId
+                            : null,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'دفعة المخزون'),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('اختر دفعة من المخزون...'),
+                      ),
+                      ...filteredBatches.map(
+                        (b) => DropdownMenuItem<int?>(
+                          value: b.id,
+                          child: Text(
+                            '${b.qatTypeName} • متاح ${QuantityMath.formatMilli(b.remainingQtyMilli)} ${b.unit}',
+                          ),
+                        ),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      setState(() {
+                        _selectedBatchId = v;
+                        if (v != null) {
+                          final b =
+                              filteredBatches.firstWhere((e) => e.id == v);
+                          _priceCtrl.text = Money.formatMinor(
+                            b.sellPriceMinor,
+                            showZeroDecimals: false,
+                          ).replaceAll(',', '');
+                        }
+                      });
+                    },
+                  ),
+                ],
+                if (_stockMode == _PosStockMode.manual) ...[
                   Row(
                     children: [
                       Expanded(
@@ -737,7 +912,7 @@ class _PosInvoiceBuilderViewState extends State<PosInvoiceBuilderView> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              _cart[i].qatTypeName,
+                              '${_cart[i].qatTypeName}${_cart[i].deductByFifo ? ' (FIFO تلقائي)' : ''}',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w700,
                                 fontSize: 13,

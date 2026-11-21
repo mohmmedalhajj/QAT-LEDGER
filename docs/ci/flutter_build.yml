@@ -145,21 +145,102 @@ jobs:
             echo "::warning::Release signing secrets are missing; falling back to Debug signing automatically."
           fi
 
+      - name: Provision paired Ed25519 licensing keypair
+        id: ed25519
+        env:
+          QAT_DEV_ED25519_SEED_B64: ${{ secrets.QAT_DEV_ED25519_SEED_B64 }}
+          QAT_LICENSE_PUBLIC_KEYS: ${{ secrets.QAT_LICENSE_PUBLIC_KEYS }}
+          SEED_TMP_PATH: ${{ runner.temp }}/dev_bootstrap_seed.b64
+        run: |
+          set -euo pipefail
+          rm -f android/app/src/developer/assets/dev_bootstrap_seed.b64 "$SEED_TMP_PATH"
+
+          eval "$(python3 - <<'PY'
+          import base64, hashlib, os, re, shlex, subprocess
+
+          raw_seed = os.environ.get('QAT_DEV_ED25519_SEED_B64', '').strip()
+          if raw_seed:
+              clean = re.sub(r'\s+', '', raw_seed)
+              if re.fullmatch(r'[0-9a-fA-F]{64}', clean):
+                  seed32 = bytes.fromhex(clean)
+              else:
+                  norm = clean.replace('-', '+').replace('_', '/')
+                  norm += '=' * ((4 - len(norm) % 4) % 4)
+                  seed32 = base64.b64decode(norm)
+              if len(seed32) != 32:
+                  raise SystemExit(f'QAT_DEV_ED25519_SEED_B64 must decode to 32 bytes, got {len(seed32)}')
+              source_label = 'secret'
+          else:
+              pkcs8 = subprocess.check_output(['openssl', 'genpkey', '-algorithm', 'ed25519', '-outform', 'DER'])
+              assert len(pkcs8) == 48 and pkcs8[:16] == bytes.fromhex('302e020100300506032b657004220420')
+              seed32 = pkcs8[16:]
+              source_label = 'ephemeral_paired'
+
+          seed_b64 = base64.b64encode(seed32).decode('ascii')
+          pkcs8 = bytes.fromhex('302e020100300506032b657004220420') + seed32
+          spki = subprocess.check_output(['openssl', 'pkey', '-inform', 'DER', '-pubout', '-outform', 'DER'], input=pkcs8)
+          assert len(spki) == 44 and spki[:12] == bytes.fromhex('302a300506032b6570032100')
+          raw_pub = spki[12:]
+          kotlin_kid = 'QLK-' + hashlib.sha256(raw_pub).hexdigest()[:8].upper()
+          raw_b64url = base64.urlsafe_b64encode(raw_pub).decode('ascii').rstrip('=')
+          paired_entry = f'{kotlin_kid}:{raw_b64url}'
+
+          extra_raw = os.environ.get('QAT_LICENSE_PUBLIC_KEYS', '').strip()
+          entries = [paired_entry]
+          seen = {paired_entry}
+          if extra_raw:
+              for part in re.split(r'[,;\n]+', extra_raw):
+                  tok = part.strip()
+                  if tok and tok not in seen:
+                      seen.add(tok)
+                      entries.append(tok)
+
+          merged_keys = ','.join(entries)
+          with open(os.environ['SEED_TMP_PATH'], 'w', encoding='ascii') as fh:
+              fh.write(seed_b64)
+          os.chmod(os.environ['SEED_TMP_PATH'], 0o600)
+
+          print(f'SEED_B64={shlex.quote(seed_b64)}')
+          print(f'MERGED_KEYS={shlex.quote(merged_keys)}')
+          print(f'KOTLIN_KID={shlex.quote(kotlin_kid)}')
+          print(f'SOURCE_LABEL={shlex.quote(source_label)}')
+          PY
+          )"
+
+          echo "::add-mask::${SEED_B64}"
+          echo "RESOLVED_QAT_LICENSE_PUBLIC_KEYS=${MERGED_KEYS}" >> "$GITHUB_ENV"
+          echo "public_key_id=${KOTLIN_KID}" >> "$GITHUB_OUTPUT"
+          echo "seed_source=${SOURCE_LABEL}" >> "$GITHUB_OUTPUT"
+          echo "Paired Ed25519 licensing keypair provisioned (${SOURCE_LABEL}, KeyID=${KOTLIN_KID})."
+
       - name: Build Customer Release APK
         env:
-          QAT_LICENSE_PUBLIC_KEYS: ${{ secrets.QAT_LICENSE_PUBLIC_KEYS }}
+          QAT_LICENSE_PUBLIC_KEYS: ${{ env.RESOLVED_QAT_LICENSE_PUBLIC_KEYS }}
         run: |
+          rm -f android/app/src/developer/assets/dev_bootstrap_seed.b64
           flutter build apk --release --flavor customer \
+            -t lib/main_customer.dart \
             --dart-define=APP_EDITION=customer \
             --dart-define=QAT_LICENSE_PUBLIC_KEYS="${QAT_LICENSE_PUBLIC_KEYS}"
 
       - name: Build Developer Release APK
         env:
-          QAT_LICENSE_PUBLIC_KEYS: ${{ secrets.QAT_LICENSE_PUBLIC_KEYS }}
+          QAT_LICENSE_PUBLIC_KEYS: ${{ env.RESOLVED_QAT_LICENSE_PUBLIC_KEYS }}
+          SEED_TMP_PATH: ${{ runner.temp }}/dev_bootstrap_seed.b64
         run: |
+          mkdir -p android/app/src/developer/assets
+          cp "$SEED_TMP_PATH" android/app/src/developer/assets/dev_bootstrap_seed.b64
           flutter build apk --release --flavor developer \
+            -t lib/main_developer.dart \
             --dart-define=APP_EDITION=developer \
             --dart-define=QAT_LICENSE_PUBLIC_KEYS="${QAT_LICENSE_PUBLIC_KEYS}"
+
+      - name: Cleanup temporary developer bootstrap seed
+        if: always()
+        env:
+          SEED_TMP_PATH: ${{ runner.temp }}/dev_bootstrap_seed.b64
+        run: |
+          rm -f android/app/src/developer/assets/dev_bootstrap_seed.b64 "$SEED_TMP_PATH"
 
       - name: Verify APKs and prepare release files
         run: |
@@ -176,6 +257,28 @@ jobs:
           git archive --format=zip \
             --output=ci-dist/QAT_LEDGER_FLUTTER_SOURCE.zip \
             HEAD -- . ':!backup'
+
+          # Verify customer/developer isolation & paired bootstrap seed presence
+          python3 - <<'PY'
+          import zipfile
+
+          with zipfile.ZipFile('ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk') as zf:
+              names = zf.namelist()
+              if any('dev_bootstrap_seed.b64' in n for n in names):
+                  raise SystemExit('ERROR: Customer APK must never contain dev_bootstrap_seed.b64')
+
+          with zipfile.ZipFile('ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk') as zf:
+              names = zf.namelist()
+              if 'assets/dev_bootstrap_seed.b64' not in names:
+                  raise SystemExit('ERROR: Developer APK is missing paired assets/dev_bootstrap_seed.b64')
+
+          with zipfile.ZipFile('ci-dist/QAT_LEDGER_FLUTTER_SOURCE.zip') as zf:
+              names = zf.namelist()
+              if any('dev_bootstrap_seed.b64' in n for n in names):
+                  raise SystemExit('ERROR: Source archive must never contain dev_bootstrap_seed.b64')
+
+          print('Verified APK flavor asset isolation and paired bootstrap seed.')
+          PY
 
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
           if [ -z "$SDK_ROOT" ]; then

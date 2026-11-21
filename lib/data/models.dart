@@ -66,6 +66,7 @@ class QatType {
     required this.notes,
     required this.isHidden,
     required this.createdAtMs,
+    this.isArchived = false,
   });
 
   final int id;
@@ -76,6 +77,7 @@ class QatType {
   final String notes;
   final bool isHidden;
   final int createdAtMs;
+  final bool isArchived;
 }
 
 @immutable
@@ -108,6 +110,7 @@ class InventoryReceiver {
     this.notes = '',
     this.isActive = true,
     this.createdAtMs = 0,
+    this.isArchived = false,
   });
 
   final int id;
@@ -116,6 +119,55 @@ class InventoryReceiver {
   final String notes;
   final bool isActive;
   final int createdAtMs;
+  final bool isArchived;
+}
+
+enum WorkerHandoffDirection {
+  toWorker('TO_WORKER', 'تسليم للعامل'),
+  fromWorker('FROM_WORKER', 'استلام من العامل');
+
+  const WorkerHandoffDirection(this.code, this.arabicLabel);
+  final String code;
+  final String arabicLabel;
+
+  static WorkerHandoffDirection fromRaw(String? raw) {
+    final s = (raw ?? '').trim().toUpperCase();
+    if (s == 'FROM_WORKER' || s.contains('استلام')) {
+      return WorkerHandoffDirection.fromWorker;
+    }
+    return WorkerHandoffDirection.toWorker;
+  }
+}
+
+@immutable
+class WorkerHandoff {
+  const WorkerHandoff({
+    required this.id,
+    required this.workerName,
+    this.receiverId,
+    required this.direction,
+    required this.amountMinor,
+    required this.currency,
+    this.qtyMilli = 0,
+    this.unit = 'ربطة',
+    required this.dateMs,
+    required this.dateIso,
+    this.notes = '',
+    this.isArchived = false,
+  });
+
+  final int id;
+  final String workerName;
+  final int? receiverId;
+  final WorkerHandoffDirection direction;
+  final int amountMinor;
+  final CurrencyCode currency;
+  final int qtyMilli;
+  final String unit;
+  final int dateMs;
+  final String dateIso;
+  final String notes;
+  final bool isArchived;
 }
 
 @immutable
@@ -418,6 +470,9 @@ class SupplierPurchase {
     this.demarMinor = 0,
     this.demarType = '',
     this.demarNumber = '',
+    this.receiverId,
+    this.receiverName = '',
+    this.importWeightId,
     this.items = const [],
   });
 
@@ -444,6 +499,9 @@ class SupplierPurchase {
   final int demarMinor;
   final String demarType;
   final String demarNumber;
+  final int? receiverId;
+  final String receiverName;
+  final int? importWeightId;
   final List<SupplierPurchaseItem> items;
 
   int get effectivePaidCappedMinor =>

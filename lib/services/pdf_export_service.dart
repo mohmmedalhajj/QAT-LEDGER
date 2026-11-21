@@ -20,7 +20,6 @@ class PdfExportService {
   static final PdfExportService instance = PdfExportService._();
 
   PdfFonts? _cachedFonts;
-  pw.MemoryImage? _cachedAppLogo;
 
   static String buildArabicPdfFileName(String reportTitle, [DateTime? timestamp]) {
     final ts = timestamp ?? DateTime.now();
@@ -43,19 +42,6 @@ class PdfExportService {
         await rootBundle.load('assets/fonts/IBMPlexSansArabic-Bold.ttf');
     _cachedFonts = PdfFonts(pw.Font.ttf(regData), pw.Font.ttf(boldData));
     return _cachedFonts!;
-  }
-
-  Future<pw.MemoryImage?> _loadAppLogo() async {
-    if (_cachedAppLogo != null) return _cachedAppLogo;
-    try {
-      final data = await rootBundle.load('assets/images/app_logo.png');
-      final bytes = data.buffer.asUint8List();
-      if (bytes.isEmpty) return null;
-      _cachedAppLogo = pw.MemoryImage(bytes);
-      return _cachedAppLogo;
-    } catch (_) {
-      return null;
-    }
   }
 
   static String _ar(String text) => ArabicPdfShaper.shapeForPdf(text);
@@ -94,7 +80,6 @@ class PdfExportService {
     PdfPageFormat format = PdfPageFormat.a4,
   }) async {
     final fonts = await _loadFonts();
-    final appLogo = await _loadAppLogo();
     final doc = pw.Document();
     final primary = _primaryColor(agency);
 
@@ -103,8 +88,9 @@ class PdfExportService {
         pageFormat: format,
         margin: const pw.EdgeInsets.all(20),
         theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
+        footer: (_) => _footerBlock(agency),
         build: (ctx) => [
-          _headerBlock(agency, 'فاتورة مبيعات (${sale.invoiceNumber})', appLogo: appLogo),
+          _headerBlock(agency, 'فاتورة مبيعات (${sale.invoiceNumber})'),
           pw.SizedBox(height: 10),
           _infoRow('العميل:', sale.customerName),
           _infoRow('التاريخ:', QatDateUtils.formatArabicDateTime12h(sale.dateMs)),
@@ -156,13 +142,6 @@ class PdfExportService {
             pw.SizedBox(height: 10),
             _infoRow('ملاحظات:', sale.notes),
           ],
-          if (agency.footerEnabled && agency.footerNote.isNotEmpty) ...[
-            pw.SizedBox(height: 14),
-            pw.Align(
-              alignment: pw.Alignment.center,
-              child: pw.Text(_ar(agency.footerNote), style: const pw.TextStyle(fontSize: 9)),
-            ),
-          ],
         ],
       ),
     );
@@ -175,7 +154,6 @@ class PdfExportService {
     PdfPageFormat format = PdfPageFormat.a4,
   }) async {
     final fonts = await _loadFonts();
-    final appLogo = await _loadAppLogo();
     final doc = pw.Document();
     final primary = _primaryColor(agency);
 
@@ -184,10 +162,13 @@ class PdfExportService {
         pageFormat: format,
         margin: const pw.EdgeInsets.all(20),
         theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
+        footer: (_) => _footerBlock(agency),
         build: (ctx) => [
-          _headerBlock(agency, 'سند/فاتورة توريد من المورد (${purchase.purchaseNumber})', appLogo: appLogo),
+          _headerBlock(agency, 'سند/فاتورة توريد من المورد (${purchase.purchaseNumber})'),
           pw.SizedBox(height: 10),
           _infoRow('المورد / الرعية:', purchase.supplierName),
+          if (purchase.receiverName.isNotEmpty)
+            _infoRow('مستلم المخزون:', purchase.receiverName),
           _infoRow('التاريخ:', QatDateUtils.formatArabicDateTime12h(purchase.dateMs)),
           _infoRow('العملة:', '${purchase.currency.arabicName} (${purchase.currency.code})'),
           _infoRow(
@@ -244,13 +225,6 @@ class PdfExportService {
           if (purchase.notes.isNotEmpty) ...[
             pw.SizedBox(height: 10),
             _infoRow('ملاحظات:', purchase.notes),
-          ],
-          if (agency.footerEnabled && agency.footerNote.isNotEmpty) ...[
-            pw.SizedBox(height: 14),
-            pw.Align(
-              alignment: pw.Alignment.center,
-              child: pw.Text(_ar(agency.footerNote), style: const pw.TextStyle(fontSize: 9)),
-            ),
           ],
         ],
       ),
@@ -343,7 +317,6 @@ class PdfExportService {
     String? toIso,
   }) async {
     final fonts = await _loadFonts();
-    final appLogo = await _loadAppLogo();
     final doc = pw.Document();
     final primary = _primaryColor(agency);
 
@@ -363,8 +336,9 @@ class PdfExportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(24),
         theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
+        footer: (_) => _footerBlock(agency),
         build: (ctx) => [
-          _headerBlock(agency, 'تقرير حوالات المستلم: ${summary.recipient.name}', appLogo: appLogo),
+          _headerBlock(agency, 'تقرير حوالات المستلم: ${summary.recipient.name}'),
           pw.SizedBox(height: 8),
           if (summary.recipient.phone.isNotEmpty) _infoRow('الهاتف:', summary.recipient.phone),
           if (summary.recipient.company.isNotEmpty)
@@ -419,7 +393,6 @@ class PdfExportService {
     required Map<CurrencyCode, List<StatementLine>> linesByCurrency,
   }) async {
     final fonts = await _loadFonts();
-    final appLogo = await _loadAppLogo();
     final doc = pw.Document();
     final primary = _primaryColor(agency);
 
@@ -428,9 +401,10 @@ class PdfExportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(24),
         theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
+        footer: (_) => _footerBlock(agency),
         build: (ctx) {
           final widgets = <pw.Widget>[
-            _headerBlock(agency, 'كشف حساب $partyTitle: $partyName', appLogo: appLogo),
+            _headerBlock(agency, 'كشف حساب $partyTitle: $partyName'),
             _infoRow('تاريخ الإصدار:', QatDateUtils.formatArabicDateTime12h(DateTime.now().millisecondsSinceEpoch)),
             pw.SizedBox(height: 12),
           ];
@@ -496,7 +470,6 @@ class PdfExportService {
     String? toIso,
   }) async {
     final fonts = await _loadFonts();
-    final appLogo = await _loadAppLogo();
     final doc = pw.Document();
 
     doc.addPage(
@@ -504,9 +477,10 @@ class PdfExportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(24),
         theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
+        footer: (_) => _footerBlock(agency),
         build: (ctx) {
           final widgets = <pw.Widget>[
-            _headerBlock(agency, 'التقرير المالي الشامل', appLogo: appLogo),
+            _headerBlock(agency, 'التقرير المالي الشامل'),
             _infoRow('النطاق الزمني:', '${fromIso ?? 'الكل'} - ${toIso ?? 'اليوم'}'),
             pw.SizedBox(height: 12),
           ];
@@ -545,7 +519,6 @@ class PdfExportService {
     List<QatImportWeight> importWeights = const [],
   }) async {
     final fonts = await _loadFonts();
-    final appLogo = await _loadAppLogo();
     final doc = pw.Document();
     final primary = _primaryColor(agency);
 
@@ -554,8 +527,9 @@ class PdfExportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(20),
         theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
+        footer: (_) => _footerBlock(agency),
         build: (ctx) => [
-          _headerBlock(agency, 'تقرير جرد وتقييم المخزون', appLogo: appLogo),
+          _headerBlock(agency, 'تقرير جرد وتقييم المخزون'),
           pw.SizedBox(height: 8),
           _infoRow('تاريخ الجرد:', QatDateUtils.formatArabicDateTime12h(DateTime.now().millisecondsSinceEpoch)),
           pw.SizedBox(height: 10),
@@ -617,7 +591,6 @@ class PdfExportService {
     required List<Expense> expenses,
   }) async {
     final fonts = await _loadFonts();
-    final appLogo = await _loadAppLogo();
     final doc = pw.Document();
     final primary = _primaryColor(agency);
 
@@ -631,8 +604,9 @@ class PdfExportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(20),
         theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
+        footer: (_) => _footerBlock(agency),
         build: (ctx) => [
-          _headerBlock(agency, 'كشف المصروفات التشغيلية', appLogo: appLogo),
+          _headerBlock(agency, 'كشف المصروفات التشغيلية'),
           pw.SizedBox(height: 8),
           _infoRow('عدد البنود:', '${expenses.length}'),
           _infoRow('إجمالي المصروفات:', _formatCurrencyMap(totalsByCur)),
@@ -672,9 +646,8 @@ class PdfExportService {
 
   pw.Widget _headerBlock(
     AgencySettings agency,
-    String title, {
-    pw.MemoryImage? appLogo,
-  }) {
+    String title,
+  ) {
     final primary = _primaryColor(agency);
     final accent = _accentColor(agency);
     final agencyLogo = _tryLoadLogo(agency);
@@ -690,13 +663,8 @@ class PdfExportService {
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         crossAxisAlignment: pw.CrossAxisAlignment.center,
         children: [
-          if (appLogo != null)
-            pw.Container(
-              width: 46,
-              height: 46,
-              margin: const pw.EdgeInsets.only(right: 10),
-              child: pw.Image(appLogo, fit: pw.BoxFit.contain),
-            ),
+          if (agencyLogo != null)
+            pw.SizedBox(width: 48),
           pw.Expanded(
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.center,
@@ -749,6 +717,26 @@ class PdfExportService {
               child: pw.Image(agencyLogo, fit: pw.BoxFit.contain),
             ),
         ],
+      ),
+    );
+  }
+
+  pw.Widget _footerBlock(AgencySettings agency) {
+    if (!agency.footerEnabled || agency.footerNote.trim().isEmpty) {
+      return pw.SizedBox.shrink();
+    }
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.only(top: 8),
+      decoration: const pw.BoxDecoration(
+        border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300, width: 0.7)),
+      ),
+      child: pw.Center(
+        child: pw.Text(
+          _ar(agency.footerNote.trim()),
+          textAlign: pw.TextAlign.center,
+          style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
+        ),
       ),
     );
   }
