@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart'
-    show debugDefaultTargetPlatformOverride, TargetPlatform;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -32,22 +30,17 @@ void main() {
   test('Android Developer key storage fails closed when AndroidKeyStore is unavailable', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
-    final keyManager = DeveloperKeyManager(prefs);
-    final previousPlatformOverride = debugDefaultTargetPlatformOverride;
-    debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    try {
-      await expectLater(
-        keyManager.getOrGenerateSigningKeyPair(),
-        throwsA(isA<StateError>()),
-      );
-      expect(
-        prefs.getKeys().where((key) => key.contains('fallback_seed')),
-        isEmpty,
-      );
-      expect(await keyManager.hasSigningKey(), isFalse);
-    } finally {
-      debugDefaultTargetPlatformOverride = previousPlatformOverride;
-    }
+    final keyManager = DeveloperKeyManager(prefs, requireAndroidKeyStore: true);
+
+    await expectLater(
+      keyManager.getOrGenerateSigningKeyPair(),
+      throwsA(isA<StateError>()),
+    );
+    expect(
+      prefs.getKeys().where((key) => key.contains('fallback_seed')),
+      isEmpty,
+    );
+    expect(await keyManager.hasSigningKey(), isFalse);
   });
 
   test('Developer refuses to replace an existing key when it cannot be unsealed', () async {
@@ -55,25 +48,20 @@ void main() {
       'qat_dev_ed25519_sealed_seed_v2': 'opaque-sealed-fixture',
     });
     final prefs = await SharedPreferences.getInstance();
-    final keyManager = DeveloperKeyManager(prefs);
-    final previousPlatformOverride = debugDefaultTargetPlatformOverride;
-    debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    try {
-      await expectLater(
-        keyManager.getOrGenerateSigningKeyPair(),
-        throwsA(isA<StateError>()),
-      );
-      expect(
-        prefs.getString('qat_dev_ed25519_sealed_seed_v2'),
-        'opaque-sealed-fixture',
-      );
-      expect(
-        prefs.getKeys().where((key) => key.contains('fallback_seed')),
-        isEmpty,
-      );
-    } finally {
-      debugDefaultTargetPlatformOverride = previousPlatformOverride;
-    }
+    final keyManager = DeveloperKeyManager(prefs, requireAndroidKeyStore: true);
+
+    await expectLater(
+      keyManager.getOrGenerateSigningKeyPair(),
+      throwsA(isA<StateError>()),
+    );
+    expect(
+      prefs.getString('qat_dev_ed25519_sealed_seed_v2'),
+      'opaque-sealed-fixture',
+    );
+    expect(
+      prefs.getKeys().where((key) => key.contains('fallback_seed')),
+      isEmpty,
+    );
   });
 
   test('Android migrates a legacy Developer key into AndroidKeyStore before signing', () async {
@@ -93,10 +81,8 @@ void main() {
       if (call.method == 'keystoreUnseal') return seedB64;
       return null;
     });
-    final previousPlatformOverride = debugDefaultTargetPlatformOverride;
-    debugDefaultTargetPlatformOverride = TargetPlatform.android;
     try {
-      final keyManager = DeveloperKeyManager(prefs);
+      final keyManager = DeveloperKeyManager(prefs, requireAndroidKeyStore: true);
       final info = await keyManager.getPublicKeyInfo();
       expect(info, isNotNull);
       expect(info!.hardwareSealed, isTrue);
@@ -106,7 +92,6 @@ void main() {
     } finally {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, null);
-      debugDefaultTargetPlatformOverride = previousPlatformOverride;
     }
   });
 

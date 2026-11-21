@@ -1,8 +1,8 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/platform_bridge.dart';
@@ -35,7 +35,10 @@ class DeveloperKeyInfo {
 /// Manages Ed25519 signing keys for Developer Edition builds, sealing private seeds
 /// with Android Keystore AES-GCM when running on Android.
 class DeveloperKeyManager {
-  DeveloperKeyManager(this._prefs);
+  DeveloperKeyManager(this._prefs, {bool? requireAndroidKeyStore})
+      : _requireAndroidKeyStore = requireAndroidKeyStore ?? Platform.isAndroid;
+
+  final bool _requireAndroidKeyStore;
 
   static const String _prefSealedSeed = 'qat_dev_ed25519_sealed_seed_v2';
   static const String _prefFallbackSeed = 'qat_dev_ed25519_fallback_seed_v2';
@@ -254,7 +257,7 @@ class DeveloperKeyManager {
     }
     final fallback = _prefs.getString(_prefFallbackSeed);
     if (fallback != null && fallback.isNotEmpty) {
-      if (defaultTargetPlatform == TargetPlatform.android) {
+      if (_requireAndroidKeyStore) {
         // Migrate legacy plaintext preference seeds to AndroidKeyStore wrapping before use.
         // If AndroidKeyStore is unavailable, leave the old value untouched and fail closed.
         final migrated = await PlatformBridge.instance.keystoreSeal(fallback);
@@ -284,7 +287,7 @@ class DeveloperKeyManager {
     if (sealed != null && sealed.isNotEmpty) {
       await _prefs.setString(_prefSealedSeed, sealed);
       await _prefs.remove(_prefFallbackSeed);
-    } else if (defaultTargetPlatform == TargetPlatform.android) {
+    } else if (_requireAndroidKeyStore) {
       // Android Developer signing keys must never silently fall back to plaintext prefs.
       throw StateError(
         'AndroidKeyStore is unavailable; refusing to persist an unsealed Developer signing key.',
