@@ -1,6 +1,0 @@
-{
-  "name": "ميزان القات",
-  "description": "نظام الإدارة والمحاسبة المتكامل لوكالات تجارة القات — QAT LEDGER",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
