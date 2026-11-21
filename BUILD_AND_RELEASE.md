@@ -60,13 +60,16 @@ From the original Kotlin repository (`516e118:app/build.gradle.kts` & `516e118:R
 ### Strict CI & Gradle Rules
 - **Production Release (`RELEASE_SIGNING_REQUIRED=true` / `release_mode=production_release`):**
   - `android/app/build.gradle.kts` **throws `GradleException` and refuses Debug signing** if `android/key.properties` or the `.jks` keystore file is absent.
-  - `.github/workflows/flutter_build.yml` requires **all** of these GitHub Repository Secrets:
+  - `.github/workflows/flutter_build.yml` enforces **all six** GitHub Repository Secrets before allowing `is_official_release=true` or publishing an Official GitHub Release:
     1. `KEYSTORE_B64` — Base64 encoding of `my-upload-key.jks` (single line)
     2. `KEYSTORE_PASSWORD` — Keystore password
     3. `KEY_ALIAS` — Key alias (`upload` in original `516e118`)
     4. `KEY_PASSWORD` — Private key password
-    5. `QAT_LICENSE_PUBLIC_KEYS` — Trusted Ed25519 **public** key(s) (`QLK-XXXXXXXX:<base64UrlRaw32>`)
-    6. `RELEASE_KEYSTORE_SHA256` *(strongly recommended)* — Expected 64-hex SHA-256 certificate digest verified via `keytool` before signing
+    5. `RELEASE_KEYSTORE_SHA256` — **Required** 64-hex SHA-256 certificate digest verified via `keytool` before Gradle runs AND matched against `apksigner` output on both final APKs
+    6. `QAT_LICENSE_PUBLIC_KEYS` — Trusted Ed25519 **public** key(s) (`QLK-XXXXXXXX:<base64UrlRaw32>`); binary audit verifies each key is embedded in Customer APK `libapp.so` + `classes*.dex`
+- **Official Release Gate & Required 10 Release Assets:**
+  - `Publish Official GitHub Release` executes **only after** `flutter analyze`, `flutter test`, strict keystore & SHA-256 verification, `apksigner` certificate match, binary isolation + Ed25519 trust-root audit, and `Smoke-test APKs on Android Emulator` (including same-cert in-place reinstall) ALL pass, attaching all 10 artifacts:
+    `QAT_LEDGER_CUSTOMER_RELEASE.apk`, `QAT_LEDGER_DEVELOPER_RELEASE.apk`, `QAT_LEDGER_FLUTTER_SOURCE.zip`, `SHA256SUMS.txt`, `BUILD_SIGNING_STATUS.txt`, `customer-signature.txt`, `developer-signature.txt`, `binary-isolation-audit.txt`, `LICENSE_TRUST_AUDIT.txt`, and `FINAL_BUILD_AND_TEST_REPORT.txt`.
 - **When Official Secrets Are Missing (`qa_debug_only`):**
   - CI halts publishing any Production GitHub Release (`Publish Official GitHub Release` is skipped).
   - Builds are strictly labeled `QAT_LEDGER_CUSTOMER_QA_DEBUG_ONLY.apk` and `QAT_LEDGER_DEVELOPER_QA_DEBUG_ONLY.apk` for QA verification only.

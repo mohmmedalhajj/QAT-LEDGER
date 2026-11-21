@@ -130,22 +130,46 @@ jobs:
         run: |
           set -euo pipefail
 
+          mkdir -p ci-dist
           rm -f android/key.properties android/app/release.jks
 
           if [ "$REQUESTED_MODE" = "qa_debug" ]; then
             echo "signed_by=qa_debug_only" >> "$GITHUB_OUTPUT"
             echo "release_signing_required=false" >> "$GITHUB_OUTPUT"
+            echo "missing_keystore_secrets=SKIPPED_QA_DEBUG" >> "$GITHUB_OUTPUT"
+            echo "keystore_secrets_matrix=qa_debug_mode" >> "$GITHUB_OUTPUT"
             echo "::notice title=signing_policy::qa_debug mode requested; building QA-DEBUG-ONLY APKs (not a production release)."
             exit 0
           fi
 
           MISSING=""
-          [ -z "$KEYSTORE_B64" ] && MISSING="${MISSING} KEYSTORE_B64"
-          [ -z "$KEYSTORE_PASSWORD" ] && MISSING="${MISSING} KEYSTORE_PASSWORD"
-          [ -z "$KEY_ALIAS" ] && MISSING="${MISSING} KEY_ALIAS"
-          [ -z "$KEY_PASSWORD" ] && MISSING="${MISSING} KEY_PASSWORD"
+          MATRIX=""
+          for S_NAME in KEYSTORE_B64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD RELEASE_KEYSTORE_SHA256; do
+            S_VAL="${!S_NAME:-}"
+            if [ -z "$S_VAL" ]; then
+              MISSING="${MISSING} ${S_NAME}"
+              MATRIX="${MATRIX}${S_NAME}=MISSING;"
+            else
+              MATRIX="${MATRIX}${S_NAME}=SET;"
+            fi
+          done
+          echo "keystore_secrets_matrix=${MATRIX%;}" >> "$GITHUB_OUTPUT"
 
           if [ -z "$MISSING" ]; then
+            EXPECTED_SHA256=$(printf '%s' "$RELEASE_KEYSTORE_SHA256" | tr '[:upper:]' '[:lower:]' | tr -d ': ')
+            if ! printf '%s' "$EXPECTED_SHA256" | grep -Eq '^[0-9a-f]{64}$'; then
+              rm -f android/key.properties android/app/release.jks
+              echo "missing_keystore_secrets=INVALID_RELEASE_KEYSTORE_SHA256" >> "$GITHUB_OUTPUT"
+              if [ "$REQUESTED_MODE" = "production_release" ]; then
+                echo "::error title=signing_policy::RELEASE_KEYSTORE_SHA256 is malformed (must be 64 hex chars). Aborting production release."
+                exit 1
+              fi
+              echo "signed_by=qa_debug_only" >> "$GITHUB_OUTPUT"
+              echo "release_signing_required=false" >> "$GITHUB_OUTPUT"
+              echo "::warning title=signing_policy::OFFICIAL RELEASE HALTED: RELEASE_KEYSTORE_SHA256 is malformed. Building strictly labeled QA-DEBUG-ONLY APKs; no production release will be published."
+              exit 0
+            fi
+
             if echo "$KEYSTORE_B64" | base64 --decode > android/app/release.jks 2>/dev/null && \
                test -s android/app/release.jks && \
                KEYTOOL_OUT=$(keytool -list -v \
@@ -153,8 +177,7 @@ jobs:
                  -storepass "$KEYSTORE_PASSWORD" \
                  -alias "$KEY_ALIAS" 2>/dev/null); then
               ACTUAL_SHA256=$(printf '%s\n' "$KEYTOOL_OUT" | awk '/SHA256:/{print $2; exit}' | tr '[:upper:]' '[:lower:]' | tr -d ':')
-              EXPECTED_SHA256=$(printf '%s' "$RELEASE_KEYSTORE_SHA256" | tr '[:upper:]' '[:lower:]' | tr -d ': ')
-              if [ -n "$EXPECTED_SHA256" ] && [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+              if [ -z "$ACTUAL_SHA256" ] || [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
                 rm -f android/key.properties android/app/release.jks
                 echo "::error title=signing_policy::Keystore certificate SHA-256 ($ACTUAL_SHA256) does not match RELEASE_KEYSTORE_SHA256 ($EXPECTED_SHA256). Aborting."
                 exit 1
@@ -165,9 +188,11 @@ jobs:
               echo "signed_by=official_release_keystore" >> "$GITHUB_OUTPUT"
               echo "release_signing_required=true" >> "$GITHUB_OUTPUT"
               echo "cert_sha256=$ACTUAL_SHA256" >> "$GITHUB_OUTPUT"
-              echo "::notice title=signing_policy::Official Release keystore verified (alias=$KEY_ALIAS, sha256=${ACTUAL_SHA256:0:16}...)."
+              echo "missing_keystore_secrets=NONE" >> "$GITHUB_OUTPUT"
+              echo "::notice title=signing_policy::Official Release keystore verified (alias=$KEY_ALIAS, sha256=${ACTUAL_SHA256})."
             else
               rm -f android/key.properties android/app/release.jks
+              echo "missing_keystore_secrets=KEYTOOL_VERIFICATION_FAILED" >> "$GITHUB_OUTPUT"
               if [ "$REQUESTED_MODE" = "production_release" ]; then
                 echo "::error title=signing_policy::Release signing secrets failed keytool verification. Cannot produce official production release."
                 exit 1
@@ -177,6 +202,7 @@ jobs:
               echo "::warning title=signing_policy::OFFICIAL RELEASE HALTED: Release signing secrets could not be decoded/verified. Producing QA-DEBUG-ONLY APKs (NO production release will be published)."
             fi
           else
+            echo "missing_keystore_secrets=${MISSING# }" >> "$GITHUB_OUTPUT"
             if [ "$REQUESTED_MODE" = "production_release" ]; then
               echo "::error title=signing_policy::Missing required GitHub Secrets for official production release:${MISSING}"
               exit 1
@@ -195,6 +221,12 @@ jobs:
         run: |
           set -euo pipefail
           rm -f android/app/src/developer/assets/dev_bootstrap_seed.b64
+
+          if [ -z "$QAT_LICENSE_PUBLIC_KEYS" ]; then
+            echo "ed25519_secret_status=MISSING" >> "$GITHUB_OUTPUT"
+          else
+            echo "ed25519_secret_status=SET" >> "$GITHUB_OUTPUT"
+          fi
 
           if [ -z "$QAT_LICENSE_PUBLIC_KEYS" ] && { [ "$SIGNED_BY" = "official_release_keystore" ] || [ "$REQUESTED_MODE" = "production_release" ]; }; then
             echo "::error title=ed25519_policy::Official production release requires QAT_LICENSE_PUBLIC_KEYS secret (public Ed25519 keys ONLY — private signing keys must NEVER be stored in APKs or CI)."
@@ -306,12 +338,18 @@ jobs:
         run: |
           rm -f android/app/src/developer/assets/dev_bootstrap_seed.b64 android/key.properties android/app/release.jks
 
-      - name: Verify actual APK binaries, manifests, DEX/AOT isolation & signatures
+      - name: Verify actual APK binaries, manifests, DEX/AOT isolation, license trust & signatures
         id: audit
         env:
           SIGNED_BY: ${{ steps.keystore.outputs.signed_by }}
+          EXPECTED_KEYSTORE_SHA256: ${{ steps.keystore.outputs.cert_sha256 }}
+          KEYSTORE_SECRETS_MATRIX: ${{ steps.keystore.outputs.keystore_secrets_matrix }}
+          MISSING_KEYSTORE_SECRETS: ${{ steps.keystore.outputs.missing_keystore_secrets }}
+          ED25519_SECRET_STATUS: ${{ steps.ed25519.outputs.ed25519_secret_status }}
           SEED_SOURCE: ${{ steps.ed25519.outputs.seed_source }}
           PUBLIC_KEY_ID: ${{ steps.ed25519.outputs.public_key_id }}
+          RESOLVED_QAT_LICENSE_PUBLIC_KEYS: ${{ env.RESOLVED_QAT_LICENSE_PUBLIC_KEYS }}
+          REQUESTED_MODE: ${{ github.event.inputs.release_mode || 'auto' }}
         run: |
           set -euo pipefail
 
@@ -383,6 +421,16 @@ jobs:
             exit 1
           }
 
+          CUST_VER_CODE=$(sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" ci-dist/customer-badging.txt | head -n 1)
+          CUST_VER_NAME=$(sed -n "s/.*versionName='\([^']*\)'.*/\1/p" ci-dist/customer-badging.txt | head -n 1)
+          DEV_VER_CODE=$(sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" ci-dist/developer-badging.txt | head -n 1)
+          DEV_VER_NAME=$(sed -n "s/.*versionName='\([^']*\)'.*/\1/p" ci-dist/developer-badging.txt | head -n 1)
+
+          if [ -z "$CUST_VER_CODE" ] || [ -z "$CUST_VER_NAME" ] || [ -z "$DEV_VER_CODE" ] || [ -z "$DEV_VER_NAME" ]; then
+            echo "::error title=apk_binary_audit::Missing versionCode/versionName in aapt2 badging output"
+            exit 1
+          fi
+
           "$APKSIGNER" verify --print-certs --verbose "$CUST_OUT" | tee ci-dist/customer-signature.txt || {
             echo "::error title=apk_binary_audit::apksigner verify failed on Customer APK"
             exit 1
@@ -397,17 +445,23 @@ jobs:
             "$APKANALYZER" apk summary "$DEV_OUT" > ci-dist/developer-apkanalyzer.txt 2>&1 || true
           fi
 
-          # Deep binary inspection of Customer & Developer APKs (ZIP entries + classes*.dex + libapp.so)
+          # Deep binary inspection of Customer & Developer APKs (ZIP entries + classes*.dex + libapp.so + Ed25519 trust root)
           CUST_OUT="$CUST_OUT" DEV_OUT="$DEV_OUT" python3 - <<'PY' | tee ci-dist/binary-isolation-audit.txt
           import os, zipfile
 
           cust_apk = os.environ['CUST_OUT']
           dev_apk = os.environ['DEV_OUT']
           src_zip = 'ci-dist/QAT_LEDGER_FLUTTER_SOURCE.zip'
+          resolved_keys_csv = os.environ.get('RESOLVED_QAT_LICENSE_PUBLIC_KEYS', '').strip()
+          seed_source = os.environ.get('SEED_SOURCE', '')
+          public_key_id = os.environ.get('PUBLIC_KEY_ID', '')
 
           def fail(msg):
               print(f'::error title=apk_binary_audit::{msg}')
               raise SystemExit(msg)
+
+          def contains_ascii_or_utf16(blob: bytes, text: str) -> bool:
+              return (text.encode('ascii') in blob) or (text.encode('utf-16le') in blob)
 
           forbidden_in_customer = [
               b'dev_bootstrap_seed.b64',
@@ -422,6 +476,10 @@ jobs:
               b'QAT_LEDGER_DEV_REGISTRY_V1',
           ]
 
+          forbidden_secret_exts = (
+              '.jks', '.keystore', '.p12', '.pfx', '.pk8', '.pem', '.key', 'key.properties',
+          )
+
           required_in_developer_app = [
               b'qat_ledger_developer_registry_v2.db',
               b'dev_package_prices',
@@ -433,23 +491,50 @@ jobs:
               b'qat_ledger_developer_store',
           ]
 
+          parsed_entries = []
+          for part in [p.strip() for p in resolved_keys_csv.split(',') if p.strip()]:
+              if ':' not in part:
+                  fail(f'Invalid resolved public key entry: {part}')
+              kid, b64u = part.split(':', 1)
+              parsed_entries.append((kid.strip(), b64u.strip()))
+          if not parsed_entries:
+              fail('No Ed25519 public key entries resolved for Customer APK verification')
+
+          cust_libapp_embedded = []
+          cust_dex_embedded = []
+
           with zipfile.ZipFile(cust_apk) as zf:
               names = zf.namelist()
-              if any('dev_bootstrap_seed.b64' in n for n in names):
-                  fail('Customer APK zip contains dev_bootstrap_seed.b64')
+              if any('dev_bootstrap_seed.b64' in n for n in names) or any(n.lower().endswith(forbidden_secret_exts) for n in names):
+                  fail('Customer APK zip contains sensitive seed/keystore/key file')
+              for asset_name in [n for n in names if n.startswith('assets/')]:
+                  asset_blob = zf.read(asset_name)
+                  if b'PRIVATE KEY' in asset_blob or b'QAT_LEDGER_ENC_KEY_V1.' in asset_blob:
+                      fail(f'Customer APK asset {asset_name} contains embedded private key material')
               scanned_bins = [n for n in names if n.endswith('.dex') or n.endswith('libapp.so')]
               if not scanned_bins:
                   fail('Customer APK missing dex/libapp.so entries')
+              cust_app_blobs = b''.join(zf.read(n) for n in names if n.endswith('libapp.so'))
+              cust_dex_blobs = b''.join(zf.read(n) for n in names if n.endswith('.dex'))
               for bin_name in scanned_bins:
                   blob = zf.read(bin_name)
                   for needle in forbidden_in_customer:
                       if needle in blob:
                           fail(f'Forbidden developer symbol/asset {needle!r} found inside Customer APK {bin_name}')
-              print(f'PASS_CUSTOMER_BINARY_ISOLATION: entries={len(names)}, scanned_dex_and_aot={len(scanned_bins)}, forbidden_matches=0')
+                  if b'PRIVATE KEY' in blob or b'QAT_LEDGER_ENC_KEY_V1.' in blob:
+                      fail(f'Private key material found inside Customer APK {bin_name}')
+              for kid, b64u in parsed_entries:
+                  if not (contains_ascii_or_utf16(cust_app_blobs, b64u) and contains_ascii_or_utf16(cust_app_blobs, kid)):
+                      fail(f'Customer APK libapp.so missing trusted public key {kid}')
+                  cust_libapp_embedded.append(kid)
+                  if not (contains_ascii_or_utf16(cust_dex_blobs, b64u) and contains_ascii_or_utf16(cust_dex_blobs, kid)):
+                      fail(f'Customer APK classes*.dex BuildConfig missing trusted public key {kid}')
+                  cust_dex_embedded.append(kid)
+              print(f'PASS_CUSTOMER_BINARY_ISOLATION: entries={len(names)}, scanned_dex_and_aot={len(scanned_bins)}, forbidden_matches=0, embedded_public_keys={len(parsed_entries)}')
 
           with zipfile.ZipFile(dev_apk) as zf:
               names = zf.namelist()
-              if any('dev_bootstrap_seed.b64' in n for n in names) or any(n.endswith(('.jks', '.keystore', '.p12', 'key.properties')) for n in names):
+              if any('dev_bootstrap_seed.b64' in n for n in names) or any(n.lower().endswith(forbidden_secret_exts) for n in names):
                   fail('Developer APK zip contains extractable seed/keystore secrets (violates zero-extractable-private-key policy)')
               for asset_name in [n for n in names if n.startswith('assets/')]:
                   asset_blob = zf.read(asset_name)
@@ -471,11 +556,45 @@ jobs:
 
           with zipfile.ZipFile(src_zip) as zf:
               names = zf.namelist()
-              bad = [n for n in names if n.endswith(('.jks', '.keystore', '.p12', '.pem', 'key.properties')) or 'dev_bootstrap_seed.b64' in n]
+              bad = [n for n in names if n.lower().endswith(forbidden_secret_exts) or 'dev_bootstrap_seed.b64' in n]
               if bad:
                   fail(f'Source archive contains sensitive files: {bad}')
               print(f'PASS_SOURCE_ARCHIVE_HYGIENE: entries={len(names)}, secret_files=0')
+
+          with open('ci-dist/LICENSE_TRUST_AUDIT.txt', 'w', encoding='utf-8') as fh:
+              fh.write('=== QAT-LEDGER LICENSE TRUST AUDIT ===\n')
+              fh.write(f'seed_source={seed_source}\n')
+              fh.write(f'primary_public_key_id={public_key_id}\n')
+              fh.write(f'total_trusted_public_keys={len(parsed_entries)}\n')
+              fh.write(f'embedded_key_ids={",".join(k for k, _ in parsed_entries)}\n')
+              fh.write(f'customer_libapp_so_verified={",".join(cust_libapp_embedded)}\n')
+              fh.write(f'customer_classes_dex_verified={",".join(cust_dex_embedded)}\n')
+              fh.write('customer_private_keys_found=0\n')
+              fh.write('developer_embedded_production_private_keys_found=0\n')
+              fh.write('ci_private_keys_stored=0\n')
+              fh.write('status=' + ('PASS_PERSISTENT_PRODUCTION_TRUST_ROOT' if seed_source == 'persistent_public_secret' else 'QA_EPHEMERAL_PUBLIC_KEY_ONLY_NOT_FOR_PRODUCTION') + '\n')
           PY
+
+          CUST_CERT_SHA256=$(awk '/certificate SHA-256 digest:/{print $NF; exit}' ci-dist/customer-signature.txt | tr '[:upper:]' '[:lower:]' | tr -d ':' || true)
+          if [ -z "$CUST_CERT_SHA256" ]; then
+            CUST_CERT_SHA256=$(keytool -printcert -jarfile "$CUST_OUT" 2>/dev/null | awk '/SHA256:/{print $2; exit}' | tr '[:upper:]' '[:lower:]' | tr -d ':' || true)
+          fi
+          DEV_CERT_SHA256=$(awk '/certificate SHA-256 digest:/{print $NF; exit}' ci-dist/developer-signature.txt | tr '[:upper:]' '[:lower:]' | tr -d ':' || true)
+          if [ -z "$DEV_CERT_SHA256" ]; then
+            DEV_CERT_SHA256=$(keytool -printcert -jarfile "$DEV_OUT" 2>/dev/null | awk '/SHA256:/{print $2; exit}' | tr '[:upper:]' '[:lower:]' | tr -d ':' || true)
+          fi
+
+          if [ -z "$CUST_CERT_SHA256" ] || [ -z "$DEV_CERT_SHA256" ]; then
+            echo "::error title=apk_binary_audit::Failed to extract certificate SHA-256 digest from signed APKs"
+            exit 1
+          fi
+
+          if [ "$IS_OFFICIAL" = "true" ]; then
+            if [ "$CUST_CERT_SHA256" != "$EXPECTED_KEYSTORE_SHA256" ] || [ "$DEV_CERT_SHA256" != "$EXPECTED_KEYSTORE_SHA256" ]; then
+              echo "::error title=apk_binary_audit::APK apksigner cert SHA-256 mismatch with RELEASE_KEYSTORE_SHA256 (cust=$CUST_CERT_SHA256, dev=$DEV_CERT_SHA256, expected=$EXPECTED_KEYSTORE_SHA256)"
+              exit 1
+            fi
+          fi
 
           (
             cd ci-dist
@@ -483,65 +602,28 @@ jobs:
               | tee SHA256SUMS.txt
           )
 
-          CUST_CERT_SHA256=$(awk '/certificate SHA-256 digest:/{print $NF; exit}' ci-dist/customer-signature.txt || true)
-          if [ -z "$CUST_CERT_SHA256" ]; then
-            CUST_CERT_SHA256=$(keytool -printcert -jarfile "$CUST_OUT" 2>/dev/null | awk '/SHA256:/{print $2; exit}' | tr '[:upper:]' '[:lower:]' | tr -d ':' || true)
-          fi
-          DEV_CERT_SHA256=$(awk '/certificate SHA-256 digest:/{print $NF; exit}' ci-dist/developer-signature.txt || true)
-          if [ -z "$DEV_CERT_SHA256" ]; then
-            DEV_CERT_SHA256=$(keytool -printcert -jarfile "$DEV_OUT" 2>/dev/null | awk '/SHA256:/{print $2; exit}' | tr '[:upper:]' '[:lower:]' | tr -d ':' || true)
-          fi
           CUST_SIZE=$(wc -c < "$CUST_OUT")
           DEV_SIZE=$(wc -c < "$DEV_OUT")
           AUDIT_LINE=$(tr '\n' ' ' < ci-dist/binary-isolation-audit.txt)
 
           {
             echo "is_official_release=$IS_OFFICIAL"
+            echo "requested_mode=$REQUESTED_MODE"
             echo "signed_by=$SIGNED_BY"
+            echo "expected_keystore_sha256=${EXPECTED_KEYSTORE_SHA256:-NONE}"
+            echo "keystore_secrets_matrix=${KEYSTORE_SECRETS_MATRIX}"
+            echo "missing_keystore_secrets=${MISSING_KEYSTORE_SECRETS}"
+            echo "ed25519_secret_status=${ED25519_SECRET_STATUS}"
             echo "seed_source=$SEED_SOURCE"
             echo "public_key_id=$PUBLIC_KEY_ID"
-            echo "customer_apk=$(basename "$CUST_OUT") (${CUST_SIZE} bytes, cert_sha256=$CUST_CERT_SHA256)"
-            echo "developer_apk=$(basename "$DEV_OUT") (${DEV_SIZE} bytes, cert_sha256=$DEV_CERT_SHA256)"
+            echo "customer_apk=$(basename "$CUST_OUT") (${CUST_SIZE} bytes, applicationId=com.aistudio.tofanqat.nxzwmb, versionCode=$CUST_VER_CODE, versionName=$CUST_VER_NAME, cert_sha256=$CUST_CERT_SHA256)"
+            echo "developer_apk=$(basename "$DEV_OUT") (${DEV_SIZE} bytes, applicationId=com.aistudio.tofanqat.nxzwmb.dev, versionCode=$DEV_VER_CODE, versionName=$DEV_VER_NAME, cert_sha256=$DEV_CERT_SHA256)"
           } | tee ci-dist/BUILD_SIGNING_STATUS.txt
 
           echo "::notice title=apk_binary_audit::official=${IS_OFFICIAL} signed_by=${SIGNED_BY} seed=${SEED_SOURCE} kid=${PUBLIC_KEY_ID} cust=${CUST_SIZE}B(${CUST_CERT_SHA256}) dev=${DEV_SIZE}B(${DEV_CERT_SHA256}) | ${AUDIT_LINE}"
 
-      - name: Upload build, binary audit & QA artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qat-ledger-build-and-audit-artifacts
-          path: ci-dist/
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Publish Official GitHub Release (only when official release keystore & persistent Ed25519 key are present)
-        if: success() && steps.audit.outputs.is_official_release == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          TAG="release-${{ github.run_id }}-${{ github.run_attempt }}"
-          SHORT_SHA="${GITHUB_SHA::7}"
-          gh release create "$TAG" \
-            --target "${{ github.sha }}" \
-            --title "QAT-LEDGER Official Release ($SHORT_SHA)" \
-            --notes "Verified Official Release APKs for commit $SHORT_SHA (signing: ${{ steps.keystore.outputs.signed_by }}, ed25519: ${{ steps.ed25519.outputs.seed_source }} / ${{ steps.ed25519.outputs.public_key_id }})." \
-            ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk \
-            ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk \
-            ci-dist/QAT_LEDGER_FLUTTER_SOURCE.zip \
-            ci-dist/SHA256SUMS.txt \
-            ci-dist/BUILD_SIGNING_STATUS.txt \
-            ci-dist/binary-isolation-audit.txt \
-            ci-dist/customer-signature.txt \
-            ci-dist/developer-signature.txt
-
-      - name: Note skipped Production GitHub Release when QA-DEBUG-ONLY
-        if: success() && steps.audit.outputs.is_official_release != 'true'
-        run: |
-          echo "::notice title=release_skipped::Skipped publishing GitHub Production Release because build is QA-DEBUG-ONLY (signed_by=${{ steps.keystore.outputs.signed_by }}, seed_source=${{ steps.ed25519.outputs.seed_source }})."
-
       - name: Smoke-test APKs on Android Emulator
+        id: emu
         if: ${{ !cancelled() && steps.audit.outcome == 'success' }}
         env:
           CUSTOMER_APK_PATH: ${{ steps.audit.outputs.customer_apk }}
@@ -560,11 +642,13 @@ jobs:
 
           if [ ! -s "$CUSTOMER_APK_PATH" ] || [ ! -s "$DEVELOPER_APK_PATH" ]; then
             echo "NOT_EXECUTED: Required APK files are missing ($CUSTOMER_APK_PATH / $DEVELOPER_APK_PATH)." | tee -a "$LOG"
+            echo "emulator_status=NOT_EXECUTED" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if [ ! -e /dev/kvm ]; then
             echo "NOT_EXECUTED: /dev/kvm device is not present on this runner." | tee -a "$LOG"
+            echo "emulator_status=NOT_EXECUTED" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -572,6 +656,7 @@ jobs:
 
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
             echo "NOT_EXECUTED: KVM is not readable/writable by runner user." | tee -a "$LOG"
+            echo "emulator_status=NOT_EXECUTED" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -640,6 +725,7 @@ jobs:
           if ! "$EMULATOR" -accel-check >> "$LOG" 2>&1; then
             cat "$LOG"
             echo "NOT_EXECUTED: Emulator hardware acceleration is unavailable." | tee -a "$LOG"
+            echo "emulator_status=NOT_EXECUTED" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           cat "$LOG"
@@ -796,6 +882,24 @@ jobs:
           echo "CUSTOMER_PID=$CUST_PID" | tee -a "$LOG"
           timeout 20 "$ADB" exec-out screencap -p > ci-dist/customer_launch.png || true
 
+          CUST_FIRST_INSTALL_1=$(timeout 10 "$ADB" shell dumpsys package com.aistudio.tofanqat.nxzwmb | awk -F= '/firstInstallTime/{print $2; exit}' | tr -d '\r' || true)
+          CUST_DATA_DIR_1=$(timeout 10 "$ADB" shell dumpsys package com.aistudio.tofanqat.nxzwmb | awk -F= '/dataDir=/{print $2; exit}' | tr -d '\r' || true)
+
+          echo "=== Verifying same-cert in-place reinstall/upgrade preserves dataDir & firstInstallTime ===" | tee -a "$LOG"
+          sleep 2
+          timeout 60 "$ADB" install -r "$CUSTOMER_APK_PATH" | tee -a "$LOG"
+          CUST_FIRST_INSTALL_2=$(timeout 10 "$ADB" shell dumpsys package com.aistudio.tofanqat.nxzwmb | awk -F= '/firstInstallTime/{print $2; exit}' | tr -d '\r' || true)
+          CUST_DATA_DIR_2=$(timeout 10 "$ADB" shell dumpsys package com.aistudio.tofanqat.nxzwmb | awk -F= '/dataDir=/{print $2; exit}' | tr -d '\r' || true)
+          echo "FIRST_INSTALL_BEFORE=$CUST_FIRST_INSTALL_1 AFTER=$CUST_FIRST_INSTALL_2 DATA_DIR=$CUST_DATA_DIR_2" | tee -a "$LOG"
+          if [ -z "$CUST_FIRST_INSTALL_1" ] || [ "$CUST_FIRST_INSTALL_1" != "$CUST_FIRST_INSTALL_2" ] || [ "$CUST_DATA_DIR_1" != "$CUST_DATA_DIR_2" ]; then
+            echo "FAIL: In-place reinstall did not preserve firstInstallTime or dataDir." | tee -a "$LOG"
+            exit 1
+          fi
+          timeout 30 "$ADB" shell am start -W -n "com.aistudio.tofanqat.nxzwmb/$CUSTOMER_ACTIVITY" | tee -a "$LOG"
+          sleep 4
+          CUST_PID_AFTER_UPGRADE=$(timeout 10 "$ADB" shell pidof com.aistudio.tofanqat.nxzwmb || true)
+          echo "CUSTOMER_PID_AFTER_UPGRADE=$CUST_PID_AFTER_UPGRADE" | tee -a "$LOG"
+
           echo "=== Installing and launching Developer APK ($DEVELOPER_APK_PATH) ===" | tee -a "$LOG"
           timeout 60 "$ADB" install -r "$DEVELOPER_APK_PATH" | tee -a "$LOG"
           DEV_PKG_PATH=$(timeout 10 "$ADB" shell pm path com.aistudio.tofanqat.nxzwmb.dev | tr -d '\r' || true)
@@ -807,9 +911,9 @@ jobs:
           timeout 20 "$ADB" exec-out screencap -p > ci-dist/developer_launch.png || true
 
           echo "=== Verifying dual-app coexistence & crash-free logcat ===" | tee -a "$LOG"
-          timeout 10 "$ADB" shell dumpsys package com.aistudio.tofanqat.nxzwmb | grep -E "versionCode|dataDir=" | tr '\n' ' ' | tee -a "$LOG" || true
+          timeout 10 "$ADB" shell dumpsys package com.aistudio.tofanqat.nxzwmb | grep -E "versionCode|versionName=|dataDir=|firstInstallTime=|lastUpdateTime=" | tr '\n' ' ' | tee -a "$LOG" || true
           echo "" | tee -a "$LOG"
-          timeout 10 "$ADB" shell dumpsys package com.aistudio.tofanqat.nxzwmb.dev | grep -E "versionCode|dataDir=" | tr '\n' ' ' | tee -a "$LOG" || true
+          timeout 10 "$ADB" shell dumpsys package com.aistudio.tofanqat.nxzwmb.dev | grep -E "versionCode|versionName=|dataDir=|firstInstallTime=|lastUpdateTime=" | tr '\n' ' ' | tee -a "$LOG" || true
           echo "" | tee -a "$LOG"
 
           timeout 20 "$ADB" logcat -d > "$LOGCAT_LOG" 2>&1 || true
@@ -821,12 +925,80 @@ jobs:
             exit 1
           fi
 
-          if [ -z "$CUST_PID" ] || [ -z "$DEV_PID" ]; then
-            echo "FAIL: One or both apps did not remain running (CUSTOMER_PID='$CUST_PID', DEVELOPER_PID='$DEV_PID')." | tee -a "$LOG"
+          if [ -z "$CUST_PID" ] || [ -z "$CUST_PID_AFTER_UPGRADE" ] || [ -z "$DEV_PID" ]; then
+            echo "FAIL: One or both apps did not remain running (CUSTOMER_PID='$CUST_PID', AFTER_UPGRADE='$CUST_PID_AFTER_UPGRADE', DEVELOPER_PID='$DEV_PID')." | tee -a "$LOG"
             exit 1
           fi
 
-          echo "PASS: Customer and Developer apps installed side-by-side, launched, and remained running cleanly." | tee -a "$LOG"
+          echo "PASS: Customer and Developer apps installed side-by-side, verified same-cert reinstall preservation, launched, and remained running cleanly." | tee -a "$LOG"
+          echo "emulator_status=PASS" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Final Build and Test Report
+        if: ${{ !cancelled() && steps.audit.outcome == 'success' }}
+        env:
+          IS_OFFICIAL: ${{ steps.audit.outputs.is_official_release }}
+          SIGNED_BY: ${{ steps.keystore.outputs.signed_by }}
+          SEED_SOURCE: ${{ steps.ed25519.outputs.seed_source }}
+          PUBLIC_KEY_ID: ${{ steps.ed25519.outputs.public_key_id }}
+          EMU_STATUS: ${{ steps.emu.outputs.emulator_status || 'NOT_EXECUTED' }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo "=== QAT-LEDGER FINAL BUILD AND TEST REPORT ==="
+            echo "commit_sha=$COMMIT_SHA"
+            echo "github_run_id=$RUN_ID"
+            echo "is_official_release=$IS_OFFICIAL"
+            echo ""
+            echo "--- 1. BUILD & SIGNING STATUS ---"
+            cat ci-dist/BUILD_SIGNING_STATUS.txt
+            echo ""
+            echo "--- 2. BINARY ISOLATION AUDIT ---"
+            cat ci-dist/binary-isolation-audit.txt
+            echo ""
+            echo "--- 3. LICENSE TRUST AUDIT ---"
+            cat ci-dist/LICENSE_TRUST_AUDIT.txt
+            echo ""
+            echo "--- 4. SHA256SUMS ---"
+            cat ci-dist/SHA256SUMS.txt
+            echo ""
+            echo "--- 5. FLUTTER ANALYZE SUMMARY ---"
+            tail -n 10 ci-dist/flutter_analyze.log 2>/dev/null || echo "flutter_analyze.log missing"
+            echo ""
+            echo "--- 6. FLUTTER TEST SUMMARY ---"
+            tail -n 20 ci-dist/flutter_test.log 2>/dev/null || echo "flutter_test.log missing"
+            echo ""
+            echo "--- 7. ANDROID EMULATOR SMOKE & SAME-CERT REINSTALL ---"
+            echo "emulator_status=$EMU_STATUS"
+            tail -n 25 ci-dist/emulator_smoke.log 2>/dev/null || echo "emulator_smoke.log missing"
+            echo ""
+            echo "--- 8. GATE MATRIX (PASS / FAIL / NOT EXECUTED / BLOCKED) ---"
+            echo "PASS: flutter analyze"
+            echo "PASS: flutter test (automated Dart/SQLite/Ed25519/Room v18 suites)"
+            echo "PASS: APK binary isolation & zero-private-key audit"
+            echo "PASS: Customer APK embedded Ed25519 public key binary check"
+            echo "${EMU_STATUS}: Android Emulator dual install, launch & same-cert reinstall"
+            if [ "$IS_OFFICIAL" = "true" ]; then
+              echo "PASS: Official Release keystore & SHA-256 certificate match"
+              echo "PASS: Persistent Ed25519 public trust root (QAT_LICENSE_PUBLIC_KEYS)"
+            else
+              echo "BLOCKED: Official Production Android Release Signing (missing required secrets — see BUILD_SIGNING_STATUS.txt)"
+              echo "BLOCKED: Persistent Production Ed25519 Public Trust Root (QAT_LICENSE_PUBLIC_KEYS missing)"
+              echo "NOT EXECUTED: Two-physical-device live license transfer & restart test with production APKs"
+              echo "NOT EXECUTED: Legacy production in-place APK upgrade with original keystore"
+              echo "BLOCKED: Official GitHub Release publication"
+            fi
+          } | tee ci-dist/FINAL_BUILD_AND_TEST_REPORT.txt
+
+      - name: Upload build, binary audit, emulator & QA artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qat-ledger-build-and-audit-artifacts
+          path: ci-dist/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload emulator smoke-test logs
         if: always()
@@ -841,3 +1013,31 @@ jobs:
             ci-dist/developer_launch.png
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Publish Official GitHub Release (only when official release keystore, SHA-256 match, persistent Ed25519 key, binary audit & emulator smoke-test ALL pass)
+        if: success() && steps.audit.outputs.is_official_release == 'true' && steps.emu.outputs.emulator_status == 'PASS' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="release-${{ github.run_id }}-${{ github.run_attempt }}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          gh release create "$TAG" \
+            --target "${{ github.sha }}" \
+            --title "QAT-LEDGER Official Release ($SHORT_SHA)" \
+            --notes "Verified Official Release APKs for commit $SHORT_SHA (signing: ${{ steps.keystore.outputs.signed_by }}, ed25519: ${{ steps.ed25519.outputs.seed_source }} / ${{ steps.ed25519.outputs.public_key_id }}, emulator: ${{ steps.emu.outputs.emulator_status }})." \
+            ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk \
+            ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk \
+            ci-dist/QAT_LEDGER_FLUTTER_SOURCE.zip \
+            ci-dist/SHA256SUMS.txt \
+            ci-dist/BUILD_SIGNING_STATUS.txt \
+            ci-dist/customer-signature.txt \
+            ci-dist/developer-signature.txt \
+            ci-dist/binary-isolation-audit.txt \
+            ci-dist/LICENSE_TRUST_AUDIT.txt \
+            ci-dist/FINAL_BUILD_AND_TEST_REPORT.txt
+
+      - name: Note skipped Production GitHub Release when QA-DEBUG-ONLY
+        if: success() && steps.audit.outputs.is_official_release != 'true'
+        run: |
+          echo "::notice title=release_skipped::Skipped publishing GitHub Production Release because build is QA-DEBUG-ONLY (signed_by=${{ steps.keystore.outputs.signed_by }}, seed_source=${{ steps.ed25519.outputs.seed_source }}, emulator=${{ steps.emu.outputs.emulator_status || 'NOT_EXECUTED' }})."
