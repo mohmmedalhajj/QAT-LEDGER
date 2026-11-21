@@ -528,7 +528,7 @@ void main() {
         currency: CurrencyCode.yer,
         supplierId: fifoSupId,
         supplierName: 'مورد الدفعات المتتابعة',
-        purchaseDateMs: DateTime(2026, 11, 2).millisecondsSinceEpoch,
+        dateMs: DateTime(2026, 11, 2).millisecondsSinceEpoch,
       );
       // Sell 5.000 bundles via automatic FIFO (deducts 3.000 from oldest batch + 2.000 from second batch)
       final fifoSaleId = await repo.makeSale(
@@ -609,7 +609,7 @@ void main() {
 
       // BackupService.resetAllAccountingData wipes transactional tables while keeping safety snapshot
       final resetSafety = await backupService.resetAllAccountingData(
-        safetyOutputDir: p.join(tempDir.path, 'safety_resets'),
+        rollbackDir: p.join(tempDir.path, 'safety_resets'),
         fullFactoryReset: false,
       );
       expect(File(resetSafety.filePath).existsSync(), true);

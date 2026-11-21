@@ -227,7 +227,7 @@ class AppController extends ChangeNotifier {
     _licenseStore = LocalLicenseStore(_prefs!);
     _installationId = await _licenseStore!.getOrCreateInstallationId();
     if (_editionConfig.isDeveloper && _developerBridge != null) {
-      await _developerBridge!.initialize(_prefs!);
+      await _developerBridge.initialize(_prefs!);
     }
 
     _migrationSummary = await _migrator.migrateIfNeeded();
@@ -750,7 +750,7 @@ class AppController extends ChangeNotifier {
   Future<void> refreshLicense() async {
     if (_licenseStore == null) return;
     final devReg = _editionConfig.isDeveloper && _developerBridge != null
-        ? await _developerBridge!.getActivePublicKeyRegistry()
+        ? await _developerBridge.getActivePublicKeyRegistry()
         : null;
     _licenseStatus = await _licenseStore!.loadAndVerify(
       editionConfig: _editionConfig,
@@ -765,7 +765,7 @@ class AppController extends ChangeNotifier {
       return const LicenseVerificationResult(kind: LicenseStateKind.corrupted);
     }
     final devReg = _editionConfig.isDeveloper && _developerBridge != null
-        ? await _developerBridge!.getActivePublicKeyRegistry()
+        ? await _developerBridge.getActivePublicKeyRegistry()
         : null;
     final installId = await _licenseStore!.getOrCreateInstallationId();
     final registry = TrustedPublicKeyRegistry.fromCsv(_editionConfig.publicKeysCsv);

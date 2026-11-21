@@ -205,7 +205,7 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
               title: 'دفتر ضريبة القات مفصول عن المصروفات اليومية',
               subtitle:
                   'يُخصّص هذا السجل لضريبة القات فقط. مصروفات إيجار المفرش وأجور العمال والكهرباء تُسجَّل في تبويب المصاريف التشغيلية.',
-              trailing: TextButton(
+              action: TextButton(
                 onPressed: () => ctrl.setSection(4, subTab: 0),
                 child: const Text('فتح المصاريف'),
               ),

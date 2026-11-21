@@ -200,24 +200,30 @@ class _BackupAndPrinterViewState extends State<BackupAndPrinterView> {
                     style: TextStyle(fontSize: 12.5, height: 1.5),
                   ),
                   const SizedBox(height: 10),
-                  RadioListTile<bool>(
+                  ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    value: false,
-                    groupValue: fullFactory,
-                    onChanged: (v) => setDlgState(() => fullFactory = v ?? false),
+                    leading: Icon(
+                      !fullFactory
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                    ),
+                    onTap: () => setDlgState(() => fullFactory = false),
                     title: const Text('تصفير الدفاتر والحسابات فقط'),
                     subtitle: const Text(
                       'الإبقاء على اسم الوكالة والشعار وحسابات الدخول',
                       style: TextStyle(fontSize: 11),
                     ),
                   ),
-                  RadioListTile<bool>(
+                  ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    value: true,
-                    groupValue: fullFactory,
-                    onChanged: (v) => setDlgState(() => fullFactory = v ?? true),
+                    leading: Icon(
+                      fullFactory
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                    ),
+                    onTap: () => setDlgState(() => fullFactory = true),
                     title: const Text('إعادة ضبط المصنع بالكامل'),
                     subtitle: const Text(
                       'حذف كل الدفاتر والإعدادات والمستخدمين والبدء من شاشة التأسيس',

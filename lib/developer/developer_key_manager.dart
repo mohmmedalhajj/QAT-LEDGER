@@ -56,7 +56,7 @@ class DeveloperKeyManager {
       try {
         final seed = decodeSeed(bootstrapRaw);
         await _persistSeed(seed);
-        return _ed25519.newKeyPairFromSeed(seed);
+        return await _ed25519.newKeyPairFromSeed(seed);
       } catch (_) {
         // Fall back to fresh random seed only if bundled bootstrap seed is malformed.
       }
