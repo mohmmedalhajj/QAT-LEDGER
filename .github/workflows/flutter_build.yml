@@ -1,10 +1,11 @@
 name: Flutter Analyze, Test & Release APK Build
 
 on:
+  # Push builds are QA-only. Only explicitly approved main is a production candidate.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
-    branches: ["**"]
+    branches: [main]
   workflow_dispatch:
     inputs:
       release_mode:
@@ -18,14 +19,60 @@ on:
           - production_release
 
 permissions:
-  contents: write
+  contents: read
+  deployments: read
 
 jobs:
   verify-and-build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      deployments: read
+    # Production secrets are scoped to this environment and are unavailable in QA/PR runs.
+    environment:
+      name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_mode == 'production_release' && 'production' || 'qa' }}
+    outputs:
+      is_official_release: ${{ steps.audit.outputs.is_official_release }}
+      emulator_status: ${{ steps.emu.outputs.emulator_status }}
 
     steps:
+      - name: Fail closed unless production environment is protected and scoped to main
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_mode == 'production_release' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error title=production_gate::Production dispatch is allowed only from refs/heads/main."
+            exit 1
+          fi
+          if ! gh api "repos/$GITHUB_REPOSITORY/environments/production" > /tmp/qat-production-environment.json; then
+            echo "::error title=production_gate::The production environment is missing or cannot be inspected; configure required reviewers and branch policy before retrying."
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, sys
+          env = json.load(open('/tmp/qat-production-environment.json', encoding='utf-8'))
+          rules = env.get('protection_rules') or []
+          reviewers = [r for rule in rules if rule.get('type') == 'required_reviewers' for r in rule.get('reviewers', [])]
+          if not reviewers:
+              sys.exit('::error::Production environment has no required reviewers; refusing to build a production release.')
+          PY
+          if ! gh api "repos/$GITHUB_REPOSITORY/environments/production/deployment-branch-policies" > /tmp/qat-production-branch-policy.json; then
+            echo "::error title=production_gate::Could not inspect production environment branch policy."
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, sys
+          policy = json.load(open('/tmp/qat-production-branch-policy.json', encoding='utf-8'))
+          branches = {item.get('name') for item in policy.get('branch_policies', []) if item.get('type') == 'branch'}
+          if branches != {'main'}:
+              sys.exit('::error::Production environment branch policy must allow exactly the approved main branch before release.')
+          print('PASS: production environment requires reviewer approval and explicitly allows main.')
+          PY
+          rm -f /tmp/qat-production-environment.json /tmp/qat-production-branch-policy.json
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -121,11 +168,11 @@ jobs:
       - name: Configure and enforce Release signing policy
         id: keystore
         env:
-          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          RELEASE_KEYSTORE_SHA256: ${{ secrets.RELEASE_KEYSTORE_SHA256 }}
+          KEYSTORE_B64: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_mode == 'production_release' && github.ref == 'refs/heads/main' && secrets.KEYSTORE_B64 || '' }}
+          KEYSTORE_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_mode == 'production_release' && github.ref == 'refs/heads/main' && secrets.KEYSTORE_PASSWORD || '' }}
+          KEY_ALIAS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_mode == 'production_release' && github.ref == 'refs/heads/main' && secrets.KEY_ALIAS || '' }}
+          KEY_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_mode == 'production_release' && github.ref == 'refs/heads/main' && secrets.KEY_PASSWORD || '' }}
+          RELEASE_KEYSTORE_SHA256: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_mode == 'production_release' && github.ref == 'refs/heads/main' && secrets.RELEASE_KEYSTORE_SHA256 || '' }}
           REQUESTED_MODE: ${{ github.event.inputs.release_mode || 'auto' }}
         run: |
           set -euo pipefail
@@ -220,7 +267,7 @@ jobs:
       - name: Provision Ed25519 public trust root (zero private keys in CI or APKs)
         id: ed25519
         env:
-          QAT_LICENSE_PUBLIC_KEYS: ${{ secrets.QAT_LICENSE_PUBLIC_KEYS }}
+          QAT_LICENSE_PUBLIC_KEYS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_mode == 'production_release' && github.ref == 'refs/heads/main' && secrets.QAT_LICENSE_PUBLIC_KEYS || '' }}
           SIGNED_BY: ${{ steps.keystore.outputs.signed_by }}
           REQUESTED_MODE: ${{ github.event.inputs.release_mode || 'auto' }}
         run: |
@@ -1000,8 +1047,27 @@ jobs:
             fi
           } | tee ci-dist/FINAL_BUILD_AND_TEST_REPORT.txt
 
-      - name: Upload build, binary audit, emulator & QA artifacts
-        if: always()
+      - name: Stage verified production release assets
+        if: success() && steps.audit.outputs.is_official_release == 'true' && steps.emu.outputs.emulator_status == 'PASS' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.event.inputs.release_mode == 'production_release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-production-release-assets
+          path: |
+            ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk
+            ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk
+            ci-dist/QAT_LEDGER_FLUTTER_SOURCE.zip
+            ci-dist/SHA256SUMS.txt
+            ci-dist/BUILD_SIGNING_STATUS.txt
+            ci-dist/customer-signature.txt
+            ci-dist/developer-signature.txt
+            ci-dist/binary-isolation-audit.txt
+            ci-dist/LICENSE_TRUST_AUDIT.txt
+            ci-dist/FINAL_BUILD_AND_TEST_REPORT.txt
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload QA build and audit artifacts (never production assets)
+        if: always() && steps.audit.outcome == 'success' && steps.audit.outputs.is_official_release != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: qat-ledger-build-and-audit-artifacts
@@ -1010,7 +1076,7 @@ jobs:
           retention-days: 14
 
       - name: Upload emulator smoke-test logs
-        if: always()
+        if: always() && steps.audit.outcome == 'success' && (steps.audit.outputs.is_official_release != 'true' || steps.emu.outputs.emulator_status == 'PASS')
         uses: actions/upload-artifact@v4
         with:
           name: qat-ledger-emulator-smoke
@@ -1023,30 +1089,53 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Publish Official GitHub Release (only when official release keystore, SHA-256 match, persistent Ed25519 key, binary audit & emulator smoke-test ALL pass)
-        if: success() && steps.audit.outputs.is_official_release == 'true' && steps.emu.outputs.emulator_status == 'PASS' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          TAG="release-${{ github.run_id }}-${{ github.run_attempt }}"
-          SHORT_SHA="${GITHUB_SHA::7}"
-          gh release create "$TAG" \
-            --target "${{ github.sha }}" \
-            --title "QAT-LEDGER Official Release ($SHORT_SHA)" \
-            --notes "Verified Official Release APKs for commit $SHORT_SHA (signing: ${{ steps.keystore.outputs.signed_by }}, ed25519: ${{ steps.ed25519.outputs.seed_source }} / ${{ steps.ed25519.outputs.public_key_id }}, emulator: ${{ steps.emu.outputs.emulator_status }})." \
-            ci-dist/QAT_LEDGER_CUSTOMER_RELEASE.apk \
-            ci-dist/QAT_LEDGER_DEVELOPER_RELEASE.apk \
-            ci-dist/QAT_LEDGER_FLUTTER_SOURCE.zip \
-            ci-dist/SHA256SUMS.txt \
-            ci-dist/BUILD_SIGNING_STATUS.txt \
-            ci-dist/customer-signature.txt \
-            ci-dist/developer-signature.txt \
-            ci-dist/binary-isolation-audit.txt \
-            ci-dist/LICENSE_TRUST_AUDIT.txt \
-            ci-dist/FINAL_BUILD_AND_TEST_REPORT.txt
-
       - name: Note skipped Production GitHub Release when QA-DEBUG-ONLY
         if: success() && steps.audit.outputs.is_official_release != 'true'
         run: |
           echo "::notice title=release_skipped::Skipped publishing GitHub Production Release because build is QA-DEBUG-ONLY (signed_by=${{ steps.keystore.outputs.signed_by }}, seed_source=${{ steps.ed25519.outputs.seed_source }}, emulator=${{ steps.emu.outputs.emulator_status || 'NOT_EXECUTED' }})."
+
+  publish-production-release:
+    needs: verify-and-build
+    if: needs.verify-and-build.outputs.is_official_release == 'true' && needs.verify-and-build.outputs.emulator_status == 'PASS' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.event.inputs.release_mode == 'production_release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      deployments: read
+    environment:
+      name: production
+    steps:
+      - name: Download verified production assets
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-production-release-assets
+          path: release-assets
+
+      - name: Publish Official GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          TAG="release-${RUN_ID}-${RUN_ATTEMPT}"
+          SHORT_SHA="${COMMIT_SHA::7}"
+          test -s release-assets/QAT_LEDGER_CUSTOMER_RELEASE.apk
+          test -s release-assets/QAT_LEDGER_DEVELOPER_RELEASE.apk
+          test -s release-assets/SHA256SUMS.txt
+          (cd release-assets && sha256sum --check SHA256SUMS.txt)
+          gh release create "$TAG" \
+            --target "$COMMIT_SHA" \
+            --title "QAT-LEDGER Official Release ($SHORT_SHA)" \
+            --notes "Verified Official Release APKs for commit $SHORT_SHA. Signing, persistent public trust root, binary audit, and emulator smoke test passed." \
+            release-assets/QAT_LEDGER_CUSTOMER_RELEASE.apk \
+            release-assets/QAT_LEDGER_DEVELOPER_RELEASE.apk \
+            release-assets/QAT_LEDGER_FLUTTER_SOURCE.zip \
+            release-assets/SHA256SUMS.txt \
+            release-assets/BUILD_SIGNING_STATUS.txt \
+            release-assets/customer-signature.txt \
+            release-assets/developer-signature.txt \
+            release-assets/binary-isolation-audit.txt \
+            release-assets/LICENSE_TRUST_AUDIT.txt \
+            release-assets/FINAL_BUILD_AND_TEST_REPORT.txt

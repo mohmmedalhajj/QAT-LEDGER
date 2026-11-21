@@ -24,7 +24,7 @@
 - **Developer APK** NEVER bundles any plaintext private seed (`dev_bootstrap_seed.b64` is banned from APKs, Git, and CI archives). Instead:
   1. **On-Device Hardware-Sealed Keys:** On first launch on the owner's Developer phone, `DeveloperKeyManager` generates an Ed25519 keypair and seals the seed via `AndroidKeyStore` (`AES-256-GCM`), or imports an encrypted `.qkey` vault bundle (`QAT_LEDGER_ENC_KEY_V1`, protected by `PBKDF2-HMAC-SHA256` 200,000 iterations + `AES-256-GCM` with passphrase >= 10 chars). AndroidKeyStore errors fail closed; Android builds never persist a newly generated seed to plaintext preferences. Legacy fallback seeds are sealed into AndroidKeyStore before use, and remain untouched if sealing fails. If a stored sealed key cannot be opened, the Developer bridge disables signing rather than replacing the key, while app initialization continues so accounting data remains accessible.
   2. **Public-Only CI Secret (`QAT_LICENSE_PUBLIC_KEYS`):** The developer copies ONLY the public key line (`QLK-XXXXXXXX:<base64UrlRaw32>`) into GitHub Secrets (`QAT_LICENSE_PUBLIC_KEYS`). Neither CI nor any APK ever holds a production private signing key.
-  3. **Legacy Format Compatibility & Signed Revocation:** Existing `QL1.` compact tokens and `.qlic` JSON envelopes (both Kotlin `licensing-core` line-v1 and Flutter v2 JSON) remain 100% valid; offline revocation uses additive signed `QLR1.` revocation notices (`QAT_LEDGER_REVOCATION_V1`) without invalidating legacy licenses.
+  3. **Format support is not identity recovery:** `QL1.` compact tokens and `.qlic` JSON envelopes (Kotlin `licensing-core` line-v1 and Flutter v2 JSON) are supported only when their signer is present in the app's trusted public keys. Do not claim compatibility with licenses signed by an unrecovered historical key. Offline revocation uses additive signed `QLR1.` revocation notices (`QAT_LEDGER_REVOCATION_V1`); do not remove or replace trusted keys as a substitute for revocation.
 
 ### Production Signing Service Design vs Device-Local Keystore (Security Trade-off Disclosure)
 - **Recommended Enterprise Option — Remote Signing Service (Cloud KMS / HSM):**
@@ -34,15 +34,15 @@
   - **Architecture:** No backend required; Developer phone seals its Ed25519 key inside `AndroidKeyStore` AES-256-GCM and backs up encrypted `.qkey` bundles offline.
   - **Security Boundary:** Protects completely against APK extraction and CI leaks (since zero keys reside in the APK or CI). Risk is strictly bounded to physical compromise + OS-level root extraction on the live unlocked Developer phone itself.
 
-### Key Continuity & Rotation Policy
-- **Why persistent keys matter:** Rotating Ed25519 keys without keeping older public keys in `QAT_LICENSE_PUBLIC_KEYS` causes previously issued customer licenses to fail with `UNTRUSTED_KEY`.
-- **How to rotate without breaking existing customers:**
-  1. Rotate to a new Ed25519 key (`QLK-NEWKEY`) in the Developer Console (or HSM/KMS).
-  2. Append the new public key while preserving the older public key(s) in GitHub Secret `QAT_LICENSE_PUBLIC_KEYS`:
-     ```text
-     QLK-OLDKEY:<oldBase64UrlRaw32>,QLK-NEWKEY:<newBase64UrlRaw32>
-     ```
-  3. Rebuild the Customer APK so existing customers remain active (`QLK-OLDKEY`) and new customers verify against `QLK-NEWKEY`.
+### Key Recovery, Continuity & Owner-Approved Transition
+- **Current historical identity status:** The historical Developer Ed25519 private identity and its public key have not been recovered or independently verified. No public-key entries were found in the inspected repository/archive; this does not prove no key exists on the owner's devices or backups. Do not generate a replacement or claim old-license compatibility until legitimate recovery has been attempted.
+- **Safe recovery sequence (owner-controlled device only):**
+  1. Preserve the Developer phone and encrypted `.qkey` backups. Do not clear app data, reinstall, reset the device, export an unencrypted seed, or paste seed/key-vault contents into chat, CI, source control, or logs.
+  2. On the original device, use the Developer console to inspect/export only the public key line and key ID. Search owner-controlled offline backups for an encrypted `.qkey` vault; recover/import it only on the owner's secure device using its passphrase. Never upload a `.qkey` or private seed.
+  3. Compare the recovered public key with any documented historical key and known license-validation evidence. Treat a missing/locked key as unrecovered; do not silently replace it.
+  4. If recovery fails, stop for explicit owner approval of an identity transition. Generate any replacement only on the owner-controlled Developer device or approved HSM, and document that licenses signed by an unavailable old key may not verify. Keep every recovered historical public key additively in the Customer trust set; never claim continuity without test evidence.
+  5. Before production, configure `QAT_LICENSE_PUBLIC_KEYS` with public keys only and verify a test license for every retained key on Customer builds. A signing-key transition does not authorize data deletion or a licensing-semantics change.
+- **General rotation after identity recovery:** Add the new public key while preserving every historical key in `QAT_LICENSE_PUBLIC_KEYS` (for example `QLK-OLD:<oldBase64UrlRaw32>,QLK-NEW:<newBase64UrlRaw32>`), rebuild, and test verification against each key before any approved release.
 
 ---
 
@@ -60,28 +60,29 @@ From the original Kotlin repository (`516e118:app/build.gradle.kts` & `516e118:R
 ### Strict CI & Gradle Rules
 - **Production Release (`RELEASE_SIGNING_REQUIRED=true` / `release_mode=production_release`):**
   - `android/app/build.gradle.kts` **throws `GradleException` and refuses Debug signing** if `android/key.properties` or the `.jks` keystore file is absent.
-  - `.github/workflows/flutter_build.yml` enforces **all six** GitHub Repository Secrets before allowing `is_official_release=true` or publishing an Official GitHub Release:
-    1. `KEYSTORE_B64` — Base64 encoding of `my-upload-key.jks` (single line)
+  - `.github/workflows/flutter_build.yml` reads production credentials only for an explicit `workflow_dispatch` from `main` after the `production` Environment gate; store all six as **Environment secrets**, not repository-wide secrets:
+    1. `KEYSTORE_B64` — Base64 encoding of the original owner-controlled release keystore (single line)
     2. `KEYSTORE_PASSWORD` — Keystore password
-    3. `KEY_ALIAS` — Key alias (`upload` in original `516e118`)
+    3. `KEY_ALIAS` — Verified key alias (do not assume the historical `upload` alias)
     4. `KEY_PASSWORD` — Private key password
-    5. `RELEASE_KEYSTORE_SHA256` — **Required** 64-hex SHA-256 certificate digest verified via `keytool` before Gradle runs AND matched against `apksigner` output on both final APKs
-    6. `QAT_LICENSE_PUBLIC_KEYS` — Trusted Ed25519 **public** key(s) (`QLK-XXXXXXXX:<base64UrlRaw32>`); binary audit verifies each key is embedded in Customer APK `libapp.so` + `classes*.dex`
+    5. `RELEASE_KEYSTORE_SHA256` — Required 64-hex SHA-256 certificate digest, independently recorded from the owner's trusted signing certificate; CI verifies it via `keytool` before Gradle and matches both final APKs via `apksigner`
+    6. `QAT_LICENSE_PUBLIC_KEYS` — Trusted Ed25519 **public** key(s) only (`QLK-XXXXXXXX:<base64UrlRaw32>`); binary audit verifies each key in Customer APK `libapp.so` + `classes*.dex`
+  - Never generate an Android release identity in CI. The owner must recover/confirm the original keystore and compare its certificate fingerprint with a trusted existing record or original signed artifact before setting secrets. If that cannot be done, stop for an owner-approved signing transition; a changed certificate may block direct-APK in-place upgrades.
+- **Production approval and trigger controls:** Push and pull-request builds target `main` but never publish and never receive production secrets. Production is dispatch-only from `refs/heads/main`, requires the GitHub `production` Environment to have required reviewers and a deployment-branch policy allowing exactly `main`, and publishes through a separate write-scoped job. The Environment approval gates both production build/signing and publication; the workflow fails closed if the reviewer or branch-policy configuration cannot be verified. Configure these controls before adding Environment secrets.
 - **Official Release Gate & Required 10 Release Assets:**
-  - `Publish Official GitHub Release` executes **only after** `flutter analyze`, `flutter test`, strict keystore & SHA-256 verification, `apksigner` certificate match, binary isolation + Ed25519 trust-root audit, and `Smoke-test APKs on Android Emulator` (including same-cert in-place reinstall) ALL pass, attaching all 10 artifacts:
-    `QAT_LEDGER_CUSTOMER_RELEASE.apk`, `QAT_LEDGER_DEVELOPER_RELEASE.apk`, `QAT_LEDGER_FLUTTER_SOURCE.zip`, `SHA256SUMS.txt`, `BUILD_SIGNING_STATUS.txt`, `customer-signature.txt`, `developer-signature.txt`, `binary-isolation-audit.txt`, `LICENSE_TRUST_AUDIT.txt`, and `FINAL_BUILD_AND_TEST_REPORT.txt`.
-- **When Official Secrets Are Missing (`qa_debug_only`):**
-  - CI halts publishing any Production GitHub Release (`Publish Official GitHub Release` is skipped).
-  - Builds are strictly labeled `QAT_LEDGER_CUSTOMER_QA_DEBUG_ONLY.apk` and `QAT_LEDGER_DEVELOPER_QA_DEBUG_ONLY.apk` for QA verification only.
+  - Publication requires `flutter analyze`, `flutter test`, strict keystore and fingerprint verification, matching `apksigner` certificates, binary isolation and Ed25519 trust-root audits, plus emulator smoke test and same-cert reinstall. Only these 10 audited assets are staged for the separate publisher: `QAT_LEDGER_CUSTOMER_RELEASE.apk`, `QAT_LEDGER_DEVELOPER_RELEASE.apk`, `QAT_LEDGER_FLUTTER_SOURCE.zip`, `SHA256SUMS.txt`, `BUILD_SIGNING_STATUS.txt`, `customer-signature.txt`, `developer-signature.txt`, `binary-isolation-audit.txt`, `LICENSE_TRUST_AUDIT.txt`, and `FINAL_BUILD_AND_TEST_REPORT.txt`.
+- **QA-only mode:** Pushes, PRs, and non-production dispatches use QA signing and an ephemeral QA public trust root, do not access production secrets, and cannot publish a production release. QA artifacts remain explicitly labeled `QAT_LEDGER_CUSTOMER_QA_DEBUG_ONLY.apk` and `QAT_LEDGER_DEVELOPER_QA_DEBUG_ONLY.apk`.
 
-### Encoding Your Original Keystore for GitHub Secrets
+### Owner-only preparation of the original signing identity
+Run these checks only on the owner's trusted machine, after locating the original keystore and confirming the correct alias. Do not paste terminal output containing key material or passwords into chat, CI, issues, or logs. The certificate fingerprint is public; independently compare it with a trusted old record or original signed APK before putting it into `RELEASE_KEYSTORE_SHA256`.
 ```bash
-# Base64-encode the original keystore (single line, no wrapping)
-base64 -w 0 my-upload-key.jks
+# Inspect the certificate SHA-256 fingerprint; keytool prompts for the password.
+keytool -list -v -keystore /secure/path/original-release.jks -alias "$KEY_ALIAS" | grep SHA256
 
-# Inspect the SHA-256 certificate fingerprint (for RELEASE_KEYSTORE_SHA256)
-keytool -list -v -keystore my-upload-key.jks -alias upload | grep SHA256
+# Base64-encode locally for the protected GitHub production Environment secret only.
+base64 -w 0 /secure/path/original-release.jks
 ```
+Store the encoded keystore, store password, alias, key password, independently verified fingerprint, and public-only `QAT_LICENSE_PUBLIC_KEYS` as secrets on the `production` Environment **after** adding required reviewers and restricting that Environment to `main`. Never configure the Developer private Ed25519 seed as a GitHub secret.
 
 ---
 
