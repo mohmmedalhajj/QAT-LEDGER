@@ -1,6 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride, TargetPlatform;
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:qat_ledger/core/money.dart';
@@ -25,6 +28,87 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
+
+  test('Android Developer key storage fails closed when AndroidKeyStore is unavailable', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final keyManager = DeveloperKeyManager(prefs);
+    final previousPlatformOverride = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await expectLater(
+        keyManager.getOrGenerateSigningKeyPair(),
+        throwsA(isA<StateError>()),
+      );
+      expect(
+        prefs.getKeys().where((key) => key.contains('fallback_seed')),
+        isEmpty,
+      );
+      expect(await keyManager.hasSigningKey(), isFalse);
+    } finally {
+      debugDefaultTargetPlatformOverride = previousPlatformOverride;
+    }
+  });
+
+  test('Developer refuses to replace an existing key when it cannot be unsealed', () async {
+    SharedPreferences.setMockInitialValues({
+      'qat_dev_ed25519_sealed_seed_v2': 'opaque-sealed-fixture',
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final keyManager = DeveloperKeyManager(prefs);
+    final previousPlatformOverride = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await expectLater(
+        keyManager.getOrGenerateSigningKeyPair(),
+        throwsA(isA<StateError>()),
+      );
+      expect(
+        prefs.getString('qat_dev_ed25519_sealed_seed_v2'),
+        'opaque-sealed-fixture',
+      );
+      expect(
+        prefs.getKeys().where((key) => key.contains('fallback_seed')),
+        isEmpty,
+      );
+    } finally {
+      debugDefaultTargetPlatformOverride = previousPlatformOverride;
+    }
+  });
+
+  test('Android migrates a legacy Developer key into AndroidKeyStore before signing', () async {
+    final seedB64 = base64.encode(List<int>.generate(32, (index) => index + 1));
+    SharedPreferences.setMockInitialValues({
+      'qat_dev_ed25519_fallback_seed_v2': seedB64,
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final channel = const MethodChannel('com.qatledger.app/platform');
+    String? sealedPayload;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'keystoreSeal') {
+        sealedPayload = 'test-sealed-payload';
+        return sealedPayload;
+      }
+      if (call.method == 'keystoreUnseal') return seedB64;
+      return null;
+    });
+    final previousPlatformOverride = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      final keyManager = DeveloperKeyManager(prefs);
+      final info = await keyManager.getPublicKeyInfo();
+      expect(info, isNotNull);
+      expect(info!.hardwareSealed, isTrue);
+      expect(sealedPayload, isNotNull);
+      expect(prefs.getString('qat_dev_ed25519_fallback_seed_v2'), isNull);
+      expect(prefs.getString('qat_dev_ed25519_sealed_seed_v2'), sealedPayload);
+    } finally {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+      debugDefaultTargetPlatformOverride = previousPlatformOverride;
+    }
+  });
 
   test('Developer signs license -> Customer verifies with public key only; expired license never destroys data', () async {
     final tempDir = await Directory.systemTemp.createTemp('qat_dev_e2e_');

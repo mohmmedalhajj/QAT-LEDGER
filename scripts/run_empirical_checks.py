@@ -30,8 +30,8 @@ def extract_schema_statements():
         text = f.read()
     create_sqls = re.findall(r"'''(.*?)'''", text, flags=re.DOTALL)
     idx_sqls = re.findall(r"'(CREATE INDEX IF NOT EXISTS [^']+)'", text)
-    assert len(create_sqls) == 22, f"Expected 22 CREATE TABLE blocks, got {len(create_sqls)}"
-    assert len(idx_sqls) == 13, f"Expected 13 CREATE INDEX blocks, got {len(idx_sqls)}"
+    assert len(create_sqls) == 24, f"Expected 24 CREATE TABLE blocks, got {len(create_sqls)}"
+    assert len(idx_sqls) == 15, f"Expected 15 CREATE INDEX blocks, got {len(idx_sqls)}"
     assert "CREATE TABLE IF NOT EXISTS inventory_receivers" in text
     return create_sqls, idx_sqls
 
@@ -85,7 +85,7 @@ def test_sqlite_schema_and_room_migration():
         now_ms = 1760000000000
         for row in src.execute("SELECT id, name, defaultBuyPrice, defaultSellPrice, notes, isHidden FROM qat_types"):
             dst.execute(
-                "INSERT INTO qat_types VALUES (?, ?, ?, ?, 'YER', ?, ?, ?)",
+                "INSERT INTO qat_types VALUES (?, ?, ?, ?, 'YER', ?, ?, 0, ?)",
                 (row[0], row[1], round(row[2] * 100), round(row[3] * 100), row[4], row[5], now_ms),
             )
         for row in src.execute("SELECT id, name, phone, address, notes FROM customers"):
@@ -147,7 +147,7 @@ def test_sqlite_schema_and_room_migration():
 
         src.close()
         dst.close()
-    print("[PASS] SQLite v4 DDL (22 tables, 13 indices) + Room v18 migration + FK & currency separation verified")
+    print("[PASS] SQLite v5 DDL (24 tables, 15 indices) + Room v18 migration + FK & currency separation verified")
 
 
 def test_ed25519_canonical_compatibility():

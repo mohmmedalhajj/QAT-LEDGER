@@ -9,14 +9,25 @@ import 'developer_key_manager.dart';
 
 class FlutterDeveloperBridge extends DeveloperBridge {
   DeveloperKeyManager? _keyManager;
+  String? _keyUnavailableReason;
 
   @override
   bool get isReady => _keyManager != null;
 
   @override
   Future<void> initialize(SharedPreferences prefs) async {
-    _keyManager = DeveloperKeyManager(prefs);
-    await _keyManager!.getOrGenerateSigningKeyPair();
+    final manager = DeveloperKeyManager(prefs);
+    try {
+      await manager.getOrGenerateSigningKeyPair();
+      _keyManager = manager;
+      _keyUnavailableReason = null;
+    } catch (_) {
+      // Keep the Developer app's accounting database usable even if signing storage fails.
+      // License issuance remains unavailable; the key manager itself fails closed.
+      _keyManager = null;
+      _keyUnavailableReason =
+          'تعذر فتح مفتاح التوقيع المحمي. لم يتم إنشاء مفتاح بديل، ويمكنك إعادة المحاولة بعد استعادة AndroidKeyStore أو ملف النسخة المشفرة.';
+    }
   }
 
   @override
@@ -32,8 +43,16 @@ class FlutterDeveloperBridge extends DeveloperBridge {
   Widget buildConsoleScreen({required VoidCallback onKeysUpdated}) {
     final mgr = _keyManager;
     if (mgr == null) {
-      return const Scaffold(
-        body: Center(child: Text('وحدة تحكم المطور غير مهيأة بعد')),
+      return Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              _keyUnavailableReason ?? 'وحدة تحكم المطور غير مهيأة بعد',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
       );
     }
     return DeveloperConsoleSheet(

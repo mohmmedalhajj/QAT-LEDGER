@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/platform_bridge.dart';
@@ -238,13 +239,33 @@ class DeveloperKeyManager {
     final sealed = _prefs.getString(_prefSealedSeed);
     if (sealed != null && sealed.isNotEmpty) {
       final unsealedB64 = await PlatformBridge.instance.keystoreUnseal(sealed);
-      if (unsealedB64 != null && unsealedB64.isNotEmpty) {
-        final seed = base64.decode(unsealedB64);
-        if (seed.length == 32) return seed;
+      if (unsealedB64 == null || unsealedB64.isEmpty) {
+        throw StateError(
+          'The stored Developer signing key cannot be unsealed; refusing to replace the existing identity.',
+        );
       }
+      final seed = base64.decode(unsealedB64);
+      if (seed.length != 32) {
+        throw StateError(
+          'The stored Developer signing key has an invalid length; refusing to replace the existing identity.',
+        );
+      }
+      return seed;
     }
     final fallback = _prefs.getString(_prefFallbackSeed);
     if (fallback != null && fallback.isNotEmpty) {
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        // Migrate legacy plaintext preference seeds to AndroidKeyStore wrapping before use.
+        // If AndroidKeyStore is unavailable, leave the old value untouched and fail closed.
+        final migrated = await PlatformBridge.instance.keystoreSeal(fallback);
+        if (migrated == null || migrated.isEmpty) {
+          throw StateError(
+            'AndroidKeyStore is unavailable; refusing to use an unsealed Developer signing key.',
+          );
+        }
+        await _prefs.setString(_prefSealedSeed, migrated);
+        await _prefs.remove(_prefFallbackSeed);
+      }
       final seed = base64.decode(fallback);
       if (seed.length == 32) return seed;
     }
@@ -263,7 +284,13 @@ class DeveloperKeyManager {
     if (sealed != null && sealed.isNotEmpty) {
       await _prefs.setString(_prefSealedSeed, sealed);
       await _prefs.remove(_prefFallbackSeed);
+    } else if (defaultTargetPlatform == TargetPlatform.android) {
+      // Android Developer signing keys must never silently fall back to plaintext prefs.
+      throw StateError(
+        'AndroidKeyStore is unavailable; refusing to persist an unsealed Developer signing key.',
+      );
     } else {
+      // Non-Android fallback is for desktop/unit-test environments only.
       await _prefs.setString(_prefFallbackSeed, seedB64);
     }
   }
