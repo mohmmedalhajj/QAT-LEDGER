@@ -4,15 +4,9 @@ import android.content.Context
 import java.io.File
 
 object FlavorPlatformDelegate {
-    fun getDeveloperBootstrapSeedB64(context: Context): String? {
-        return try {
-            context.assets.open("dev_bootstrap_seed.b64").bufferedReader().use {
-                it.readText().trim().ifEmpty { null }
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
+    // Production & QA security policy: NEVER package plaintext Ed25519 private seeds inside APK assets.
+    // Developer signing keys are generated on-device inside AndroidKeyStore AES-GCM or imported via encrypted passphrase bundles.
+    fun getDeveloperBootstrapSeedB64(context: Context): String? = null
 
     fun extraLegacyPrefNames(): List<String> = listOf("qat_ledger_developer_store")
 

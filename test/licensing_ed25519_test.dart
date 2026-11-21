@@ -254,4 +254,114 @@ void main() {
     expect(res.isValid, true);
     expect(res.isProActive, true);
   });
+
+  test('Explicitly distinguishes UNKNOWN_KEY_ID, UNTRUSTED_KEY, and INVALID_SIGNATURE', () async {
+    final ed = Ed25519();
+    final trustedKp = await ed.newKeyPairFromSeed(List<int>.generate(32, (i) => i + 31));
+    final trustedPub = await trustedKp.extractPublicKey();
+    final trustedKid = TrustedPublicKeyRegistry.computeKotlinKeyIdFromRaw(trustedPub.bytes);
+    final trustedCsv = TrustedPublicKeyRegistry.formatKotlinBuildConfigEntry(trustedPub.bytes);
+    final verifier = OfflineLicenseVerifier(
+      registry: TrustedPublicKeyRegistry.fromCsv(trustedCsv),
+      timeGuard: TrustedTimeGuard(),
+    );
+
+    // 1. UNKNOWN_KEY_ID: Kotlin line-v1 payload with empty keyId
+    final missingKidPayload = LicensePayload(
+      format: LicenseCanonical.canonicalPayloadFormat,
+      canonicalFlavor: LicenseCanonicalFlavor.kotlinLineV1,
+      version: 1,
+      licenseId: 'QL-MISSING-KID',
+      product: 'QAT_LEDGER',
+      edition: 'CUSTOMER',
+      installationId: 'QAT-1111-2222-3333',
+      customerName: 'تجربة',
+      businessName: 'وكالة تجربة',
+      packageTier: PackageTier.pro,
+      licenseType: LicenseType.perpetual,
+      planCode: 'PRO_PERPETUAL',
+      features: LicenseFeature.proFeatures.map((f) => f.code).toList(),
+      issuedAtEpochMs: 1700000000000,
+      expiresAtEpochMs: 0,
+      keyIdField: '',
+    );
+    final missingSig = await ed.sign(
+      LicenseCanonical.canonicalBytes(missingKidPayload),
+      keyPair: trustedKp,
+    );
+    final missingKidToken = LicenseCanonical.encodeCompactToken(
+      payload: missingKidPayload,
+      signatureBytes: missingSig.bytes,
+    );
+    final resUnknown = await verifier.verify(
+      rawLicenseInput: missingKidToken,
+      currentInstallationId: 'QAT-1111-2222-3333',
+    );
+    expect(resUnknown.kind, LicenseStateKind.unknownKeyId);
+
+    // 2. UNTRUSTED_KEY: signed by an alien Ed25519 key whose QLK-ID is not in registry
+    final alienKp = await ed.newKeyPairFromSeed(List<int>.generate(32, (i) => i + 77));
+    final alienPub = await alienKp.extractPublicKey();
+    final alienKid = TrustedPublicKeyRegistry.computeKotlinKeyIdFromRaw(alienPub.bytes);
+    final alienPayload = LicensePayload(
+      format: LicenseCanonical.canonicalPayloadFormat,
+      canonicalFlavor: LicenseCanonicalFlavor.kotlinLineV1,
+      version: 1,
+      licenseId: 'QL-ALIEN-KID',
+      product: 'QAT_LEDGER',
+      edition: 'CUSTOMER',
+      installationId: 'QAT-1111-2222-3333',
+      customerName: 'غريب',
+      businessName: 'وكالة غريبة',
+      packageTier: PackageTier.pro,
+      licenseType: LicenseType.perpetual,
+      planCode: 'PRO_PERPETUAL',
+      features: LicenseFeature.proFeatures.map((f) => f.code).toList(),
+      issuedAtEpochMs: 1700000000000,
+      expiresAtEpochMs: 0,
+      keyIdField: alienKid,
+    );
+    final alienSig = await ed.sign(
+      LicenseCanonical.canonicalBytes(alienPayload),
+      keyPair: alienKp,
+    );
+    final alienToken = LicenseCanonical.encodeCompactToken(
+      payload: alienPayload,
+      signatureBytes: alienSig.bytes,
+    );
+    final resUntrusted = await verifier.verify(
+      rawLicenseInput: alienToken,
+      currentInstallationId: 'QAT-1111-2222-3333',
+    );
+    expect(resUntrusted.kind, LicenseStateKind.untrustedKey);
+
+    // 3. INVALID_SIGNATURE: claims trusted keyId, but payload/signature tampered
+    final forgedPayload = LicensePayload(
+      format: LicenseCanonical.canonicalPayloadFormat,
+      canonicalFlavor: LicenseCanonicalFlavor.kotlinLineV1,
+      version: 1,
+      licenseId: 'QL-FORGED-SIG',
+      product: 'QAT_LEDGER',
+      edition: 'CUSTOMER',
+      installationId: 'QAT-1111-2222-3333',
+      customerName: 'معدل',
+      businessName: 'وكالة معدلة',
+      packageTier: PackageTier.pro,
+      licenseType: LicenseType.perpetual,
+      planCode: 'PRO_PERPETUAL',
+      features: LicenseFeature.proFeatures.map((f) => f.code).toList(),
+      issuedAtEpochMs: 1700000000000,
+      expiresAtEpochMs: 0,
+      keyIdField: trustedKid,
+    );
+    final forgedToken = LicenseCanonical.encodeCompactToken(
+      payload: forgedPayload,
+      signatureBytes: List<int>.filled(64, 0x42),
+    );
+    final resInvalid = await verifier.verify(
+      rawLicenseInput: forgedToken,
+      currentInstallationId: 'QAT-1111-2222-3333',
+    );
+    expect(resInvalid.kind, LicenseStateKind.invalidSignature);
+  });
 }

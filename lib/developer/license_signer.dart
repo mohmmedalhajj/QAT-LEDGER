@@ -24,6 +24,18 @@ class SignedLicenseArtifact {
   final String qlicJson;
 }
 
+class SignedRevocationArtifact {
+  const SignedRevocationArtifact({
+    required this.payload,
+    required this.keyId,
+    required this.revocationToken,
+  });
+
+  final RevocationPayload payload;
+  final String keyId;
+  final String revocationToken;
+}
+
 class DeveloperLicenseSigner {
   DeveloperLicenseSigner({
     required this.keyManager,
@@ -527,7 +539,7 @@ class DeveloperLicenseSigner {
     return reissued;
   }
 
-  Future<void> revokeLicense({
+  Future<SignedRevocationArtifact?> revokeLicense({
     required String licenseId,
     required String reason,
   }) async {
@@ -536,6 +548,12 @@ class DeveloperLicenseSigner {
     }
     final db = await devDb.database;
     final now = DateTime.now().millisecondsSinceEpoch;
+    final rows = await db.query(
+      'issued_licenses',
+      where: 'license_id = ?',
+      whereArgs: [licenseId],
+      limit: 1,
+    );
     await db.update(
       'issued_licenses',
       {'status': 'REVOKED', 'updated_at_ms': now},
@@ -550,6 +568,34 @@ class DeveloperLicenseSigner {
       'reason': reason.trim(),
       'created_at_ms': now,
     });
+
+    final kp = await keyManager.loadSigningKeyPair();
+    if (kp == null) return null;
+    final pub = await kp.extractPublicKey();
+    final keyId = TrustedPublicKeyRegistry.computeKotlinKeyIdFromRaw(pub.bytes);
+    final installId = rows.isNotEmpty
+        ? (rows.first['installation_id'] ?? '*').toString()
+        : '*';
+    final revPayload = RevocationPayload(
+      licenseId: licenseId.trim().toUpperCase(),
+      installationId: installId.trim().isEmpty ? '*' : installId.trim().toUpperCase(),
+      keyId: keyId,
+      revokedAtEpochMs: now,
+      reason: reason.trim(),
+    );
+    final sig = await _ed25519.sign(
+      LicenseCanonical.canonicalRevocationBytes(revPayload),
+      keyPair: kp,
+    );
+    final token = LicenseCanonical.encodeRevocationToken(
+      payload: revPayload,
+      signatureBytes: sig.bytes,
+    );
+    return SignedRevocationArtifact(
+      payload: revPayload,
+      keyId: keyId,
+      revocationToken: token,
+    );
   }
 
   Future<SignedLicenseArtifact?> reissueLicense(String licenseId) async {

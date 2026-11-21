@@ -939,9 +939,49 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                       style: FilledButton.styleFrom(backgroundColor: pal.danger),
                       onPressed: () async {
                         if (revokeReasonCtrl.text.trim().isEmpty) return;
-                        await _signer.revokeLicense(licenseId: licId, reason: revokeReasonCtrl.text);
+                        final revArtifact = await _signer.revokeLicense(
+                          licenseId: licId,
+                          reason: revokeReasonCtrl.text,
+                        );
                         await _loadAll();
                         if (ctx.mounted) Navigator.pop(ctx);
+                        if (revArtifact != null && mounted) {
+                          await showDialog<void>(
+                            context: context,
+                            builder: (rCtx) => AlertDialog(
+                              title: const Text('تم إلغاء الترخيص وإصدار إشعار QLR1'),
+                              content: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  const Text(
+                                    'يمكنك نسخ رمز الإلغاء الموقّع (QLR1) ولصقه في شاشة الترخيص على جهاز العميل لتعطيل الترخيص محلياً بدون إنترنت:',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  SelectableText(
+                                    revArtifact.revocationToken,
+                                    textDirection: TextDirection.ltr,
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () {
+                                    unawaited(
+                                      Clipboard.setData(
+                                        ClipboardData(text: revArtifact.revocationToken),
+                                      ),
+                                    );
+                                    Navigator.pop(rCtx);
+                                  },
+                                  child: const Text('نسخ الإشعار وإغلاق'),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
                       },
                       child: const Text('إلغاء الترخيص في السجل'),
                     ),
@@ -1112,41 +1152,80 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: () async {
-                            final confirmed = await showDialog<bool>(
+                            final passCtrl = TextEditingController();
+                            final confirmCtrl = TextEditingController();
+                            final encrypted = await showDialog<String?>(
                               context: context,
                               builder: (ctx) => AlertDialog(
-                                title: const Text('تصدير بذرة المفتاح الخاص'),
-                                content: const Text(
-                                  'تحذير أمني: هذا الرمز يمثل المفتاح الخاص (Ed25519 Private Seed). احتفظ به في مكان سري ولا تشاركه مع أي عميل.',
+                                title: const Text('تصدير نسخة مفتاح مشفّرة (.qkey)'),
+                                content: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Text(
+                                      'سيتم تشفير مفتاح التوقيع بـ PBKDF2-SHA256 + AES-256-GCM ولن يُعرض أو يُنسخ أي مفتاح خام غير مشفّر.',
+                                      style: TextStyle(fontSize: 12),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    TextField(
+                                      controller: passCtrl,
+                                      obscureText: true,
+                                      textDirection: TextDirection.ltr,
+                                      decoration: const InputDecoration(
+                                        labelText: 'كلمة مرور التشفير (10+ أحرف)',
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    TextField(
+                                      controller: confirmCtrl,
+                                      obscureText: true,
+                                      textDirection: TextDirection.ltr,
+                                      decoration: const InputDecoration(
+                                        labelText: 'تأكيد كلمة المرور',
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 actions: [
                                   TextButton(
-                                    onPressed: () => Navigator.pop(ctx, false),
+                                    onPressed: () => Navigator.pop(ctx),
                                     child: const Text('إلغاء'),
                                   ),
                                   FilledButton(
-                                    onPressed: () => Navigator.pop(ctx, true),
-                                    child: const Text('نسخ البذرة السرية'),
+                                    onPressed: () async {
+                                      final messenger = ScaffoldMessenger.of(ctx);
+                                      if (passCtrl.text != confirmCtrl.text) {
+                                        messenger.showSnackBar(
+                                          const SnackBar(content: Text('كلمتا المرور غير متطابقتين')),
+                                        );
+                                        return;
+                                      }
+                                      try {
+                                        final bundle = await widget.keyManager
+                                            .exportEncryptedKeyBundle(passCtrl.text);
+                                        if (ctx.mounted) Navigator.pop(ctx, bundle);
+                                      } catch (e) {
+                                        messenger.showSnackBar(
+                                          SnackBar(content: Text(e.toString())),
+                                        );
+                                      }
+                                    },
+                                    child: const Text('تشفير وتصدير'),
                                   ),
                                 ],
                               ),
                             );
-                            if (confirmed != true) return;
-                            final seedB64 = await widget.keyManager.exportSigningSeedB64();
-                            if (!mounted) return;
-                            if (seedB64 == null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('لا يوجد مفتاح لتصديره')),
-                              );
-                              return;
-                            }
-                            unawaited(Clipboard.setData(ClipboardData(text: seedB64)));
+                            passCtrl.dispose();
+                            confirmCtrl.dispose();
+                            if (encrypted == null || !mounted) return;
+                            unawaited(Clipboard.setData(ClipboardData(text: encrypted)));
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('تم نسخ بذرة المفتاح الخاص بأمان')),
+                              const SnackBar(
+                                content: Text('تم نسخ الحزمة المشفّرة (QAT_LEDGER_ENC_KEY_V1) بأمان'),
+                              ),
                             );
                           },
-                          icon: const Icon(Icons.key_outlined, size: 18),
-                          label: const Text('نسخ المفتاح الخاص'),
+                          icon: const Icon(Icons.enhanced_encryption_outlined, size: 18),
+                          label: const Text('تصدير مشفّر (.qkey)'),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -1154,17 +1233,32 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                         child: OutlinedButton.icon(
                           onPressed: () async {
                             final seedCtrl = TextEditingController();
+                            final passCtrl = TextEditingController();
                             final imported = await showDialog<bool>(
                               context: context,
                               builder: (ctx) => AlertDialog(
-                                title: const Text('استيراد مفتاح توقيع سابق'),
-                                content: TextField(
-                                  controller: seedCtrl,
-                                  textDirection: TextDirection.ltr,
-                                  maxLines: 2,
-                                  decoration: const InputDecoration(
-                                    labelText: 'بذرة Ed25519 (32 بايت Base64 أو Hex)',
-                                  ),
+                                title: const Text('استيراد مفتاح توقيع'),
+                                content: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    TextField(
+                                      controller: seedCtrl,
+                                      textDirection: TextDirection.ltr,
+                                      maxLines: 2,
+                                      decoration: const InputDecoration(
+                                        labelText: 'حزمة مشفّرة QAT_LEDGER_ENC_KEY_V1 أو بذرة قديمة',
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    TextField(
+                                      controller: passCtrl,
+                                      obscureText: true,
+                                      textDirection: TextDirection.ltr,
+                                      decoration: const InputDecoration(
+                                        labelText: 'كلمة مرور فك التشفير (للحزم المشفّرة)',
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 actions: [
                                   TextButton(
@@ -1175,7 +1269,17 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                                     onPressed: () async {
                                       final messenger = ScaffoldMessenger.of(ctx);
                                       try {
-                                        await widget.keyManager.importSigningSeedB64(seedCtrl.text);
+                                        final raw = seedCtrl.text.trim();
+                                        if (raw.startsWith(
+                                          DeveloperKeyManager.encryptedBundlePrefix,
+                                        )) {
+                                          await widget.keyManager.importEncryptedKeyBundle(
+                                            raw,
+                                            passCtrl.text,
+                                          );
+                                        } else {
+                                          await widget.keyManager.importSigningSeedB64(raw);
+                                        }
                                         if (ctx.mounted) Navigator.pop(ctx, true);
                                       } catch (e) {
                                         messenger.showSnackBar(
@@ -1189,6 +1293,7 @@ class _DeveloperConsoleSheetState extends State<DeveloperConsoleSheet>
                               ),
                             );
                             seedCtrl.dispose();
+                            passCtrl.dispose();
                             if (imported == true) {
                               widget.onKeysUpdated();
                               await _loadAll();

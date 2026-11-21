@@ -9,10 +9,15 @@ import 'license_models.dart';
 abstract final class LicenseCanonical {
   static const String canonicalPayloadFormat = 'QAT_LEDGER_CANONICAL_PAYLOAD_V1';
   static const String licenseEnvelopeFormat = 'QAT_LEDGER_LICENSE_V1';
+  static const String revocationFormat = 'QAT_LEDGER_REVOCATION_V1';
   static const String compactPrefix = 'QL1.';
+  static const String revocationPrefix = 'QLR1.';
   static const String algorithmEd25519 = 'Ed25519';
   static final RegExp _ql1Regex = RegExp(
     'QL1\\.[A-Za-z0-9_+/=-]+(?:\\r?\\n[A-Za-z0-9_+/=-]+)*\\.[A-Za-z0-9_+/=-]+(?:\\r?\\n[A-Za-z0-9_+/=-]+)*',
+  );
+  static final RegExp _qlr1Regex = RegExp(
+    'QLR1\\.[A-Za-z0-9_+/=-]+(?:\\r?\\n[A-Za-z0-9_+/=-]+)*\\.[A-Za-z0-9_+/=-]+(?:\\r?\\n[A-Za-z0-9_+/=-]+)*',
   );
 
   static List<String> normalizeFeatures(Iterable<String> features) {
@@ -196,12 +201,16 @@ abstract final class LicenseCanonical {
         throw const FormatException('حقل signature مفقود');
       }
       final parsedPayload = _parsePayloadMap(payloadRaw);
-      final keyHint = root['keyId']?.toString() ??
-          (parsedPayload.keyIdField.isNotEmpty ? parsedPayload.keyIdField : null);
+      final rootKeyHint = (root['keyId'] ?? '').toString().trim();
+      final effectiveHint = rootKeyHint.isNotEmpty
+          ? rootKeyHint
+          : parsedPayload.keyIdField.trim();
       return DecodedLicenseInput(
         payload: parsedPayload,
         signatureBytes: decodeBase64UrlLenient(sigStr),
-        keyIdHint: keyHint,
+        keyIdHint: effectiveHint.isEmpty ? null : effectiveHint,
+        hadExplicitKeyId: effectiveHint.isNotEmpty,
+        isQlicJson: true,
       );
     }
 
@@ -218,14 +227,88 @@ abstract final class LicenseCanonical {
       final sigBytes = decodeBase64UrlLenient(parts[1]);
       final payloadMap = jsonDecode(utf8.decode(payloadBytes)) as Map<String, dynamic>;
       final payload = _parsePayloadMap(payloadMap);
+      final hint = payload.keyIdField.trim();
       return DecodedLicenseInput(
         payload: payload,
         signatureBytes: sigBytes,
-        keyIdHint: payload.keyIdField.isNotEmpty ? payload.keyIdField : null,
+        keyIdHint: hint.isEmpty ? null : hint,
+        hadExplicitKeyId: hint.isNotEmpty,
+        isQlicJson: false,
       );
     }
 
     throw const FormatException('صيغة ترخيص غير معروفة (يقبل QL1. أو ملف .qlic)');
+  }
+
+  static bool isRevocationInput(String rawInput) {
+    final trimmed = rawInput.trim();
+    if (trimmed.isEmpty) return false;
+    return _qlr1Regex.hasMatch(trimmed) ||
+        trimmed.contains('"$revocationFormat"');
+  }
+
+  static Uint8List canonicalRevocationBytes(RevocationPayload p) {
+    String esc(String raw) => encodeBase64UrlNoPad(utf8.encode(raw.trim()));
+    final lines = [
+      revocationFormat,
+      'licenseId=${esc(p.licenseId.toUpperCase())}',
+      'installationId=${esc(p.installationId.toUpperCase())}',
+      'keyId=${esc(p.keyId)}',
+      'revokedAtEpochMs=${p.revokedAtEpochMs}',
+      'reason=${esc(p.reason)}',
+    ];
+    return Uint8List.fromList(utf8.encode(lines.join('\n')));
+  }
+
+  static String encodeRevocationToken({
+    required RevocationPayload payload,
+    required List<int> signatureBytes,
+  }) {
+    final map = <String, Object?>{
+      'format': revocationFormat,
+      'licenseId': payload.licenseId.trim().toUpperCase(),
+      'installationId': payload.installationId.trim().toUpperCase(),
+      'keyId': payload.keyId.trim(),
+      'revokedAtEpochMs': payload.revokedAtEpochMs,
+      'reason': payload.reason.trim(),
+    };
+    final payloadB64 = encodeBase64UrlNoPad(utf8.encode(jsonEncode(map)));
+    final sigB64 = encodeBase64UrlNoPad(signatureBytes);
+    return '$revocationPrefix$payloadB64.$sigB64';
+  }
+
+  static DecodedRevocationInput parseRevocationInput(String rawInput) {
+    final trimmed = rawInput.trim();
+    final match = _qlr1Regex.firstMatch(trimmed);
+    final normalized = (match?.group(0) ?? trimmed).replaceAll(RegExp(r'\s+'), '');
+    if (!normalized.startsWith(revocationPrefix)) {
+      throw const FormatException('صيغة إشعار الإلغاء غير صالحة');
+    }
+    final body = normalized.substring(revocationPrefix.length);
+    final parts = body.split('.');
+    if (parts.length != 2) {
+      throw const FormatException('صيغة إشعار QLR1 غير مكتملة');
+    }
+    final payloadMap =
+        jsonDecode(utf8.decode(decodeBase64UrlLenient(parts[0]))) as Map<String, dynamic>;
+    if (payloadMap['format'] != revocationFormat) {
+      throw FormatException('صيغة إشعار إلغاء غير مدعومة: ${payloadMap['format']}');
+    }
+    final licenseId = (payloadMap['licenseId'] ?? '').toString().trim().toUpperCase();
+    if (licenseId.isEmpty) {
+      throw const FormatException('معرّف الترخيص مفقود في إشعار الإلغاء');
+    }
+    final payload = RevocationPayload(
+      licenseId: licenseId,
+      installationId: (payloadMap['installationId'] ?? '*').toString().trim().toUpperCase(),
+      keyId: (payloadMap['keyId'] ?? '').toString().trim(),
+      revokedAtEpochMs: (payloadMap['revokedAtEpochMs'] as num).toInt(),
+      reason: (payloadMap['reason'] ?? '').toString().trim(),
+    );
+    return DecodedRevocationInput(
+      payload: payload,
+      signatureBytes: decodeBase64UrlLenient(parts[1]),
+    );
   }
 
   static LicensePayload _parsePayloadMap(Map<String, dynamic> map) {
@@ -246,9 +329,6 @@ abstract final class LicenseCanonical {
         throw const FormatException('بيانات حمولة الترخيص غير مكتملة');
       }
       final keyId = (map['keyId'] ?? '').toString().trim();
-      if (keyId.isEmpty) {
-        throw const FormatException('معرّف مفتاح التوقيع keyId مفقود');
-      }
       final installRaw = map['installationId']?.toString().trim().toUpperCase() ?? '';
       final expiresRaw = map['expiresAtEpochMs'];
       final expiresMs = expiresRaw == null ? 0 : (expiresRaw as num).toInt();
@@ -312,9 +392,47 @@ class DecodedLicenseInput {
     required this.payload,
     required this.signatureBytes,
     required this.keyIdHint,
+    this.hadExplicitKeyId = true,
+    this.isQlicJson = false,
   });
 
   final LicensePayload payload;
   final Uint8List signatureBytes;
   final String? keyIdHint;
+  final bool hadExplicitKeyId;
+  final bool isQlicJson;
+}
+
+class RevocationPayload {
+  const RevocationPayload({
+    required this.licenseId,
+    required this.installationId,
+    required this.keyId,
+    required this.revokedAtEpochMs,
+    this.reason = '',
+  });
+
+  final String licenseId;
+  final String installationId;
+  final String keyId;
+  final int revokedAtEpochMs;
+  final String reason;
+
+  bool matchesInstallation(String currentId) {
+    final target = installationId.trim().toUpperCase();
+    return target.isEmpty ||
+        target == '*' ||
+        target == 'ANY' ||
+        target == currentId.trim().toUpperCase();
+  }
+}
+
+class DecodedRevocationInput {
+  const DecodedRevocationInput({
+    required this.payload,
+    required this.signatureBytes,
+  });
+
+  final RevocationPayload payload;
+  final Uint8List signatureBytes;
 }

@@ -13,6 +13,7 @@ import '../data/models.dart';
 import '../data/qat_repository.dart';
 import '../data/room_migrator.dart';
 import '../licensing/developer_bridge.dart';
+import '../licensing/license_canonical.dart';
 import '../licensing/license_models.dart';
 import '../licensing/license_verifier.dart';
 import '../licensing/local_license_store.dart';
@@ -773,11 +774,28 @@ class AppController extends ChangeNotifier {
       registry: registry,
       timeGuard: TrustedTimeGuard(prefs: _prefs),
     );
+    if (LicenseCanonical.isRevocationInput(rawInput)) {
+      final rev = await verifier.verifyRevocationToken(
+        rawInput: rawInput,
+        currentInstallationId: installId,
+        allowUntrustedLocalKeyInDev: _editionConfig.isDeveloper,
+        extraDevRegistry: devReg,
+      );
+      if (rev.isAuthenticRevocation && rev.payload != null) {
+        await _licenseStore!.addRevokedLicenseId(rev.payload!.licenseId);
+        await refreshLicense();
+      }
+      return LicenseVerificationResult(
+        kind: rev.kind,
+        reason: rev.reason,
+      );
+    }
     final candidateResult = await verifier.verify(
       rawLicenseInput: rawInput,
       currentInstallationId: installId,
       allowUntrustedLocalKeyInDev: _editionConfig.isDeveloper,
       extraDevRegistry: devReg,
+      revokedLicenseIds: _licenseStore!.getRevokedLicenseIds(),
     );
     if (!candidateResult.isValid) {
       return candidateResult;

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +13,7 @@ import 'package:qat_ledger/data/room_migrator.dart';
 import 'package:qat_ledger/developer/developer_database.dart';
 import 'package:qat_ledger/developer/developer_key_manager.dart';
 import 'package:qat_ledger/developer/license_signer.dart';
+import 'package:qat_ledger/licensing/license_canonical.dart';
 import 'package:qat_ledger/licensing/license_models.dart';
 import 'package:qat_ledger/licensing/license_verifier.dart';
 import 'package:qat_ledger/licensing/local_license_store.dart';
@@ -439,6 +441,207 @@ void main() {
       final afterClear = await restartedStore.loadAndVerify(editionConfig: editionCfg);
       expect(afterClear.kind, LicenseStateKind.unlicensed);
 
+      await (await devDb.database).close();
+    } finally {
+      await tempDir.delete(recursive: true);
+    }
+  });
+
+  test('Passphrase-encrypted .qkey export/import protects private key and survives device replacement', () async {
+    SharedPreferences.setMockInitialValues({});
+    final devPrefsA = await SharedPreferences.getInstance();
+    final mgrA = DeveloperKeyManager(devPrefsA);
+    await mgrA.getOrGenerateSigningKeyPair();
+    final originalInfo = (await mgrA.getPublicKeyInfo())!;
+
+    // Weak passphrase rejected
+    await expectLater(
+      mgrA.exportEncryptedKeyBundle('short'),
+      throwsFormatException,
+    );
+
+    // Strong passphrase exports encrypted PBKDF2 + AES-GCM bundle
+    final bundle = await mgrA.exportEncryptedKeyBundle('QatLedger#2026Strong!');
+    expect(bundle.startsWith('${DeveloperKeyManager.encryptedBundlePrefix}.'), true);
+    expect(bundle.contains(originalInfo.kotlinKeyId), false);
+
+    // Simulate new Developer device B
+    await mgrA.wipeSigningKey();
+    expect(await mgrA.hasSigningKey(), false);
+
+    // Wrong passphrase fails decryption cleanly
+    await expectLater(
+      mgrA.importEncryptedKeyBundle(bundle, 'WrongPassphrase123!'),
+      throwsException,
+    );
+
+    // Correct passphrase restores identical Ed25519 keyId
+    final restoredInfo = await mgrA.importEncryptedKeyBundle(
+      bundle,
+      'QatLedger#2026Strong!',
+    );
+    expect(restoredInfo.kotlinKeyId, originalInfo.kotlinKeyId);
+    expect(restoredInfo.kotlinConfigLine, originalInfo.kotlinConfigLine);
+  });
+
+  test('Cross-device offline transfer + QLR1 signed revocation + data preservation E2E', () async {
+    final tempDir = await Directory.systemTemp.createTemp('qat_cross_device_');
+    try {
+      // DEVICE 1 (Developer): independent prefs & registry DB
+      SharedPreferences.setMockInitialValues({});
+      final devPrefs = await SharedPreferences.getInstance();
+      final devDb = DeveloperDatabaseService(
+        factory: databaseFactoryFfi,
+        customPath: p.join(tempDir.path, 'dev_device.db'),
+      );
+      final devMgr = DeveloperKeyManager(devPrefs);
+      await devMgr.getOrGenerateSigningKeyPair();
+      final devPubInfo = (await devMgr.getPublicKeyInfo())!;
+      final devSigner = DeveloperLicenseSigner(keyManager: devMgr, devDb: devDb);
+
+      // DEVICE 2 (Customer): independent DB & installation ID (receives ONLY public key at build time)
+      const custDeviceInstallId = 'QAT-7F2B-9C4D-1E8A';
+      const wrongDeviceInstallId = 'QAT-0000-1111-2222';
+      final custConfig = EditionConfig(
+        edition: 'customer',
+        publicKeysCsv: devPubInfo.kotlinConfigLine,
+        applicationId: 'com.aistudio.tofanqat.nxzwmb',
+        versionName: '2.0.0',
+        versionCode: 200,
+      );
+      final custDb = DatabaseService(
+        factory: databaseFactoryFfi,
+        customPath: p.join(tempDir.path, 'customer_device.db'),
+      );
+      final custRepo = QatRepository(custDb);
+      final cid = await custRepo.upsertCustomer(name: 'تاجر محلي');
+      await custRepo.makeSale(
+        customerId: cid,
+        customerName: 'تاجر محلي',
+        items: const [
+          NewSaleItemInput(
+            qatTypeName: 'همداني',
+            qtyMilli: 2000,
+            unit: 'ربطة',
+            unitPriceMinor: 500000,
+            buyPriceMinor: 350000,
+          ),
+        ],
+        currency: CurrencyCode.yer,
+        paymentType: PaymentType.credit,
+      );
+
+      // Developer issues license bound strictly to Device 2's installation ID
+      final issued = await devSigner.issueOfficialLicense(
+        agencyName: 'وكالة الشمال',
+        ownerName: 'فيصل',
+        packageTier: PackageTier.pro,
+        licenseType: LicenseType.subscription,
+        durationDays: 30,
+        installationId: custDeviceInstallId,
+        requestedPaidConfirmed: true,
+      );
+
+      // Transfer token to a DIFFERENT Customer device -> rejected as deviceMismatch
+      final verifierWrong = OfflineLicenseVerifier(
+        registry: TrustedPublicKeyRegistry.fromCsv(custConfig.publicKeysCsv),
+        timeGuard: TrustedTimeGuard(),
+      );
+      final wrongRes = await verifierWrong.verify(
+        rawLicenseInput: issued.compactToken,
+        currentInstallationId: wrongDeviceInstallId,
+      );
+      expect(wrongRes.kind, LicenseStateKind.deviceMismatch);
+
+      // Transfer token to target Customer Device 2 offline -> activates PRO
+      SharedPreferences.setMockInitialValues({'qat_install_id_v2': custDeviceInstallId});
+      final custPrefs = await SharedPreferences.getInstance();
+      final custStore = LocalLicenseStore(custPrefs);
+      await custStore.saveRawLicense(issued.compactToken);
+      final active = await custStore.loadAndVerify(editionConfig: custConfig);
+      expect(active.isPro, true);
+      expect(active.hasFeature(LicenseFeature.reports), true);
+
+      // Tampering a single character in payload -> rejected as invalidSignature
+      final dotParts = issued.compactToken.substring(4).split('.');
+      final rawMap = jsonDecode(
+        utf8.decode(LicenseCanonical.decodeBase64UrlLenient(dotParts[0])),
+      ) as Map<String, dynamic>;
+      rawMap['agencyName'] = 'وكالة مزورة';
+      final tamperedPayloadB64 = LicenseCanonical.encodeBase64UrlNoPad(
+        utf8.encode(jsonEncode(rawMap)),
+      );
+      final tamperedToken = 'QL1.$tamperedPayloadB64.${dotParts[1]}';
+      final tamperedCheck = await OfflineLicenseVerifier(
+        registry: TrustedPublicKeyRegistry.fromCsv(custConfig.publicKeysCsv),
+        timeGuard: TrustedTimeGuard(),
+      ).verify(
+        rawLicenseInput: tamperedToken,
+        currentInstallationId: custDeviceInstallId,
+      );
+      expect(tamperedCheck.kind, LicenseStateKind.invalidSignature);
+
+      // Developer revokes license -> emits QLR1 signed revocation notice
+      final revNotice = await devSigner.revokeLicense(
+        licenseId: issued.payload.licenseId,
+        reason: 'إلغاء بطلب العميل للاستبدال',
+      );
+      expect(revNotice, isNotNull);
+      expect(revNotice!.revocationToken.startsWith('QLR1.'), true);
+
+      // Forged revocation token from untrusted key must be rejected
+      final alienRevPayload = RevocationPayload(
+        licenseId: issued.payload.licenseId,
+        installationId: custDeviceInstallId,
+        keyId: 'QLK-DEADBEEF',
+        revokedAtEpochMs: DateTime.now().millisecondsSinceEpoch,
+        reason: 'fake',
+      );
+      final forgedRevToken = LicenseCanonical.encodeRevocationToken(
+        payload: alienRevPayload,
+        signatureBytes: List<int>.filled(64, 1),
+      );
+      final forgedRevCheck = await OfflineLicenseVerifier(
+        registry: TrustedPublicKeyRegistry.fromCsv(custConfig.publicKeysCsv),
+        timeGuard: TrustedTimeGuard(),
+      ).verifyRevocationToken(
+        rawInput: forgedRevToken,
+        currentInstallationId: custDeviceInstallId,
+      );
+      expect(forgedRevCheck.isAuthenticRevocation, false);
+      expect(forgedRevCheck.kind, LicenseStateKind.untrustedKey);
+
+      // Authentic QLR1 revocation token accepted -> downgrades Customer to BASIC & preserves data
+      final authRevCheck = await OfflineLicenseVerifier(
+        registry: TrustedPublicKeyRegistry.fromCsv(custConfig.publicKeysCsv),
+        timeGuard: TrustedTimeGuard(),
+      ).verifyRevocationToken(
+        rawInput: revNotice.revocationToken,
+        currentInstallationId: custDeviceInstallId,
+      );
+      expect(authRevCheck.isAuthenticRevocation, true);
+      await custStore.addRevokedLicenseId(authRevCheck.payload!.licenseId);
+
+      final afterRevoke = await custStore.loadAndVerify(editionConfig: custConfig);
+      expect(afterRevoke.kind, LicenseStateKind.revoked);
+      expect(afterRevoke.isPro, false);
+
+      // Renewal issues a fresh licenseId that activates cleanly again on Customer Device 2
+      final renewed = await devSigner.renewSubscription(
+        previousLicenseId: issued.payload.licenseId,
+        additionalDays: 90,
+      );
+      expect(renewed, isNotNull);
+      await custStore.saveRawLicense(renewed!.compactToken);
+      final afterRenew = await custStore.loadAndVerify(editionConfig: custConfig);
+      expect(afterRenew.isPro, true);
+      expect(afterRenew.remainingDays, greaterThanOrEqualTo(89));
+
+      // Verify Customer ledger data survived every license state transition untouched
+      final customers = await custRepo.getCustomers();
+      expect(customers.single.balanceFor(CurrencyCode.yer), 1000000);
+
+      await custDb.close();
       await (await devDb.database).close();
     } finally {
       await tempDir.delete(recursive: true);

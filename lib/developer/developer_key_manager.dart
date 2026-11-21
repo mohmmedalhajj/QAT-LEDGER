@@ -38,9 +38,16 @@ class DeveloperKeyManager {
 
   static const String _prefSealedSeed = 'qat_dev_ed25519_sealed_seed_v2';
   static const String _prefFallbackSeed = 'qat_dev_ed25519_fallback_seed_v2';
+  static const String encryptedBundlePrefix = 'QAT_LEDGER_ENC_KEY_V1';
 
   final SharedPreferences _prefs;
   final Ed25519 _ed25519 = Ed25519();
+  final AesGcm _aesGcm = AesGcm.with256bits();
+  final Pbkdf2 _pbkdf2 = Pbkdf2(
+    macAlgorithm: Hmac.sha256(),
+    iterations: 200000,
+    bits: 256,
+  );
 
   Future<bool> hasSigningKey() async {
     return (_prefs.getString(_prefSealedSeed)?.isNotEmpty ?? false) ||
@@ -142,6 +149,89 @@ class DeveloperKeyManager {
       throw StateError('تعذر استخراج معلومات المفتاح العام بعد الاستيراد');
     }
     return info;
+  }
+
+  /// Exports the 32-byte Ed25519 seed encrypted under a user passphrase via PBKDF2-HMAC-SHA256 + AES-256-GCM.
+  /// Format: `QAT_LEDGER_ENC_KEY_V1.<saltB64Url>.<nonceB64Url>.<cipherAndMacB64Url>`
+  Future<String> exportEncryptedKeyBundle(String passphrase) async {
+    final cleanPass = passphrase.trim();
+    if (cleanPass.length < 10) {
+      throw const FormatException('كلمة مرور تشفير المفتاح يجب أن لا تقل عن 10 أحرف.');
+    }
+    final seed = await _loadSeedBytes();
+    if (seed == null || seed.length != 32) {
+      throw StateError('لا يوجد مفتاح توقيع لتصديره.');
+    }
+    final rnd = Random.secure();
+    final salt = List<int>.generate(16, (_) => rnd.nextInt(256));
+    final secretKey = await _pbkdf2.deriveKeyFromPassword(
+      password: cleanPass,
+      nonce: salt,
+    );
+    final nonce = _aesGcm.newNonce();
+    final box = await _aesGcm.encrypt(
+      seed,
+      secretKey: secretKey,
+      nonce: nonce,
+      aad: utf8.encode(encryptedBundlePrefix),
+    );
+    final cipherAndMac = [...box.cipherText, ...box.mac.bytes];
+    String b64u(List<int> b) => base64Url.encode(b).replaceAll('=', '');
+    return '$encryptedBundlePrefix.${b64u(salt)}.${b64u(nonce)}.${b64u(cipherAndMac)}';
+  }
+
+  /// Imports a passphrase-encrypted `.qkey` bundle and immediately seals it inside AndroidKeyStore AES-GCM.
+  Future<DeveloperKeyInfo> importEncryptedKeyBundle(
+    String bundleText,
+    String passphrase,
+  ) async {
+    final cleanPass = passphrase.trim();
+    if (cleanPass.isEmpty) {
+      throw const FormatException('أدخل كلمة مرور فك التشفير.');
+    }
+    final parts = bundleText.trim().split('.');
+    if (parts.length != 4 || parts[0] != encryptedBundlePrefix) {
+      throw const FormatException('صيغة حزمة المفتاح المشفرة غير صالحة.');
+    }
+    List<int> dec(String raw) {
+      var norm = raw.replaceAll('+', '-').replaceAll('/', '_');
+      final rem = norm.length % 4;
+      if (rem == 2) norm += '==';
+      if (rem == 3) norm += '=';
+      return base64Url.decode(norm);
+    }
+
+    final salt = dec(parts[1]);
+    final nonce = dec(parts[2]);
+    final combined = dec(parts[3]);
+    if (combined.length <= 16) {
+      throw const FormatException('بيانات التشفير ناقصة أو تالفة.');
+    }
+    final cipherText = combined.sublist(0, combined.length - 16);
+    final macBytes = combined.sublist(combined.length - 16);
+    final secretKey = await _pbkdf2.deriveKeyFromPassword(
+      password: cleanPass,
+      nonce: salt,
+    );
+    final plainSeed = await _aesGcm.decrypt(
+      SecretBox(cipherText, nonce: nonce, mac: Mac(macBytes)),
+      secretKey: secretKey,
+      aad: utf8.encode(encryptedBundlePrefix),
+    );
+    if (plainSeed.length != 32) {
+      throw const FormatException('طول المفتاح المفكوك غير صحيح.');
+    }
+    await _persistSeed(plainSeed);
+    final info = await getPublicKeyInfo();
+    if (info == null) {
+      throw StateError('تعذر استخراج معلومات المفتاح العام بعد الاستيراد.');
+    }
+    return info;
+  }
+
+  Future<void> wipeSigningKey() async {
+    await _prefs.remove(_prefSealedSeed);
+    await _prefs.remove(_prefFallbackSeed);
   }
 
   Future<List<int>?> _loadSeedBytes() async {

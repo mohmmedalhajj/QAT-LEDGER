@@ -10,55 +10,66 @@
 
 ## 2. Flavors & Edition Separation (`customer` vs `developer`)
 
-| Flavor | Application ID | Entrypoint | Purpose | Developer Signing / Console (`780mohmmed`) |
+| Flavor | Application ID | Entrypoint | Purpose | Private Keys in APK |
 |---|---|---|---|---|
-| `customer` | `com.aistudio.tofanqat.nxzwmb` | `lib/main_customer.dart` | End-user production app preserving in-place upgrade & Room v18 migration (`tofan_al_aqsa_qat_db`) | **Excluded from binary** (`APP_EDITION=customer`; `"780mohmmed"` gate opens local Agency Name & Section Permissions only; zero `lib/developer/**` imports & no `dev_bootstrap_seed.b64`) |
-| `developer` | `com.aistudio.tofanqat.nxzwmb.dev` | `lib/main_developer.dart` | Internal vendor/developer issuance build | **Enabled** (`APP_EDITION=developer`; exposes Ed25519 Key Manager & License Signer with paired bootstrap seed) |
+| `customer` | `com.aistudio.tofanqat.nxzwmb` | `lib/main_customer.dart` | End-user production app preserving in-place upgrade & Room v18 migration (`tofan_al_aqsa_qat_db`) | **Zero** (`APP_EDITION=customer`; zero `lib/developer/**` imports; only public keys via `QAT_LICENSE_PUBLIC_KEYS`) |
+| `developer` | `com.aistudio.tofanqat.nxzwmb.dev` | `lib/main_developer.dart` | Internal vendor/developer issuance build | **Zero extractable private keys in APK/CI** (Ed25519 keys generated/sealed on device inside `AndroidKeyStore` AES-256-GCM or imported via encrypted `.qkey`) |
 
 ---
 
-## 3. Ed25519 Key Continuity, Rotation & Security Trade-Offs
+## 3. Ed25519 Security Architecture, Key Rotation & Signing Boundaries
 
-### Security Model & Trade-off Disclosure
-- **Customer APK** contains **ONLY** trusted Ed25519 public keys (`QAT_LICENSE_PUBLIC_KEYS` in `BuildConfig` + `--dart-define`). It never embeds any private key, signing seed, developer database schema, or license-issuance UI.
-- **Developer APK** is designed for offline license issuance (`com.aistudio.tofanqat.nxzwmb.dev`). On first launch, `DeveloperKeyManager` imports the build-time `assets/dev_bootstrap_seed.b64` and seals the 32-byte seed into Android Keystore (`AES-256-GCM`) inside private app preferences (`SharedPreferences`).
-- **Honest Security Trade-off:** Because offline license issuance does not call an online backend, bundling `dev_bootstrap_seed.b64` inside the Developer APK means anyone who acquires and reverse-engineers the **Developer APK** could extract that bootstrap seed. Therefore:
-  1. **NEVER distribute the Developer APK publicly.** Only install it on the owner's/vendor's controlled device(s).
-  2. Use `QAT_DEV_ED25519_SEED_B64` stored strictly in **GitHub Repository Secrets** (never in Git) and masked during CI builds.
-  3. On a dedicated hardware-only workflow, you can omit `QAT_DEV_ED25519_SEED_B64` from CI, generate/hold the seed solely in an air-gapped Developer device/vault, and embed only the resulting public key line (`QLK-XXXXXXXX:<base64UrlRaw32>`) in `QAT_LICENSE_PUBLIC_KEYS`.
+### Zero-Private-Key-in-APK Policy
+- **Customer APK** contains **ONLY** trusted Ed25519 public keys (`QAT_LICENSE_PUBLIC_KEYS` via `BuildConfig` + `--dart-define`). It never embeds any private key, developer database schema, or license-issuance UI.
+- **Developer APK** NEVER bundles any plaintext private seed (`dev_bootstrap_seed.b64` is banned from APKs, Git, and CI archives). Instead:
+  1. **On-Device Hardware-Sealed Keys:** On first launch on the owner's Developer phone, `DeveloperKeyManager` generates an Ed25519 keypair and seals the seed via `AndroidKeyStore` (`AES-256-GCM`), or imports an encrypted `.qkey` vault bundle (`QAT_LEDGER_ENC_KEY_V1`, protected by `PBKDF2-HMAC-SHA256` 200,000 iterations + `AES-256-GCM` with passphrase >= 10 chars).
+  2. **Public-Only CI Secret (`QAT_LICENSE_PUBLIC_KEYS`):** The developer copies ONLY the public key line (`QLK-XXXXXXXX:<base64UrlRaw32>`) into GitHub Secrets (`QAT_LICENSE_PUBLIC_KEYS`). Neither CI nor any APK ever holds a production private signing key.
+  3. **Legacy Format Compatibility & Signed Revocation:** Existing `QL1.` compact tokens and `.qlic` JSON envelopes (both Kotlin `licensing-core` line-v1 and Flutter v2 JSON) remain 100% valid; offline revocation uses additive signed `QLR1.` revocation notices (`QAT_LEDGER_REVOCATION_V1`) without invalidating legacy licenses.
+
+### Production Signing Service Design vs Device-Local Keystore (Security Trade-off Disclosure)
+- **Recommended Enterprise Option — Remote Signing Service (Cloud KMS / HSM):**
+  - **Architecture:** Place the Ed25519 private key inside a non-exportable HSM / Cloud KMS (`Google Cloud KMS` or dedicated backend API with mTLS + hardware device attestation / MFA). The Developer app sends only canonical `LicenseCanonical` payload bytes over authenticated TLS; the KMS returns the 64-byte Ed25519 signature, while the Customer app remains 100% offline using the embedded KMS public key (`QAT_LICENSE_PUBLIC_KEYS`).
+  - **Security Boundary:** Even full compromise or reverse-engineering of a stolen Developer phone/APK cannot extract the master private key.
+- **Offline Device-Bound Alternative (Implemented):**
+  - **Architecture:** No backend required; Developer phone seals its Ed25519 key inside `AndroidKeyStore` AES-256-GCM and backs up encrypted `.qkey` bundles offline.
+  - **Security Boundary:** Protects completely against APK extraction and CI leaks (since zero keys reside in the APK or CI). Risk is strictly bounded to physical compromise + OS-level root extraction on the live unlocked Developer phone itself.
 
 ### Key Continuity & Rotation Policy
-- **Why persistent keys matter:** If every build generates an ephemeral Ed25519 key without preserving older public keys, previously issued customer licenses become `UNTRUSTED_KEY` after updating the Customer APK (or vice versa if the Developer app rotates keys without updating Customer's trusted list).
-- **Production rule enforced in CI:** Official production releases (`release_mode=production_release` or when official release keystore secrets are present) **FAIL FAST** unless persistent `QAT_DEV_ED25519_SEED_B64` is configured.
-- **How to rotate Ed25519 keys without breaking existing customers:**
-  1. Generate a new 32-byte Ed25519 seed (`openssl genpkey -algorithm ed25519 -outform DER`), extract its 32-byte seed + `QLK-NEWKEY:<base64UrlRaw32>` public key entry.
-  2. Keep the previous public key entry in GitHub Secret `QAT_LICENSE_PUBLIC_KEYS`:
+- **Why persistent keys matter:** Rotating Ed25519 keys without keeping older public keys in `QAT_LICENSE_PUBLIC_KEYS` causes previously issued customer licenses to fail with `UNTRUSTED_KEY`.
+- **How to rotate without breaking existing customers:**
+  1. Rotate to a new Ed25519 key (`QLK-NEWKEY`) in the Developer Console (or HSM/KMS).
+  2. Append the new public key while preserving the older public key(s) in GitHub Secret `QAT_LICENSE_PUBLIC_KEYS`:
      ```text
      QLK-OLDKEY:<oldBase64UrlRaw32>,QLK-NEWKEY:<newBase64UrlRaw32>
      ```
-  3. Replace `QAT_DEV_ED25519_SEED_B64` with the new seed so newly built Developer APKs sign with `QLK-NEWKEY` while newly built Customer APKs verify **both** `QLK-OLDKEY` (legacy customers) and `QLK-NEWKEY` (new customers).
+  3. Rebuild the Customer APK so existing customers remain active (`QLK-OLDKEY`) and new customers verify against `QLK-NEWKEY`.
 
 ---
 
-## 4. Official Release Signing Enforcement (No Debug Fallback for Production)
+## 4. Official Android APK Signing & Google Play App Signing Audit
 
-From the original Kotlin project (`516e118:app/build.gradle.kts`), the original release build used an external keystore (`my-upload-key.jks`, alias `upload`) that was **never committed to Git**.
+From the original Kotlin repository (`516e118:app/build.gradle.kts` & `516e118:README.md`):
+- The original build referenced `${rootDir}/my-upload-key.jks` (`keyAlias = "upload"`) via `KEYSTORE_PATH` / `STORE_PASSWORD` / `KEY_PASSWORD`, which was **never committed to Git**.
+- `516e118:app/build.gradle.kts` set `dependenciesInfo { includeInApk = false; includeInBundle = true }`, and `516e118:README.md` explicitly referenced Google Play Console upload key reset — indicating **Google Play App Signing** architecture:
+  - **Play App Signing Key (held by Google Play):** Signs final Play-distributed APKs derived from uploaded `.aab` bundles.
+  - **Upload Key (`my-upload-key.jks`, alias `upload`):** Used by the developer/CI to sign `.aab` uploads to Play Console (or direct sideload APKs if distributed directly outside Play).
+  - **If `my-upload-key.jks` is lost:**
+    1. If distributed via **Google Play (Play App Signing enabled)**: Generate a new upload keystore (`keytool -genkeypair ... -alias upload`), export its PEM certificate (`keytool -export -rfc ...`), and follow Google Play Console **Setup → App integrity → Request upload key reset** — **Play preserves the underlying App Signing key so users still update seamlessly**.
+    2. If distributed as **direct sideload APKs outside Play**: A lost keystore cannot produce in-place upgrades over earlier direct installs; installing a new keystore requires uninstalling the older build (backup `.qatbackup` first!) or recovering the original `my-upload-key.jks` from the original AI Studio / developer machine.
 
 ### Strict CI & Gradle Rules
 - **Production Release (`RELEASE_SIGNING_REQUIRED=true` / `release_mode=production_release`):**
   - `android/app/build.gradle.kts` **throws `GradleException` and refuses Debug signing** if `android/key.properties` or the `.jks` keystore file is absent.
   - `.github/workflows/flutter_build.yml` requires **all** of these GitHub Repository Secrets:
-    1. `KEYSTORE_B64` — Base64 encoding of the original upload keystore (`my-upload-key.jks` / `.keystore`)
-    2. `KEYSTORE_PASSWORD` — Store password (`STORE_PASSWORD` in original Kotlin `516e118`)
-    3. `KEY_ALIAS` — Key alias (`upload` in original Kotlin `516e118`)
-    4. `KEY_PASSWORD` — Key password (`KEY_PASSWORD` in original Kotlin `516e118`)
-    5. `RELEASE_KEYSTORE_SHA256` *(strongly recommended)* — Expected SHA-256 certificate digest of the official signing certificate to verify exact match before signing
-    6. `QAT_DEV_ED25519_SEED_B64` — Persistent 32-byte Ed25519 seed (Base64 or 64-hex)
-    7. `QAT_LICENSE_PUBLIC_KEYS` *(recommended for rotation)* — Additional comma-separated historical `QLK-...:...` public keys
+    1. `KEYSTORE_B64` — Base64 encoding of `my-upload-key.jks` (single line)
+    2. `KEYSTORE_PASSWORD` — Keystore password
+    3. `KEY_ALIAS` — Key alias (`upload` in original `516e118`)
+    4. `KEY_PASSWORD` — Private key password
+    5. `QAT_LICENSE_PUBLIC_KEYS` — Trusted Ed25519 **public** key(s) (`QLK-XXXXXXXX:<base64UrlRaw32>`)
+    6. `RELEASE_KEYSTORE_SHA256` *(strongly recommended)* — Expected 64-hex SHA-256 certificate digest verified via `keytool` before signing
 - **When Official Secrets Are Missing (`qa_debug_only`):**
-  - CI halts publishing any Production GitHub Release (`Official GitHub Release` step is skipped).
-  - Builds are strictly labeled `QAT_LEDGER_CUSTOMER_QA_DEBUG_ONLY.apk` and `QAT_LEDGER_DEVELOPER_QA_DEBUG_ONLY.apk` and uploaded solely as workflow artifacts for QA testing and binary/emulator verification.
-  - Android **will reject in-place upgrades** (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) over an earlier production install signed by the original `my-upload-key.jks` if installed from a `QA_DEBUG_ONLY` APK.
+  - CI halts publishing any Production GitHub Release (`Publish Official GitHub Release` is skipped).
+  - Builds are strictly labeled `QAT_LEDGER_CUSTOMER_QA_DEBUG_ONLY.apk` and `QAT_LEDGER_DEVELOPER_QA_DEBUG_ONLY.apk` for QA verification only.
 
 ### Encoding Your Original Keystore for GitHub Secrets
 ```bash
@@ -86,16 +97,12 @@ flutter build apk --release --flavor customer \
   -t lib/main_customer.dart \
   -PRELEASE_SIGNING_REQUIRED=true \
   --dart-define=APP_EDITION=customer \
-  --dart-define=QAT_LICENSE_PUBLIC_KEYS="<QLK_OR_SPKI_BASE64>"
+  --dart-define=QAT_LICENSE_PUBLIC_KEYS="<QLK_ENTRY_CSV>"
 
 # 4. Official Production Developer Release APK (requires android/key.properties + release.jks)
 flutter build apk --release --flavor developer \
   -t lib/main_developer.dart \
   -PRELEASE_SIGNING_REQUIRED=true \
   --dart-define=APP_EDITION=developer \
-  --dart-define=QAT_LICENSE_PUBLIC_KEYS="<QLK_OR_SPKI_BASE64>"
+  --dart-define=QAT_LICENSE_PUBLIC_KEYS="<QLK_ENTRY_CSV>"
 ```
-
-## 6. Real-Device Hardware Notes
-- **Bluetooth ESC/POS (`EscPosService` + `MainActivity.kt` SPP):** Verified statically and via formatter/raster tests; actual paper feed & Bluetooth RFCOMM transmission require a physical paired 58mm/80mm thermal printer.
-- **In-Place Android Upgrade (`tofan_al_aqsa_qat_db` -> Flutter v5):** Schema and full 14-table Room v18 migration verified via `sqflite_common_ffi` tests with `PRAGMA foreign_key_check`; actual Android OS in-place `adb install -r` upgrade over a production `516e118` install can only run once the owner supplies the original `my-upload-key.jks` signing certificate.

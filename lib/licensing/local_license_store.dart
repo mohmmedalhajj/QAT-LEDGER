@@ -15,6 +15,7 @@ class LocalLicenseStore {
 
   static const String _prefInstallId = 'qat_install_id_v2';
   static const String _prefActiveLicense = 'qat_active_license_raw_v2';
+  static const String _prefRevokedLicenseIds = 'qat_revoked_license_ids_v1';
 
   final SharedPreferences _prefs;
 
@@ -68,6 +69,21 @@ class LocalLicenseStore {
     await _prefs.remove(_prefActiveLicense);
   }
 
+  Set<String> getRevokedLicenseIds() {
+    final list = _prefs.getStringList(_prefRevokedLicenseIds) ?? const [];
+    return list
+        .map((e) => e.trim().toUpperCase())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+  }
+
+  Future<void> addRevokedLicenseId(String licenseId) async {
+    final norm = licenseId.trim().toUpperCase();
+    if (norm.isEmpty) return;
+    final next = getRevokedLicenseIds()..add(norm);
+    await _prefs.setStringList(_prefRevokedLicenseIds, next.toList()..sort());
+  }
+
   /// Imports legacy `.qlic` or compact token from native `noBackupFilesDir/active_license.qlic`
   /// or `qat_active_license_store` / `qat_ledger_license_store` if present during first run.
   Future<void> importLegacyLicenseIfUnset() async {
@@ -115,6 +131,7 @@ class LocalLicenseStore {
       currentInstallationId: installId,
       allowUntrustedLocalKeyInDev: editionConfig.isDeveloper,
       extraDevRegistry: extraDevRegistry,
+      revokedLicenseIds: getRevokedLicenseIds(),
     );
   }
 }

@@ -22,6 +22,7 @@ class OfflineLicenseVerifier {
     int? nowEpochMs,
     bool allowUntrustedLocalKeyInDev = false,
     TrustedPublicKeyRegistry? extraDevRegistry,
+    Set<String> revokedLicenseIds = const {},
   }) async {
     final DecodedLicenseInput decoded;
     try {
@@ -38,6 +39,32 @@ class OfflineLicenseVerifier {
       return const LicenseVerificationResult(
         kind: LicenseStateKind.invalidSignature,
         reason: 'طول توقيع Ed25519 غير صحيح.',
+      );
+    }
+
+    final hasEffectiveKeys = !registry.isEmpty ||
+        (allowUntrustedLocalKeyInDev &&
+            extraDevRegistry != null &&
+            !extraDevRegistry.isEmpty);
+
+    if (!hasEffectiveKeys) {
+      return LicenseVerificationResult(
+        kind: LicenseStateKind.untrustedKey,
+        payload: payload,
+        keyId: decoded.keyIdHint,
+        reason:
+            'لا توجد مفاتيح عامة موثوقة مدمجة في هذا البناء (QAT_LICENSE_PUBLIC_KEYS).',
+      );
+    }
+
+    if (!decoded.hadExplicitKeyId &&
+        (payload.canonicalFlavor == LicenseCanonicalFlavor.kotlinLineV1 ||
+            decoded.isQlicJson)) {
+      return LicenseVerificationResult(
+        kind: LicenseStateKind.unknownKeyId,
+        payload: payload,
+        reason:
+            'معرّف مفتاح التوقيع (keyId) مفقود أو غير معرّف داخل الترخيص (UNKNOWN_KEY_ID).',
       );
     }
 
@@ -71,9 +98,8 @@ class OfflineLicenseVerifier {
         kind: LicenseStateKind.untrustedKey,
         payload: payload,
         keyId: decoded.keyIdHint,
-        reason: registry.isEmpty
-            ? 'لا توجد مفاتيح عامة موثوقة مدمجة في هذا البناء (QAT_LICENSE_PUBLIC_KEYS).'
-            : 'مفتاح التوقيع (${decoded.keyIdHint ?? ''}) غير معرّف كـ Public Key موثوق داخل هذه النسخة.',
+        reason:
+            'مفتاح التوقيع (${decoded.keyIdHint ?? ''}) غير معرّف كـ Public Key موثوق داخل هذه النسخة.',
       );
     }
 
@@ -94,6 +120,7 @@ class OfflineLicenseVerifier {
       return LicenseVerificationResult(
         kind: LicenseStateKind.invalidSignature,
         payload: payload,
+        keyId: decoded.keyIdHint,
         reason: 'فشل التحقق التشفيري Ed25519 — تم تعديل الترخيص أو التوقيع مزوّر.',
       );
     }
@@ -107,6 +134,16 @@ class OfflineLicenseVerifier {
               extraDevRegistry?.findById(flavorKeyId) != null)) {
         matchedKeyId = flavorKeyId;
       }
+    }
+
+    final normalizedRevoked = revokedLicenseIds.map((e) => e.trim().toUpperCase()).toSet();
+    if (normalizedRevoked.contains(payload.licenseId.trim().toUpperCase())) {
+      return LicenseVerificationResult(
+        kind: LicenseStateKind.revoked,
+        payload: payload,
+        keyId: matchedKeyId,
+        reason: 'تم إلغاء هذا الترخيص (${payload.licenseId}) رسمياً ولا يمكن تفعيله.',
+      );
     }
 
     if (!payload.matchesInstallation(currentInstallationId)) {
@@ -179,4 +216,90 @@ class OfflineLicenseVerifier {
       remainingDays: remDays,
     );
   }
+
+  /// Cryptographically verifies a signed `QLR1.` revocation notice against trusted Ed25519 keys.
+  Future<RevocationVerificationResult> verifyRevocationToken({
+    required String rawInput,
+    required String currentInstallationId,
+    bool allowUntrustedLocalKeyInDev = false,
+    TrustedPublicKeyRegistry? extraDevRegistry,
+  }) async {
+    final DecodedRevocationInput decoded;
+    try {
+      decoded = LicenseCanonical.parseRevocationInput(rawInput);
+    } catch (e) {
+      return RevocationVerificationResult(
+        kind: LicenseStateKind.corrupted,
+        reason: e.toString(),
+      );
+    }
+
+    final p = decoded.payload;
+    if (decoded.signatureBytes.length != 64) {
+      return const RevocationVerificationResult(
+        kind: LicenseStateKind.invalidSignature,
+        reason: 'طول توقيع إشعار الإلغاء غير صحيح.',
+      );
+    }
+    if (p.keyId.trim().isEmpty) {
+      return RevocationVerificationResult(
+        kind: LicenseStateKind.unknownKeyId,
+        payload: p,
+        reason: 'معرّف مفتاح التوقيع مفقود في إشعار الإلغاء (UNKNOWN_KEY_ID).',
+      );
+    }
+
+    SimplePublicKey? key = registry.findById(p.keyId);
+    if (key == null && allowUntrustedLocalKeyInDev && extraDevRegistry != null) {
+      key = extraDevRegistry.findById(p.keyId);
+    }
+    if (key == null) {
+      return RevocationVerificationResult(
+        kind: LicenseStateKind.untrustedKey,
+        payload: p,
+        reason: 'مفتاح إشعار الإلغاء (${p.keyId}) غير موثوق في هذه النسخة.',
+      );
+    }
+
+    final ok = await _ed25519.verify(
+      LicenseCanonical.canonicalRevocationBytes(p),
+      signature: Signature(decoded.signatureBytes, publicKey: key),
+    );
+    if (!ok) {
+      return RevocationVerificationResult(
+        kind: LicenseStateKind.invalidSignature,
+        payload: p,
+        reason: 'فشل التحقق التشفيري من توقيع إشعار الإلغاء.',
+      );
+    }
+
+    if (!p.matchesInstallation(currentInstallationId)) {
+      return RevocationVerificationResult(
+        kind: LicenseStateKind.deviceMismatch,
+        payload: p,
+        reason: 'إشعار الإلغاء مخصص لمعرّف تثبيت آخر.',
+      );
+    }
+
+    return RevocationVerificationResult(
+      kind: LicenseStateKind.revoked,
+      payload: p,
+      isAuthenticRevocation: true,
+      reason: 'تم التحقق من إشعار إلغاء الترخيص ${p.licenseId} بنجاح.',
+    );
+  }
+}
+
+class RevocationVerificationResult {
+  const RevocationVerificationResult({
+    required this.kind,
+    this.payload,
+    this.isAuthenticRevocation = false,
+    this.reason = '',
+  });
+
+  final LicenseStateKind kind;
+  final RevocationPayload? payload;
+  final bool isAuthenticRevocation;
+  final String reason;
 }

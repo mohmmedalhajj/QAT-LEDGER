@@ -69,7 +69,7 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
         ),
       ),
     );
-    if (res.isValid) _tokenCtrl.clear();
+    if (res.isValid || res.kind == LicenseStateKind.revoked) _tokenCtrl.clear();
   }
 
   Future<void> _scanQrAndActivate(
