@@ -1,9 +1,9 @@
 name: Flutter Analyze, Test & Release APK Build
 
 on:
-  # Push builds are QA-only. Only explicitly approved main is a production candidate.
+  # All branch pushes are QA-only; production remains restricted to the approved main dispatch.
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -76,11 +76,47 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup JDK 17
+      - name: Setup Eclipse Temurin JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Verify Temurin JDK 17, JAVA_HOME and PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${JAVA_HOME:-}" ] || [ ! -x "$JAVA_HOME/bin/java" ] || [ ! -x "$JAVA_HOME/bin/javac" ] || [ ! -x "$JAVA_HOME/bin/keytool" ]; then
+            echo "::error title=java_toolchain::setup-java did not provide a complete JDK 17 under JAVA_HOME."
+            exit 1
+          fi
+          case ":$PATH:" in
+            *":$JAVA_HOME/bin:"*) ;;
+            *) echo "::error title=java_toolchain::JAVA_HOME/bin is not present in PATH."; exit 1 ;;
+          esac
+          for tool in java javac keytool; do
+            expected="$(readlink -f "$JAVA_HOME/bin/$tool")"
+            actual="$(readlink -f "$(command -v "$tool")")"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error title=java_toolchain::$tool on PATH does not resolve to JAVA_HOME/bin/$tool."
+              exit 1
+            fi
+          done
+
+          java -version
+          javac -version
+          KEYTOOL_VERSION="$(keytool -J-version 2>&1)"
+          printf '%s\n' "$KEYTOOL_VERSION"
+
+          JAVA_PROPERTIES="$(java -XshowSettings:properties -version 2>&1)"
+          JAVA_SPEC="$(printf '%s\n' "$JAVA_PROPERTIES" | awk -F= '/java.specification.version =/ {gsub(/[[:space:]]/, "", $2); print $2; exit}')"
+          JAVA_VENDOR="$(printf '%s\n' "$JAVA_PROPERTIES" | awk -F= '/java.vendor =/ {sub(/^[[:space:]]+/, "", $2); sub(/[[:space:]]+$/, "", $2); print $2; exit}')"
+          JAVAC_VERSION="$(javac -version 2>&1)"
+          if [ "$JAVA_SPEC" != "17" ] || [ "$JAVA_VENDOR" != "Eclipse Adoptium" ] || ! [[ "$JAVAC_VERSION" =~ ^javac[[:space:]]17([.]|$) ]] || ! grep -Eq 'version "17([.]|")' <<<"$KEYTOOL_VERSION"; then
+            echo "::error title=java_toolchain::Expected Eclipse Temurin JDK 17; observed spec=$JAVA_SPEC vendor=$JAVA_VENDOR javac=$JAVAC_VERSION."
+            exit 1
+          fi
+          echo "PASS: Eclipse Temurin JDK 17; JAVA_HOME and PATH resolve to the same JDK."
 
       - name: Setup Flutter SDK
         uses: subosito/flutter-action@v2

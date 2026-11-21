@@ -82,7 +82,25 @@ keytool -list -v -keystore /secure/path/original-release.jks -alias "$KEY_ALIAS"
 # Base64-encode locally for the protected GitHub production Environment secret only.
 base64 -w 0 /secure/path/original-release.jks
 ```
-Store the encoded keystore, store password, alias, key password, independently verified fingerprint, and public-only `QAT_LICENSE_PUBLIC_KEYS` as secrets on the `production` Environment **after** adding required reviewers and restricting that Environment to `main`. Never configure the Developer private Ed25519 seed as a GitHub secret.
+Store the encoded keystore, store password, alias, key password, independently verified fingerprint, and public-only `QAT_LICENSE_PUBLIC_KEYS` as secrets on the `production` Environment **after** adding required reviewers and restricting that Environment to `main`. Remove any repository-level copies of these production secrets. Never configure the Developer private Ed25519 seed as a GitHub secret.
+
+### Owner-authorized new Android signing identity (only if recovery fails)
+Do not run this while the original identity may still be recoverable. First complete the recovery checks above, have the owner explicitly approve an identity transition, and assess whether any existing direct-APK installation needs the old signing certificate. A new certificate can prevent in-place updates. Run only on the owner's trusted machine, never in Arena or CI:
+```bash
+umask 077
+install -d -m 700 "$HOME/qat-ledger-signing"
+KEYSTORE_PATH="$HOME/qat-ledger-signing/qat-ledger-release.jks"
+keytool -genkeypair -v \
+  -keystore "$KEYSTORE_PATH" \
+  -storetype JKS \
+  -alias qat-ledger-release \
+  -keyalg RSA -keysize 3072 -validity 10000
+
+# keytool prompts interactively; do not put passwords on the command line.
+# Record the public certificate fingerprint independently:
+keytool -list -v -keystore "$KEYSTORE_PATH" -alias qat-ledger-release | grep 'SHA256:'
+```
+Back up the keystore securely in two owner-controlled locations, independently compare the SHA-256 fingerprint, and only then provision production Environment secrets. Never commit or artifact the keystore, use a QA/debug certificate for production, or create an identity just to unblock CI.
 
 ---
 
