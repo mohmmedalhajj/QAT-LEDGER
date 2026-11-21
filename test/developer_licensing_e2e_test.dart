@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:qat_ledger/core/money.dart';
+import 'package:qat_ledger/core/platform_bridge.dart';
 import 'package:qat_ledger/data/backup_service.dart';
 import 'package:qat_ledger/data/database_service.dart';
 import 'package:qat_ledger/data/models.dart';
@@ -13,6 +14,7 @@ import 'package:qat_ledger/developer/developer_key_manager.dart';
 import 'package:qat_ledger/developer/license_signer.dart';
 import 'package:qat_ledger/licensing/license_models.dart';
 import 'package:qat_ledger/licensing/license_verifier.dart';
+import 'package:qat_ledger/licensing/local_license_store.dart';
 import 'package:qat_ledger/licensing/trusted_key_registry.dart';
 import 'package:qat_ledger/licensing/trusted_time_guard.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -287,6 +289,157 @@ void main() {
 
       await (await dbA.database).close();
       await (await dbB.database).close();
+    } finally {
+      await tempDir.delete(recursive: true);
+    }
+  });
+
+  test('Key rotation continuity: Customer trusting K1,K2 accepts old K1 and new K2 licenses; K2-only rejects K1 as untrustedKey', () async {
+    final tempDir = await Directory.systemTemp.createTemp('qat_dev_rotation_');
+    try {
+      SharedPreferences.setMockInitialValues({});
+      final devPrefs = await SharedPreferences.getInstance();
+      final devDb = DeveloperDatabaseService(
+        factory: databaseFactoryFfi,
+        customPath: p.join(tempDir.path, 'dev_rot.db'),
+      );
+      final mgr = DeveloperKeyManager(devPrefs);
+      await mgr.getOrGenerateSigningKeyPair();
+      final k1 = (await mgr.getPublicKeyInfo())!;
+
+      final signer = DeveloperLicenseSigner(keyManager: mgr, devDb: devDb);
+      final oldLicense = await signer.issueOfficialLicense(
+        agencyName: 'وكالة قديمة',
+        ownerName: 'أحمد',
+        packageTier: PackageTier.pro,
+        licenseType: LicenseType.perpetual,
+        installationId: 'QAT-ROT1-AAAA-BBBB',
+        requestedPaidConfirmed: true,
+      );
+
+      // Rotate to new Ed25519 key K2
+      await mgr.rotateSigningKeyPair();
+      final k2 = (await mgr.getPublicKeyInfo())!;
+      expect(k2.kotlinKeyId, isNot(k1.kotlinKeyId));
+
+      final newLicense = await signer.issueOfficialLicense(
+        agencyName: 'وكالة حديثة',
+        ownerName: 'صالح',
+        packageTier: PackageTier.pro,
+        licenseType: LicenseType.perpetual,
+        installationId: 'QAT-ROT2-CCCC-DDDD',
+        requestedPaidConfirmed: true,
+      );
+
+      // Customer built with rotated multi-key list (K1 + K2) honors both old and new licenses
+      final combinedCsv = '${k1.kotlinConfigLine},${k2.kotlinConfigLine}';
+      final combinedVerifier = OfflineLicenseVerifier(
+        registry: TrustedPublicKeyRegistry.fromCsv(combinedCsv),
+        timeGuard: TrustedTimeGuard(),
+      );
+      final verifyOldOnCombined = await combinedVerifier.verify(
+        rawLicenseInput: oldLicense.compactToken,
+        currentInstallationId: 'QAT-ROT1-AAAA-BBBB',
+      );
+      final verifyNewOnCombined = await combinedVerifier.verify(
+        rawLicenseInput: newLicense.qlicJson,
+        currentInstallationId: 'QAT-ROT2-CCCC-DDDD',
+      );
+      expect(verifyOldOnCombined.isPro, true);
+      expect(verifyNewOnCombined.isPro, true);
+
+      // Customer built ONLY with K2 rejects old K1 license cleanly as untrustedKey
+      final k2OnlyVerifier = OfflineLicenseVerifier(
+        registry: TrustedPublicKeyRegistry.fromCsv(k2.kotlinConfigLine),
+        timeGuard: TrustedTimeGuard(),
+      );
+      final rejectedOld = await k2OnlyVerifier.verify(
+        rawLicenseInput: oldLicense.compactToken,
+        currentInstallationId: 'QAT-ROT1-AAAA-BBBB',
+      );
+      expect(rejectedOld.isValid, false);
+      expect(rejectedOld.kind, LicenseStateKind.untrustedKey);
+
+      await (await devDb.database).close();
+    } finally {
+      await tempDir.delete(recursive: true);
+    }
+  });
+
+  test('LocalLicenseStore persists installation ID and signed license across simulated restarts, rejects clock rollback, and preserves customer data', () async {
+    final tempDir = await Directory.systemTemp.createTemp('qat_store_e2e_');
+    try {
+      // 1. Developer issues subscription bound to Customer installation ID
+      SharedPreferences.setMockInitialValues({});
+      final devPrefs = await SharedPreferences.getInstance();
+      final devDb = DeveloperDatabaseService(
+        factory: databaseFactoryFfi,
+        customPath: p.join(tempDir.path, 'dev_store.db'),
+      );
+      final mgr = DeveloperKeyManager(devPrefs);
+      await mgr.getOrGenerateSigningKeyPair();
+      final keyInfo = (await mgr.getPublicKeyInfo())!;
+
+      // Customer initializes install ID
+      SharedPreferences.setMockInitialValues({});
+      final custPrefs = await SharedPreferences.getInstance();
+      final store = LocalLicenseStore(custPrefs);
+      final installId = await store.getOrCreateInstallationId();
+      expect(installId, matches(RegExp(r'^QAT-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$')));
+
+      final signer = DeveloperLicenseSigner(keyManager: mgr, devDb: devDb);
+      final issuedNow = DateTime.now().millisecondsSinceEpoch - 60000;
+      final subLicense = await signer.issueOfficialLicense(
+        agencyName: 'وكالة الثبات',
+        ownerName: 'مختار',
+        packageTier: PackageTier.pro,
+        licenseType: LicenseType.subscription,
+        durationDays: 30,
+        installationId: installId,
+        requestedPaidConfirmed: true,
+        nowEpochMs: issuedNow,
+      );
+
+      final editionCfg = EditionConfig(
+        edition: 'customer',
+        publicKeysCsv: keyInfo.kotlinConfigLine,
+        applicationId: 'com.aistudio.tofanqat.nxzwmb',
+        versionName: '1.0.0',
+        versionCode: 1,
+      );
+
+      await store.saveRawLicense(subLicense.compactToken);
+
+      // 2. Re-open store from persisted SharedPreferences (restart simulation)
+      final restartedStore = LocalLicenseStore(await SharedPreferences.getInstance());
+      expect(await restartedStore.getOrCreateInstallationId(), installId);
+      final active = await restartedStore.loadAndVerify(editionConfig: editionCfg);
+      expect(active.isPro, true);
+      expect(active.hasFeature(LicenseFeature.reports), true);
+      expect(active.hasFeature(LicenseFeature.archive), true);
+
+      // 3. Simulate clock rollback after recording trusted high-water mark -> downgraded to BASIC
+      final timeGuard = TrustedTimeGuard(prefs: custPrefs);
+      final forwardCheck = await timeGuard.evaluateNow(issuedNow + 5 * 86400000);
+      expect(forwardCheck.trusted, true);
+      final tamperedVerifier = OfflineLicenseVerifier(
+        registry: TrustedPublicKeyRegistry.fromCsv(editionCfg.publicKeysCsv),
+        timeGuard: TrustedTimeGuard(prefs: custPrefs),
+      );
+      final tamperedRes = await tamperedVerifier.verify(
+        rawLicenseInput: subLicense.compactToken,
+        currentInstallationId: installId,
+        nowEpochMs: issuedNow + 86400000, // 4 days backwards rollback!
+      );
+      expect(tamperedRes.kind, LicenseStateKind.clockTampered);
+      expect(tamperedRes.isPro, false);
+
+      // 4. Clear license cleanly -> returns to BASIC unlicensed
+      await restartedStore.clearLicense();
+      final afterClear = await restartedStore.loadAndVerify(editionConfig: editionCfg);
+      expect(afterClear.kind, LicenseStateKind.unlicensed);
+
+      await (await devDb.database).close();
     } finally {
       await tempDir.delete(recursive: true);
     }

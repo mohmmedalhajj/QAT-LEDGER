@@ -35,6 +35,19 @@ val hasReleaseKeystore = resolvedReleaseKeystoreFile != null &&
     !keystoreProperties.getProperty("keyAlias").isNullOrBlank() &&
     !keystoreProperties.getProperty("keyPassword").isNullOrBlank()
 
+val releaseSigningRequired: Boolean =
+    ((project.findProperty("RELEASE_SIGNING_REQUIRED") as String?)
+        ?: System.getenv("RELEASE_SIGNING_REQUIRED")
+        ?: "false").trim().equals("true", ignoreCase = true)
+
+if (releaseSigningRequired && !hasReleaseKeystore) {
+    throw org.gradle.api.GradleException(
+        "[QAT-LEDGER] Official production release signing is required (RELEASE_SIGNING_REQUIRED=true), " +
+            "but android/key.properties or the release keystore file is missing/incomplete. " +
+            "Refusing to fall back to debug signing for a production release."
+    )
+}
+
 android {
     namespace = "com.aistudio.tofanqat.nxzwmb"
     compileSdk = flutter.compileSdkVersion
@@ -94,7 +107,7 @@ android {
             if (hasReleaseKeystore) {
                 signingConfig = signingConfigs.getByName("release")
             } else {
-                println("[QAT-LEDGER] android/key.properties not found; signing release APK with Android debug key (for clean install/QA only — provide original keystore via android/key.properties for store/upgrade continuity).")
+                println("[QAT-LEDGER][QA-DEBUG-ONLY] android/key.properties not found; signing APK with Android debug key strictly for QA verification (NOT a production release; pass -PRELEASE_SIGNING_REQUIRED=true to fail instead).")
                 signingConfig = signingConfigs.getByName("debug")
             }
             isMinifyEnabled = false

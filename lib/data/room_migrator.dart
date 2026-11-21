@@ -151,6 +151,8 @@ class RoomMigrator {
 
     await targetDb.transaction<void>((txn) async {
       const clearOrder = [
+        'sale_batch_deductions',
+        'worker_handoffs',
         'qat_import_weights',
         'money_transfers',
         'transfer_recipients',
@@ -167,6 +169,7 @@ class RoomMigrator {
         'customer_balances',
         'customers',
         'inventory_batches',
+        'inventory_receivers',
         'qat_types',
       ];
       for (final tbl in clearOrder) {
@@ -281,6 +284,53 @@ class RoomMigrator {
         counts['suppliers'] = rows.length;
       }
 
+      // 3b. Pre-populate inventory_receivers from qat_import_weights / inventory_items so FK on inventory_batches.receiver_id always holds cleanly
+      final validReceiverIds = <int>{};
+      final receiverIdByName = <String, int>{};
+      if (await tableExists('inventory_receivers')) {
+        final cols = await colsOf('inventory_receivers');
+        final rows = await sourceDb.query('inventory_receivers');
+        for (final r in rows) {
+          final id = (r['id'] as num).toInt();
+          final name = (r['name'] ?? '').toString().trim();
+          if (name.isEmpty) continue;
+          await txn.insert('inventory_receivers', {
+            'id': id,
+            'name': name,
+            'phone': cols.contains('phone') ? (r['phone'] ?? '').toString() : '',
+            'notes': cols.contains('notes') ? (r['notes'] ?? '').toString() : '',
+            'is_active': cols.contains('isActive') ? ((r['isActive'] as num?)?.toInt() ?? 1) : 1,
+            'created_at_ms': nowMs,
+          });
+          validReceiverIds.add(id);
+          receiverIdByName.putIfAbsent(name.toLowerCase(), () => id);
+        }
+      }
+      if (await tableExists('qat_import_weights')) {
+        final cols = await colsOf('qat_import_weights');
+        if (cols.contains('receiverName')) {
+          final rows = await sourceDb.query('qat_import_weights');
+          for (final r in rows) {
+            final rawRecName = (r['receiverName'] ?? '').toString().trim();
+            if (rawRecName.isEmpty) continue;
+            final key = rawRecName.toLowerCase();
+            if (!receiverIdByName.containsKey(key)) {
+              final rawId = cols.contains('id') ? (r['id'] as num?)?.toInt() : null;
+              final insertedId = await txn.insert('inventory_receivers', {
+                if (rawId != null && rawId > 0 && !validReceiverIds.contains(rawId)) 'id': rawId,
+                'name': rawRecName,
+                'phone': '',
+                'notes': 'مرحّل من أوزان ومستلمي القات السابقين',
+                'is_active': 1,
+                'created_at_ms': nowMs,
+              });
+              validReceiverIds.add(insertedId);
+              receiverIdByName[key] = insertedId;
+            }
+          }
+        }
+      }
+
       // 4. inventory_items (Room v18) OR inventory (synthetic) -> inventory_batches
       final validBatchIds = <int>{};
       final invTableName = (await tableExists('inventory_items'))
@@ -310,6 +360,28 @@ class RoomMigrator {
               : (cols.contains('currency') ? r['currency']?.toString() : null);
           final currency = CurrencyCode.fromRaw(curRaw);
           final rawRecId = cols.contains('receiverId') ? (r['receiverId'] as num?)?.toInt() : null;
+          final rawRecName = cols.contains('receiverName') ? (r['receiverName'] ?? '').toString().trim() : '';
+          int? resolvedRecId;
+          if (rawRecId != null && rawRecId > 0 && validReceiverIds.contains(rawRecId)) {
+            resolvedRecId = rawRecId;
+          } else if (rawRecName.isNotEmpty) {
+            final existingRecId = receiverIdByName[rawRecName.toLowerCase()];
+            if (existingRecId != null) {
+              resolvedRecId = existingRecId;
+            } else {
+              final insertedId = await txn.insert('inventory_receivers', {
+                if (rawRecId != null && rawRecId > 0 && !validReceiverIds.contains(rawRecId)) 'id': rawRecId,
+                'name': rawRecName,
+                'phone': '',
+                'notes': 'مرحّل من أصناف المخزون السابقة',
+                'is_active': 1,
+                'created_at_ms': nowMs,
+              });
+              validReceiverIds.add(insertedId);
+              receiverIdByName[rawRecName.toLowerCase()] = insertedId;
+              resolvedRecId = insertedId;
+            }
+          }
           final lowThresh = cols.contains('lowStockThreshold')
               ? QuantityMath.fromLegacyDouble(r['lowStockThreshold'] as num?).clamp(0, 1 << 60).toInt()
               : 0;
@@ -332,8 +404,8 @@ class RoomMigrator {
             'is_archived': 0,
             'item_number': cols.contains('itemNumber') ? (r['itemNumber'] ?? '').toString() : '',
             'low_stock_threshold_milli': lowThresh,
-            'receiver_id': (rawRecId != null && rawRecId > 0) ? rawRecId : null,
-            'receiver_name': cols.contains('receiverName') ? (r['receiverName'] ?? '').toString() : '',
+            'receiver_id': resolvedRecId,
+            'receiver_name': rawRecName,
             'notes': cols.contains('notes') ? (r['notes'] ?? '').toString() : '',
           });
           validBatchIds.add(id);
