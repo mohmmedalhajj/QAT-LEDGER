@@ -343,16 +343,40 @@ jobs:
           test -x "$AAPT2"
           test -x "$APKSIGNER"
 
-          "$AAPT2" dump badging "$CUST_OUT" | tee ci-dist/customer-badging.txt
-          "$AAPT2" dump badging "$DEV_OUT" | tee ci-dist/developer-badging.txt
-          "$AAPT2" dump xmltree "$CUST_OUT" --file AndroidManifest.xml > ci-dist/customer-manifest-xmltree.txt
-          "$AAPT2" dump xmltree "$DEV_OUT" --file AndroidManifest.xml > ci-dist/developer-manifest-xmltree.txt
+          "$AAPT2" dump badging "$CUST_OUT" > ci-dist/customer-badging.txt || {
+            echo "::error title=apk_binary_audit::aapt2 dump badging failed on Customer APK"
+            exit 1
+          }
+          "$AAPT2" dump badging "$DEV_OUT" > ci-dist/developer-badging.txt || {
+            echo "::error title=apk_binary_audit::aapt2 dump badging failed on Developer APK"
+            exit 1
+          }
+          "$AAPT2" dump xmltree "$CUST_OUT" --file AndroidManifest.xml > ci-dist/customer-manifest-xmltree.txt || {
+            echo "::error title=apk_binary_audit::aapt2 dump xmltree failed on Customer APK"
+            exit 1
+          }
+          "$AAPT2" dump xmltree "$DEV_OUT" --file AndroidManifest.xml > ci-dist/developer-manifest-xmltree.txt || {
+            echo "::error title=apk_binary_audit::aapt2 dump xmltree failed on Developer APK"
+            exit 1
+          }
 
-          grep -q "package: name='com.aistudio.tofanqat.nxzwmb'" ci-dist/customer-badging.txt
-          grep -q "package: name='com.aistudio.tofanqat.nxzwmb.dev'" ci-dist/developer-badging.txt
+          grep -q "package: name='com.aistudio.tofanqat.nxzwmb'" ci-dist/customer-badging.txt || {
+            echo "::error title=apk_binary_audit::Customer APK applicationId mismatch in aapt2 badging"
+            exit 1
+          }
+          grep -q "package: name='com.aistudio.tofanqat.nxzwmb.dev'" ci-dist/developer-badging.txt || {
+            echo "::error title=apk_binary_audit::Developer APK applicationId mismatch in aapt2 badging"
+            exit 1
+          }
 
-          "$APKSIGNER" verify --print-certs --verbose "$CUST_OUT" | tee ci-dist/customer-signature.txt
-          "$APKSIGNER" verify --print-certs --verbose "$DEV_OUT" | tee ci-dist/developer-signature.txt
+          "$APKSIGNER" verify --print-certs --verbose "$CUST_OUT" | tee ci-dist/customer-signature.txt || {
+            echo "::error title=apk_binary_audit::apksigner verify failed on Customer APK"
+            exit 1
+          }
+          "$APKSIGNER" verify --print-certs --verbose "$DEV_OUT" | tee ci-dist/developer-signature.txt || {
+            echo "::error title=apk_binary_audit::apksigner verify failed on Developer APK"
+            exit 1
+          }
 
           if [ -x "$APKANALYZER" ]; then
             "$APKANALYZER" apk summary "$CUST_OUT" > ci-dist/customer-apkanalyzer.txt 2>&1 || true
@@ -367,9 +391,15 @@ jobs:
           dev_apk = os.environ['DEV_OUT']
           src_zip = 'ci-dist/QAT_LEDGER_FLUTTER_SOURCE.zip'
 
+          def fail(msg):
+              print(f'::error title=apk_binary_audit::{msg}')
+              raise SystemExit(msg)
+
           forbidden_in_customer = [
               b'dev_bootstrap_seed.b64',
               b'qat_ledger_developer_registry.db',
+              b'qat_ledger_developer_registry_v2.db',
+              b'qat_ledger_developer_store',
               b'DeveloperConsoleSheet',
               b'DeveloperLicenseSigner',
               b'DeveloperKeyManager',
@@ -379,38 +409,51 @@ jobs:
           ]
 
           required_in_developer_app = [
-              b'qat_ledger_developer_registry.db',
+              b'qat_ledger_developer_registry_v2.db',
               b'dev_package_prices',
               b'QAT_LEDGER_DEV_REGISTRY_V1',
+          ]
+
+          required_in_developer_dex = [
+              b'qat_ledger_developer_registry.db',
+              b'qat_ledger_developer_store',
           ]
 
           with zipfile.ZipFile(cust_apk) as zf:
               names = zf.namelist()
               if any('dev_bootstrap_seed.b64' in n for n in names):
-                  raise SystemExit('FAIL: Customer APK zip contains dev_bootstrap_seed.b64')
+                  fail('Customer APK zip contains dev_bootstrap_seed.b64')
               scanned_bins = [n for n in names if n.endswith('.dex') or n.endswith('libapp.so')]
+              if not scanned_bins:
+                  fail('Customer APK missing dex/libapp.so entries')
               for bin_name in scanned_bins:
                   blob = zf.read(bin_name)
                   for needle in forbidden_in_customer:
                       if needle in blob:
-                          raise SystemExit(f'FAIL: Forbidden developer symbol/asset {needle!r} found inside Customer APK {bin_name}')
+                          fail(f'Forbidden developer symbol/asset {needle!r} found inside Customer APK {bin_name}')
               print(f'PASS_CUSTOMER_BINARY_ISOLATION: entries={len(names)}, scanned_dex_and_aot={len(scanned_bins)}, forbidden_matches=0')
 
           with zipfile.ZipFile(dev_apk) as zf:
               names = zf.namelist()
               if 'assets/dev_bootstrap_seed.b64' not in names:
-                  raise SystemExit('FAIL: Developer APK zip missing assets/dev_bootstrap_seed.b64')
+                  fail('Developer APK zip missing assets/dev_bootstrap_seed.b64')
               app_blobs = b''.join(zf.read(n) for n in names if n.endswith('libapp.so'))
+              dex_blobs = b''.join(zf.read(n) for n in names if n.endswith('.dex'))
+              if not app_blobs:
+                  fail('Developer APK missing libapp.so')
               missing_syms = [s.decode() for s in required_in_developer_app if s not in app_blobs]
               if missing_syms:
-                  raise SystemExit(f'FAIL: Developer APK libapp.so missing expected developer symbols: {missing_syms}')
+                  fail(f'Developer APK libapp.so missing expected developer symbols: {missing_syms}')
+              missing_dex = [s.decode() for s in required_in_developer_dex if s not in dex_blobs]
+              if missing_dex:
+                  fail(f'Developer APK classes*.dex missing expected developer entries: {missing_dex}')
               print(f'PASS_DEVELOPER_BINARY_PRESENCE: entries={len(names)}, bootstrap_seed=present, dev_symbols_verified={len(required_in_developer_app)}')
 
           with zipfile.ZipFile(src_zip) as zf:
               names = zf.namelist()
               bad = [n for n in names if n.endswith('.jks') or n.endswith('.keystore') or n.endswith('key.properties') or 'dev_bootstrap_seed.b64' in n]
               if bad:
-                  raise SystemExit(f'FAIL: Source archive contains sensitive files: {bad}')
+                  fail(f'Source archive contains sensitive files: {bad}')
               print(f'PASS_SOURCE_ARCHIVE_HYGIENE: entries={len(names)}, secret_files=0')
           PY
 

@@ -164,7 +164,6 @@ class MainActivity : FlutterActivity() {
 
     private fun collectLegacySources(): Map<String, Any?> {
         val legacyRoomDb: File = getDatabasePath("tofan_al_aqsa_qat_db")
-        val legacyDevDb: File = getDatabasePath("qat_ledger_developer_registry.db")
         val prefsMap = mutableMapOf<String, Map<String, Any?>>()
         val prefNames = listOf(
             "app_settings",
@@ -176,9 +175,8 @@ class MainActivity : FlutterActivity() {
             "qat_license_time_guard",
             "qat_agency_prefs",
             "app_theme_prefs",
-            "qat_ledger_license_store",
-            "qat_ledger_developer_store"
-        )
+            "qat_ledger_license_store"
+        ) + FlavorPlatformDelegate.extraLegacyPrefNames()
         for (name in prefNames) {
             val sp = getSharedPreferences(name, Context.MODE_PRIVATE)
             val entries = mutableMapOf<String, Any?>()
@@ -201,11 +199,9 @@ class MainActivity : FlutterActivity() {
         return mapOf(
             "legacyRoomDbExists" to legacyRoomDb.exists(),
             "legacyRoomDbPath" to legacyRoomDb.absolutePath,
-            "legacyDevDbExists" to legacyDevDb.exists(),
-            "legacyDevDbPath" to legacyDevDb.absolutePath,
             "legacyActiveLicenseDoc" to legacyActiveLicenseDoc,
             "legacyPrefs" to prefsMap
-        )
+        ) + FlavorPlatformDelegate.extraLegacyDbInfo(applicationContext)
     }
 
     private fun applyLauncherIdentity(appName: String, logoPath: String): Boolean {
