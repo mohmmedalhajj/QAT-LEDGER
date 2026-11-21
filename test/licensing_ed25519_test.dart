@@ -283,6 +283,7 @@ void main() {
       features: LicenseFeature.proFeatures.map((f) => f.code).toList(),
       issuedAtEpochMs: 1700000000000,
       expiresAtEpochMs: 0,
+      maxDevices: 1,
       keyIdField: '',
     );
     final missingSig = await ed.sign(
@@ -319,6 +320,7 @@ void main() {
       features: LicenseFeature.proFeatures.map((f) => f.code).toList(),
       issuedAtEpochMs: 1700000000000,
       expiresAtEpochMs: 0,
+      maxDevices: 1,
       keyIdField: alienKid,
     );
     final alienSig = await ed.sign(
@@ -352,6 +354,7 @@ void main() {
       features: LicenseFeature.proFeatures.map((f) => f.code).toList(),
       issuedAtEpochMs: 1700000000000,
       expiresAtEpochMs: 0,
+      maxDevices: 1,
       keyIdField: trustedKid,
     );
     final forgedToken = LicenseCanonical.encodeCompactToken(
