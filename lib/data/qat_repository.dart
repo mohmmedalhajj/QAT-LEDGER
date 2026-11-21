@@ -878,16 +878,20 @@ class QatRepository {
       final avgBuyMinor = item.buyPriceMinor > 0
           ? item.buyPriceMinor
           : (deductedTotal > 0 ? ((weightedCostAccum * 1000) / deductedTotal).round() : 0);
-      await txn.update(
-        'sales_invoice_items',
-        {
-          if (item.inventoryBatchId == null && usedBatchIds.length == 1)
-            'inventory_batch_id': usedBatchIds.first,
-          if (item.buyPriceMinor <= 0 && avgBuyMinor > 0) 'buy_price_minor': avgBuyMinor,
-        },
-        where: 'id = ?',
-        whereArgs: [saleItemId],
-      );
+      final patch = <String, Object?>{
+        if (item.inventoryBatchId == null && usedBatchIds.length == 1)
+          'inventory_batch_id': usedBatchIds.first,
+        if (item.buyPriceMinor <= 0 && avgBuyMinor > 0)
+          'buy_price_minor': avgBuyMinor,
+      };
+      if (patch.isNotEmpty) {
+        await txn.update(
+          'sales_invoice_items',
+          patch,
+          where: 'id = ?',
+          whereArgs: [saleItemId],
+        );
+      }
     }
   }
 

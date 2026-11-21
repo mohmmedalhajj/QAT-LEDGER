@@ -202,12 +202,12 @@ class _TaxLedgerViewState extends State<TaxLedgerView> {
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: ErpStatusBanner(
               tone: ErpBannerTone.info,
-              title: 'دفتر ضريبة القات مفصول عن المصروفات اليومية',
+              title: 'دفتر ضريبة القات مفصول عن المصروفات',
               subtitle:
-                  'يُخصّص هذا السجل لضريبة القات فقط. مصروفات إيجار المفرش وأجور العمال والكهرباء تُسجَّل في تبويب المصاريف التشغيلية.',
+                  'قيود الضريبة هنا مستقلة؛ سجل إيجار المفرش وأجور العمال في المصاريف.',
               action: TextButton(
                 onPressed: () => ctrl.setSection(4, subTab: 0),
-                child: const Text('فتح المصاريف'),
+                child: const Text('المصاريف'),
               ),
             ),
           ),

@@ -424,8 +424,8 @@ class EmptyLedgerState extends StatelessWidget {
   Widget build(BuildContext context) {
     final pal = context.pal;
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
