@@ -17,6 +17,10 @@ on:
           - auto
           - qa_debug
           - production_release
+      production_confirmation:
+        description: "Production only: type RELEASE followed by the full 40-character main commit SHA"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -41,23 +45,36 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_mode == 'production_release' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRODUCTION_CONFIRMATION: ${{ github.event.inputs.production_confirmation || '' }}
         run: |
           set -euo pipefail
           if [ "$GITHUB_REF" != "refs/heads/main" ]; then
             echo "::error title=production_gate::Production dispatch is allowed only from refs/heads/main."
             exit 1
           fi
+          EXPECTED_CONFIRMATION="RELEASE $GITHUB_SHA"
+          if [ "$PRODUCTION_CONFIRMATION" != "$EXPECTED_CONFIRMATION" ]; then
+            echo "::error title=production_gate::Type the exact confirmation 'RELEASE <full commit SHA>' for this production dispatch."
+            exit 1
+          fi
+          MAIN_SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [ "$MAIN_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error title=production_gate::Dispatch SHA is not the current main tip; refusing stale or non-main commits."
+            exit 1
+          fi
           if ! gh api "repos/$GITHUB_REPOSITORY/environments/production" > /tmp/qat-production-environment.json; then
-            echo "::error title=production_gate::The production environment is missing or cannot be inspected; configure required reviewers and branch policy before retrying."
+            echo "::error title=production_gate::The production environment is missing or cannot be inspected; refusing production."
             exit 1
           fi
           python3 - <<'PY'
           import json, sys
           env = json.load(open('/tmp/qat-production-environment.json', encoding='utf-8'))
           rules = env.get('protection_rules') or []
-          reviewers = [r for rule in rules if rule.get('type') == 'required_reviewers' for r in rule.get('reviewers', [])]
-          if not reviewers:
-              sys.exit('::error::Production environment has no required reviewers; refusing to build a production release.')
+          reviewer_rules = [rule for rule in rules if rule.get('type') == 'required_reviewers']
+          if reviewer_rules:
+              sys.exit('::error::Single-owner production must not require an independent GitHub reviewer; remove the required-reviewers rule and use the typed dispatch confirmation.')
+          if env.get('can_admins_bypass') is not False:
+              sys.exit('::error::Production environment must have administrator bypass disabled.')
           PY
           if ! gh api "repos/$GITHUB_REPOSITORY/environments/production/deployment-branch-policies" > /tmp/qat-production-branch-policy.json; then
             echo "::error title=production_gate::Could not inspect production environment branch policy."
@@ -69,15 +86,48 @@ jobs:
           branches = {item.get('name') for item in policy.get('branch_policies', []) if item.get('type') == 'branch'}
           if branches != {'main'}:
               sys.exit('::error::Production environment branch policy must allow exactly the approved main branch before release.')
-          print('PASS: production environment requires reviewer approval and explicitly allows main.')
+          print('PASS: production environment has no independent reviewer gate, admin bypass is disabled, and only main is allowed.')
           PY
           rm -f /tmp/qat-production-environment.json /tmp/qat-production-branch-policy.json
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Scan tracked source for private-key files and PEM material
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          import subprocess
+          from pathlib import Path
+
+          tracked = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
+          forbidden_names = re.compile(r"(?:\.jks|\.keystore|\.p12|\.pfx|\.pk8|\.qkey|\.key)$|(?:^|/)key\.properties$|(?:^|/)dev_bootstrap_seed\.b64$", re.I)
+          private_marker = re.compile(rb"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")
+          bad_names = []
+          bad_content = []
+          for name in filter(None, tracked):
+              if forbidden_names.search(name):
+                  bad_names.append(name)
+                  continue
+              path = Path(name)
+              try:
+                  data = path.read_bytes()
+              except (OSError, IsADirectoryError):
+                  continue
+              if private_marker.search(data):
+                  bad_content.append(name)
+          if bad_names or bad_content:
+              print("::error::Tracked private-key material detected; filenames only (contents suppressed):")
+              for name in sorted(set(bad_names + bad_content)):
+                  print(f"::error::{name}")
+              raise SystemExit(1)
+          print(f"PASS: scanned {sum(bool(n) for n in tracked)} tracked paths; no private-key file or PEM marker found.")
+          PY
 
       - name: Setup Eclipse Temurin JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: "17"
@@ -119,7 +169,7 @@ jobs:
           echo "PASS: Eclipse Temurin JDK 17; JAVA_HOME and PATH resolve to the same JDK."
 
       - name: Setup Flutter SDK
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           cache: true
@@ -1083,9 +1133,25 @@ jobs:
             fi
           } | tee ci-dist/FINAL_BUILD_AND_TEST_REPORT.txt
 
+      - name: Generate final release-asset checksum manifest
+        if: success() && steps.audit.outputs.is_official_release == 'true' && steps.emu.outputs.emulator_status == 'PASS' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.event.inputs.release_mode == 'production_release'
+        run: |
+          set -euo pipefail
+          cd ci-dist
+          sha256sum \
+            QAT_LEDGER_CUSTOMER_RELEASE.apk \
+            QAT_LEDGER_DEVELOPER_RELEASE.apk \
+            QAT_LEDGER_FLUTTER_SOURCE.zip \
+            BUILD_SIGNING_STATUS.txt \
+            customer-signature.txt \
+            developer-signature.txt \
+            binary-isolation-audit.txt \
+            LICENSE_TRUST_AUDIT.txt \
+            FINAL_BUILD_AND_TEST_REPORT.txt > SHA256SUMS.txt
+
       - name: Stage verified production release assets
         if: success() && steps.audit.outputs.is_official_release == 'true' && steps.emu.outputs.emulator_status == 'PASS' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.event.inputs.release_mode == 'production_release'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: verified-production-release-assets
           path: |
@@ -1104,7 +1170,7 @@ jobs:
 
       - name: Upload QA build and audit artifacts (never production assets)
         if: always() && steps.audit.outcome == 'success' && steps.audit.outputs.is_official_release != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: qat-ledger-build-and-audit-artifacts
           path: ci-dist/
@@ -1113,7 +1179,7 @@ jobs:
 
       - name: Upload emulator smoke-test logs
         if: always() && steps.audit.outcome == 'success' && (steps.audit.outputs.is_official_release != 'true' || steps.emu.outputs.emulator_status == 'PASS')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: qat-ledger-emulator-smoke
           path: |
@@ -1137,12 +1203,14 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
-      deployments: read
+    concurrency:
+      group: qat-ledger-production-release
+      cancel-in-progress: false
     environment:
       name: production
     steps:
       - name: Download verified production assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: verified-production-release-assets
           path: release-assets
@@ -1151,18 +1219,48 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT_SHA: ${{ github.sha }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
+          PRODUCTION_CONFIRMATION: ${{ github.event.inputs.production_confirmation || '' }}
         run: |
           set -euo pipefail
-          TAG="release-${RUN_ID}-${RUN_ATTEMPT}"
+          EXPECTED_CONFIRMATION="RELEASE $COMMIT_SHA"
+          if [ "$PRODUCTION_CONFIRMATION" != "$EXPECTED_CONFIRMATION" ]; then
+            echo "::error title=release_gate::Production confirmation does not match the commit being published."
+            exit 1
+          fi
+          TAG="qat-ledger-${COMMIT_SHA}"
           SHORT_SHA="${COMMIT_SHA::7}"
-          test -s release-assets/QAT_LEDGER_CUSTOMER_RELEASE.apk
-          test -s release-assets/QAT_LEDGER_DEVELOPER_RELEASE.apk
-          test -s release-assets/SHA256SUMS.txt
+          if gh release view "$TAG" >/dev/null 2>&1 || gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error title=release_gate::A release or tag for this commit already exists; releases are immutable and are never overwritten."
+            exit 1
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          expected = {
+              "QAT_LEDGER_CUSTOMER_RELEASE.apk",
+              "QAT_LEDGER_DEVELOPER_RELEASE.apk",
+              "QAT_LEDGER_FLUTTER_SOURCE.zip",
+              "SHA256SUMS.txt",
+              "BUILD_SIGNING_STATUS.txt",
+              "customer-signature.txt",
+              "developer-signature.txt",
+              "binary-isolation-audit.txt",
+              "LICENSE_TRUST_AUDIT.txt",
+              "FINAL_BUILD_AND_TEST_REPORT.txt",
+          }
+          actual = {p.name for p in Path("release-assets").iterdir() if p.is_file()}
+          if actual != expected:
+              raise SystemExit(f"Release asset set mismatch; unexpected={sorted(actual-expected)}, missing={sorted(expected-actual)}")
+          PY
+          grep -qx 'is_official_release=true' release-assets/BUILD_SIGNING_STATUS.txt
+          grep -qx 'signed_by=official_release_keystore' release-assets/BUILD_SIGNING_STATUS.txt
+          grep -qx 'seed_source=persistent_public_secret' release-assets/BUILD_SIGNING_STATUS.txt
+          grep -qx 'status=PASS_PERSISTENT_PRODUCTION_TRUST_ROOT' release-assets/LICENSE_TRUST_AUDIT.txt
+          grep -q '^emulator_status=PASS$' release-assets/FINAL_BUILD_AND_TEST_REPORT.txt
           (cd release-assets && sha256sum --check SHA256SUMS.txt)
-          gh release create "$TAG" \
-            --target "$COMMIT_SHA" \
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/tags/$TAG" \
+            -f "sha=$COMMIT_SHA" >/dev/null
+          gh release create "$TAG" --verify-tag \
             --title "QAT-LEDGER Official Release ($SHORT_SHA)" \
             --notes "Verified Official Release APKs for commit $SHORT_SHA. Signing, persistent public trust root, binary audit, and emulator smoke test passed." \
             release-assets/QAT_LEDGER_CUSTOMER_RELEASE.apk \
