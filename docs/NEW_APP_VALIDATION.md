@@ -20,13 +20,18 @@ The owner approved both IDs. Their availability in the intended distribution cha
 - No historical Ed25519 public keys were configured or verified. The workflow generated no replacement key; it marks license readiness **BLOCKED**. The QA run does not establish production licensing compatibility.
 - An earlier QA run at commit `1389541d256728c8193233d645300883ad1f7d26` failed analysis on one redundant test import; that import was removed, and the follow-up run above passed.
 
-## Remaining BLOCKED release gates
+## Owner-reported physical QA and remaining BLOCKED release gates
+
+The owner reports **Customer QA PASS** on their phone: Customer QA was installed beside the legacy Customer and a `.qatbackup` was restored with data appearing as expected. This is explicitly **owner testimony**, not a device test performed or independently inspected by Arena. The owner did not provide a separate checklist result for every table/financial total, settings, logo, SQLite integrity or foreign-key check. Do not upload the backup; preserve the old app and original backup.
+
+Developer physical QA has **NOT BEEN RUN** as of this report. It must use synthetic data only.
 
 | Gate | Status | Required next evidence/action |
 |---|---|---|
-| Physical coexistence with the original Customer installation | **BLOCKED** | On a separate owner-controlled Android device, install Customer alongside legacy `com.aistudio.tofanqat.nxzwmb`, launch both, and verify the old app's data remains unchanged. CI only installed the two new apps together. |
-| `.qatbackup` import inside the new Customer on a separate device | **BLOCKED** | Test with synthetic data only. Compare all tables/records, financial totals, settings and logo; run SQLite `integrity_check` and `foreign_key_check`; preserve the input file unchanged. Never upload a real backup to GitHub/Actions or a public link. |
-| Historical-license activation, re-activation and persistence | **BLOCKED** | Recover and verify historical Ed25519 public key(s) and test licenses. Do not invent replacement keys or include private seeds. |
+| Customer coexistence beside legacy app | **PASS — OWNER-REPORTED** | Owner reports both installed beside each other. Arena did not inspect legacy data on-device; retain the old app and its data unchanged. |
+| `.qatbackup` import inside the new Customer on a separate device | **PASS — OWNER-REPORTED, LIMITED EVIDENCE** | Owner reports successful restore and expected data. Before Production, complete the synthetic-backup checklist: all tables/records, financial totals, settings and logo; SQLite `integrity_check` and `foreign_key_check`; preserve the input unchanged. Never upload a real backup to GitHub/Actions or a public link. |
+| Developer QA physical install and feature test | **BLOCKED — NOT RUN** | Test the Developer QA APK on an owner-controlled test phone with synthetic data only; verify Developer-only features and no replacement of either Customer app. |
+| Historical-license activation, re-activation and persistence | **BLOCKED** | Recover and verify historical Ed25519 public key(s) and test licenses; exercise the new Customer on device. Do not invent replacement keys or include private seeds. |
 | New production signing identity | **BLOCKED** | After QA, the owner must generate a new RSA-3072 JKS key on a trusted computer, retain two encrypted owner-controlled backups, verify its fingerprint, and configure the protected `production` Environment secrets. No key was created in Arena. See [`RELEASE_KEY_SETUP.md`](RELEASE_KEY_SETUP.md). |
 | Production `apksigner` verification | **BLOCKED** | No production APK exists. The CI `apksigner` result above is for QA/debug APKs only. Production must confirm both new APKs use the owner-approved new certificate. |
 | Final production authorization/distribution | **BLOCKED** | Requires the physical-device and license evidence, new-key and Environment verification, exact release commit/fingerprints/results, and the owner's separate final approval. No Release was published. |

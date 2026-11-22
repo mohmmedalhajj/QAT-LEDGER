@@ -263,6 +263,17 @@ def test_assets_and_dart_structure():
     im = Image.open(os.path.join(ROOT, "assets/images/store_icon_1024.png"))
     assert im.size == (1024, 1024)
 
+    # Task-switcher branding must use the same current brand green as the icon backdrop,
+    # not the stale Kotlin-era color called out in PROJECT_AUDIT.md.
+    main_activity = os.path.join(
+        ROOT,
+        "android/app/src/main/kotlin/com/aistudio/tofanqat/nxzwmb/MainActivity.kt",
+    )
+    with open(main_activity, "r", encoding="utf-8") as f:
+        activity_src = f.read()
+    assert 'Color.parseColor("#173B2F")' not in activity_src
+    assert 'Color.parseColor("#173D2E")' in activity_src
+
     # Check relative Dart imports & forbidden residue
     dart_files = []
     for base in ("lib", "test"):

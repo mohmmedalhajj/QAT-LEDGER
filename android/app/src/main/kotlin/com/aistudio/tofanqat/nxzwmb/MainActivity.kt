@@ -232,7 +232,7 @@ class MainActivity : FlutterActivity() {
                     ActivityManager.TaskDescription(
                         cleanName,
                         if (customBmp != null) iconBmp else null,
-                        Color.parseColor("#173B2F")
+                        Color.parseColor("#173D2E")
                     )
                 )
             } catch (_: Exception) {
