@@ -1,6 +1,6 @@
 # New Production Release Key — Owner-Only Setup
 
-**Timing:** Follow these steps only after the QA workflow passes. QA passed for commit `9754be46068ec92155e8aa5645a98e032f283116` (run `45070939692`), but this key has **not** been generated and production remains blocked until the device, licensing, restore, and owner-approval gates are complete.
+**Timing:** Follow these steps only after the QA workflow passes. The current QA-only implementation passed for commit `67956a47c99df01b45540ef0cdbda3dd7b1f3270` (push run `45073158431`; pull-request run `45073163686`). This key has **not** been generated, GitHub production secrets are not verified, and production remains blocked until the device, licensing, restore, and owner-approval gates are complete. The workflow intentionally skipped production signing and publication.
 
 **Scope:** This new RSA/JKS signing identity is only for the new Customer (`com.aistudio.tofanqat.qatledger.customer`) and Developer (`com.aistudio.tofanqat.qatledger.developer`) packages and their future updates. It cannot update, replace, or sign the legacy `com.aistudio.tofanqat.nxzwmb` app. Never use its certificate to overwrite or sign the legacy package.
 
