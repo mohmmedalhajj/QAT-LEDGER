@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
@@ -101,6 +102,18 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
         SnackBar(content: Text('تعذر تشغيل الماسح: $e')),
       );
     }
+  }
+
+  Future<String> _licenseRequestMessage(AppController ctrl) async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    final version = packageInfo.buildNumber.isEmpty
+        ? packageInfo.version
+        : '${packageInfo.version}+${packageInfo.buildNumber}';
+    return WhatsappShareService.formatLicenseRequestMessage(
+      agencyName: ctrl.settings.agencyName,
+      installationId: ctrl.installationId,
+      appVersion: version,
+    );
   }
 
   Future<void> _addOrEditUserDialog(
@@ -930,10 +943,7 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                       onPressed: () async {
                         await WhatsappShareService.instance.openWhatsApp(
                           phone: '780961823',
-                          text:
-                              'مرحباً، أرغب في تفعيل ترخيص ميزان القات (PRO):\n'
-                              'الوكالة: ${ctrl.settings.agencyName}\n'
-                              'معرّف التثبيت: ${ctrl.installationId}',
+                          text: await _licenseRequestMessage(ctrl),
                         );
                       },
                       icon: const Icon(Icons.chat_outlined, size: 17),
@@ -941,11 +951,7 @@ class _LicenseAndSecurityViewState extends State<LicenseAndSecurityView> {
                     ),
                     OutlinedButton.icon(
                       onPressed: () async {
-                        await Share.share(
-                          'طلب ترخيص ميزان القات\n'
-                          'الوكالة: ${ctrl.settings.agencyName}\n'
-                          'معرّف التثبيت: ${ctrl.installationId}',
-                        );
+                        await Share.share(await _licenseRequestMessage(ctrl));
                       },
                       icon: const Icon(Icons.share_outlined, size: 17),
                       label: const Text('مشاركة طلب الترخيص'),

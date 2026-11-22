@@ -11,6 +11,7 @@ import 'package:qat_ledger/data/database_service.dart';
 import 'package:qat_ledger/data/models.dart';
 import 'package:qat_ledger/data/qat_repository.dart';
 import 'package:qat_ledger/data/room_migrator.dart';
+import 'package:qat_ledger/developer/developer_bridge_impl.dart';
 import 'package:qat_ledger/developer/developer_database.dart';
 import 'package:qat_ledger/developer/developer_key_manager.dart';
 import 'package:qat_ledger/developer/license_signer.dart';
@@ -26,6 +27,18 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
+
+  test('Developer app initialization does not create signing material before explicit console use', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final bridge = FlutterDeveloperBridge();
+
+    await bridge.initialize(prefs);
+
+    expect(bridge.isReady, isTrue);
+    expect(await DeveloperKeyManager(prefs).hasSigningKey(), isFalse);
+    expect(prefs.getKeys().where((key) => key.contains('seed')), isEmpty);
+  });
 
   test('Android Developer key storage fails closed when AndroidKeyStore is unavailable', () async {
     SharedPreferences.setMockInitialValues({});

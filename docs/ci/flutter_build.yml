@@ -868,7 +868,7 @@ jobs:
         env:
           CUSTOMER_APK_PATH: ${{ steps.audit.outputs.customer_apk }}
           DEVELOPER_APK_PATH: ${{ steps.audit.outputs.developer_apk }}
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: |
           set -euo pipefail
 
@@ -1097,6 +1097,16 @@ jobs:
 
           timeout 15 "$ADB" logcat -c || true
 
+          echo "=== Running Flutter integration tests on the clean Android Emulator ===" | tee -a "$LOG"
+          set -o pipefail
+          flutter test integration_test/customer_app_test.dart \
+            --flavor customer -d emulator-5554 -r expanded 2>&1 \
+            | tee ci-dist/integration_test_customer.log
+          flutter test integration_test/developer_app_test.dart \
+            --flavor developer -d emulator-5554 -r expanded 2>&1 \
+            | tee ci-dist/integration_test_developer.log
+          echo "PASS: Customer and Developer integration tests booted, verified native flavor identities, completed synthetic onboarding, rejected default credentials, and checked Developer-console isolation." | tee -a "$LOG"
+
           CUSTOMER_ACTIVITY=$(awk -F"'" '/^launchable-activity:/{print $2; exit}' ci-dist/customer-badging.txt)
           DEVELOPER_ACTIVITY=$(awk -F"'" '/^launchable-activity:/{print $2; exit}' ci-dist/developer-badging.txt)
 
@@ -1207,7 +1217,11 @@ jobs:
             echo "emulator_status=$EMU_STATUS"
             tail -n 25 ci-dist/emulator_smoke.log 2>/dev/null || echo "emulator_smoke.log missing"
             echo ""
-            echo "--- 8. GATE MATRIX (PASS / FAIL / NOT EXECUTED / BLOCKED) ---"
+            echo "--- 8. FLUTTER INTEGRATION TESTS (CUSTOMER + DEVELOPER) ---"
+            tail -n 35 ci-dist/integration_test_customer.log 2>/dev/null || echo "Customer integration log missing"
+            tail -n 35 ci-dist/integration_test_developer.log 2>/dev/null || echo "Developer integration log missing"
+            echo ""
+            echo "--- 9. GATE MATRIX (PASS / FAIL / NOT EXECUTED / BLOCKED) ---"
             echo "PASS: flutter analyze"
             echo "PASS: flutter test (automated Dart/SQLite/Ed25519/Room v18 suites)"
             echo "PASS: APK binary isolation & zero-private-key audit"

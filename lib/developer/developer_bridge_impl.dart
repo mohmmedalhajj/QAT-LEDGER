@@ -18,7 +18,9 @@ class FlutterDeveloperBridge extends DeveloperBridge {
   Future<void> initialize(SharedPreferences prefs) async {
     final manager = DeveloperKeyManager(prefs);
     try {
-      await manager.getOrGenerateSigningKeyPair();
+      // Do not create signing material merely because the Developer app starts.
+      // Opening the Developer console is the explicit action that creates a first key.
+      await manager.loadSigningKeyPair();
       _keyManager = manager;
       _keyUnavailableReason = null;
     } catch (_) {

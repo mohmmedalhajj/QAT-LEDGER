@@ -102,6 +102,17 @@ class WhatsappShareService {
     return sb.toString().trim();
   }
 
+  static String formatLicenseRequestMessage({
+    required String agencyName,
+    required String installationId,
+    required String appVersion,
+  }) {
+    return 'طلب ترخيص ميزان القات\n'
+        'الوكالة: $agencyName\n'
+        'معرّف التثبيت: $installationId\n'
+        'إصدار التطبيق: $appVersion';
+  }
+
   static Uri buildWhatsAppUri({String? phone, required String text}) {
     final trimmed = (phone ?? '').trim();
     var digits = normalizeDigits(trimmed).replaceAll(RegExp(r'[^0-9+]'), '');

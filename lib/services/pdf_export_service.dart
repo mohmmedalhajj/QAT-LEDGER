@@ -21,6 +21,9 @@ class PdfExportService {
 
   PdfFonts? _cachedFonts;
 
+  static const String requiredReportFooterText =
+      'تم إعداد هذا التقرير عبر النظام المحاسبي والإداري المتكامل لميزان القات';
+
   static String buildArabicPdfFileName(String reportTitle, [DateTime? timestamp]) {
     final ts = timestamp ?? DateTime.now();
     final datePart = QatDateUtils.toIsoDate(ts);
@@ -336,7 +339,7 @@ class PdfExportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(24),
         theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
-        footer: (_) => _footerBlock(agency),
+        footer: (_) => _requiredReportFooterBlock(),
         build: (ctx) => [
           _headerBlock(agency, 'تقرير حوالات المستلم: ${summary.recipient.name}'),
           pw.SizedBox(height: 8),
@@ -401,7 +404,7 @@ class PdfExportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(24),
         theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
-        footer: (_) => _footerBlock(agency),
+        footer: (_) => _requiredReportFooterBlock(),
         build: (ctx) {
           final widgets = <pw.Widget>[
             _headerBlock(agency, 'كشف حساب $partyTitle: $partyName'),
@@ -477,7 +480,7 @@ class PdfExportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(24),
         theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
-        footer: (_) => _footerBlock(agency),
+        footer: (_) => _requiredReportFooterBlock(),
         build: (ctx) {
           final widgets = <pw.Widget>[
             _headerBlock(agency, 'التقرير المالي الشامل'),
@@ -527,7 +530,7 @@ class PdfExportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(20),
         theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
-        footer: (_) => _footerBlock(agency),
+        footer: (_) => _requiredReportFooterBlock(),
         build: (ctx) => [
           _headerBlock(agency, 'تقرير جرد وتقييم المخزون'),
           pw.SizedBox(height: 8),
@@ -604,7 +607,7 @@ class PdfExportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(20),
         theme: pw.ThemeData.withFont(base: fonts.regular, bold: fonts.bold),
-        footer: (_) => _footerBlock(agency),
+        footer: (_) => _requiredReportFooterBlock(),
         build: (ctx) => [
           _headerBlock(agency, 'كشف المصروفات التشغيلية'),
           pw.SizedBox(height: 8),
@@ -717,6 +720,23 @@ class PdfExportService {
               child: pw.Image(agencyLogo, fit: pw.BoxFit.contain),
             ),
         ],
+      ),
+    );
+  }
+
+  pw.Widget _requiredReportFooterBlock() {
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.only(top: 8),
+      decoration: const pw.BoxDecoration(
+        border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300, width: 0.7)),
+      ),
+      child: pw.Center(
+        child: pw.Text(
+          _ar(requiredReportFooterText),
+          textAlign: pw.TextAlign.center,
+          style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+        ),
       ),
     );
   }

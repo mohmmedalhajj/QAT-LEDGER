@@ -74,6 +74,10 @@ void main() {
     );
     expect(pdfBytes.length, greaterThan(1500));
     expect(String.fromCharCodes(pdfBytes.take(5)), '%PDF-');
+    expect(
+      PdfExportService.requiredReportFooterText,
+      'تم إعداد هذا التقرير عبر النظام المحاسبي والإداري المتكامل لميزان القات',
+    );
 
     const summary = TransferRecipientSummary(
       recipient: TransferRecipient(
@@ -214,6 +218,19 @@ void main() {
           printerAddress: '   ',
         ),
         throwsStateError,
+      );
+
+      final licenseRequest = WhatsappShareService.formatLicenseRequestMessage(
+        agencyName: 'وكالة الاختبار',
+        installationId: 'synthetic-install-id',
+        appVersion: '2.1.0+201',
+      );
+      expect(
+        licenseRequest,
+        'طلب ترخيص ميزان القات\n'
+        'الوكالة: وكالة الاختبار\n'
+        'معرّف التثبيت: synthetic-install-id\n'
+        'إصدار التطبيق: 2.1.0+201',
       );
 
       // WhatsApp URI builder does not invent a fixed country code for local numbers
