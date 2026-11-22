@@ -9,7 +9,6 @@ import 'package:qat_ledger/data/database_service.dart';
 import 'package:qat_ledger/data/models.dart';
 import 'package:qat_ledger/data/qat_repository.dart';
 import 'package:qat_ledger/data/room_migrator.dart';
-import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
