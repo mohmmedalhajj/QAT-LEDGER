@@ -1,0 +1,61 @@
+name: Check QAT-LEDGER production signing certificate
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  verify-certificate:
+    name: Compare signing certificate only
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    permissions: {}
+    steps:
+      - name: Compare keystore certificate SHA-256
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          expected='fb7422dd9cfbda083cabb8fdf8a3cb24e25fd1f7f28229beba3ffddf2afea338'
+
+          if [[ -z "${KEYSTORE_B64:-}" || -z "${KEYSTORE_PASSWORD:-}" || -z "${KEY_ALIAS:-}" ]]; then
+            echo 'SECRET_MISSING'
+            exit 0
+          fi
+
+          umask 077
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+          keystore="$tmpdir/signing.jks"
+          keytool_output="$tmpdir/keytool.txt"
+
+          if ! printf '%s' "$KEYSTORE_B64" | base64 --decode > "$keystore" 2>/dev/null || [[ ! -s "$keystore" ]]; then
+            echo 'KEYSTORE_INVALID'
+            exit 1
+          fi
+
+          if ! keytool -list -v \
+            -keystore "$keystore" \
+            -storepass:env KEYSTORE_PASSWORD \
+            -alias "$KEY_ALIAS" > "$keytool_output" 2>/dev/null; then
+            echo 'KEYSTORE_INVALID'
+            exit 1
+          fi
+
+          actual="$(awk '/SHA256:/ { line=$0; sub(/^.*SHA256:[[:space:]]*/, "", line); gsub(/:/, "", line); print tolower(line); exit }' "$keytool_output")"
+          if [[ ! "$actual" =~ ^[0-9a-f]{64}$ ]]; then
+            echo 'CERTIFICATE_NOT_FOUND'
+            exit 1
+          fi
+
+          echo "CERT_SHA256=$actual"
+          if [[ "$actual" == "$expected" ]]; then
+            echo 'MATCH'
+          else
+            echo 'NO_MATCH'
+          fi
