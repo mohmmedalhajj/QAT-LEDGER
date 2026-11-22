@@ -309,7 +309,8 @@ jobs:
 
           mkdir -p ci-dist
           rm -f android/key.properties android/app/qat-ledger-production.jks
-          APPROVED_CERT_SHA256="ef54452f72865e580ebe13e69a2fbe2785d47f99198b0915730a9bf1cc3bad62"
+          # RELEASE_KEYSTORE_SHA256 is the owner-approved fingerprint of the NEW production key.
+          # It is provisioned only in the protected production Environment after owner verification.
           APPROVED_CERT_SUBJECT='Owner: CN=QAT Ledger, OU=Software Development, O=QAT Ledger, L=Taiz, ST=TTT, C=YE'
           APPROVED_KEY_ALIAS='qat-ledger-release'
 
@@ -353,10 +354,6 @@ jobs:
               echo "release_signing_required=false" >> "$GITHUB_OUTPUT"
               echo "::warning title=signing_policy::OFFICIAL RELEASE HALTED: RELEASE_KEYSTORE_SHA256 is malformed. Building strictly labeled QA-DEBUG-ONLY APKs; no production release will be published."
               exit 0
-            fi
-            if [ "$EXPECTED_SHA256" != "$APPROVED_CERT_SHA256" ]; then
-              echo "::error title=signing_policy::RELEASE_KEYSTORE_SHA256 does not match the owner-approved production certificate."
-              exit 1
             fi
             if [ "$KEY_ALIAS" != "$APPROVED_KEY_ALIAS" ]; then
               echo "::error title=signing_policy::KEY_ALIAS does not match the owner-approved production alias."
@@ -1268,9 +1265,8 @@ jobs:
           DEVELOPER_SHA=$(sha256sum release-dist/QAT-Ledger-Developer.apk | awk '{print $1}')
           CUSTOMER_CERT=$(sed -n 's/.*cert_sha256=\([0-9a-fA-F]*\)).*/\1/p' ci-dist/BUILD_SIGNING_STATUS.txt | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':')
           DEVELOPER_CERT=$(sed -n 's/.*cert_sha256=\([0-9a-fA-F]*\)).*/\1/p' ci-dist/BUILD_SIGNING_STATUS.txt | tail -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':')
-          APPROVED_CERT_SHA256="ef54452f72865e580ebe13e69a2fbe2785d47f99198b0915730a9bf1cc3bad62"
-          if [[ ! "$CUSTOMER_CERT" =~ ^[0-9a-f]{64}$ ]] || [[ "$CUSTOMER_CERT" != "$APPROVED_CERT_SHA256" ]] || [[ "$CUSTOMER_CERT" != "$DEVELOPER_CERT" ]]; then
-            echo "::error title=release_package::Production APK certificates are missing, differ, or do not match the owner-approved fingerprint."
+          if [[ ! "$CUSTOMER_CERT" =~ ^[0-9a-f]{64}$ ]] || [[ ! "$DEVELOPER_CERT" =~ ^[0-9a-f]{64}$ ]] || [[ "$CUSTOMER_CERT" != "$DEVELOPER_CERT" ]]; then
+            echo "::error title=release_package::Production APK certificates are missing, malformed, or differ from one another."
             exit 1
           fi
           {
@@ -1417,8 +1413,12 @@ jobs:
           grep -qx "commit_sha=$COMMIT_SHA" "$REPORT"
           grep -qx "app_version=$APP_VERSION" "$REPORT"
           grep -qx 'customer_application_id=com.aistudio.tofanqat.qatledger.customer' "$REPORT"
-          grep -qx 'customer_certificate_sha256=ef54452f72865e580ebe13e69a2fbe2785d47f99198b0915730a9bf1cc3bad62' "$REPORT"
-          grep -qx 'developer_certificate_sha256=ef54452f72865e580ebe13e69a2fbe2785d47f99198b0915730a9bf1cc3bad62' "$REPORT"
+          CUSTOMER_CERT_REPORTED=$(sed -n 's/^customer_certificate_sha256=//p' "$REPORT" | head -n 1)
+          DEVELOPER_CERT_REPORTED=$(sed -n 's/^developer_certificate_sha256=//p' "$REPORT" | head -n 1)
+          if [[ ! "$CUSTOMER_CERT_REPORTED" =~ ^[0-9a-f]{64}$ ]] || [[ "$CUSTOMER_CERT_REPORTED" != "$DEVELOPER_CERT_REPORTED" ]]; then
+            echo "::error title=release_gate::Production APKs must share one valid owner-approved certificate SHA-256 fingerprint."
+            exit 1
+          fi
           grep -qx 'developer_application_id=com.aistudio.tofanqat.qatledger.developer' "$REPORT"
           grep -qx 'legacy_application_id=com.aistudio.tofanqat.nxzwmb' "$REPORT"
           grep -qx 'legacy_upgrade_supported=false' "$REPORT"

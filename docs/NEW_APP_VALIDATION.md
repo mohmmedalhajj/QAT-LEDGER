@@ -1,6 +1,6 @@
 # New Customer & Developer App Validation Status
 
-**Status: NOT RELEASE-READY — no production APK has been built or distributed. The requested GitHub Actions run will build QA-only APKs if its gates pass; those artifacts are not production releases.**
+**Status: QA workflow passed; NOT RELEASE-READY.** QA-only APKs were built and exercised by GitHub Actions. No production APK or public release has been created.
 
 ## Owner-approved permanent Android identities
 
@@ -9,32 +9,28 @@
 | Customer | `com.aistudio.tofanqat.qatledger.customer` | `QAT-LEDGER Customer` | `2.1.0+201` (`versionCode=201`) |
 | Developer | `com.aistudio.tofanqat.qatledger.developer` | `QAT-LEDGER Developer` | `2.1.0-dev` (`versionCode=201`) |
 
-These proposed IDs are distinct from each other and legacy Customer `com.aistudio.tofanqat.nxzwmb` (`2.0.0`, code `200`). The new Customer is a **separate install, not an update**. Do not uninstall, overwrite, or clear the legacy app or its data. Their availability still needs to be checked in the intended distribution channels before distribution.
+The owner approved both IDs. Their availability in the intended distribution channels remains to be checked. They are distinct from each other and legacy Customer `com.aistudio.tofanqat.nxzwmb` (`2.0.0`, code `200`). The new Customer is a **separate install, not an update**. Do not uninstall, overwrite, or clear the legacy app or its data.
 
-## Checks completed in this workspace
+## QA workflow result
 
-- GitHub Actions YAML syntax parsed successfully for `.github/workflows/flutter_build.yml` and its documentation mirror.
-- `bash -n` passed for all 19 multiline shell steps in each workflow file.
-- Static assertions passed for both application IDs, version `2.1.0+201`, package-label checks, `${applicationId}.fileprovider`, and the legacy non-upgrade gate.
-- A synthetic `.qatbackup` cross-install test was added to `test/repository_accounting_test.dart`. It compares every SQLite table and row, settings, logo bytes, integrity checks, and foreign-key checks. **It has not run locally; it is included in the requested Actions test run.**
-- The workflow no longer generates an ephemeral Ed25519 trust key. With no historical public keys configured, a QA build is explicitly blocked for license readiness; production requires owner-recovered historical public keys only.
-- `git diff --check` passed. The original Kotlin source-archive checksum and the pre-change safety snapshot checksums passed.
-- No APK/AAB, keystore, or `android/key.properties` file was created or found.
+- **Passing run:** [GitHub Actions run 45070939692](https://github.com/mohmmedalhajj/QAT-LEDGER/actions/runs/45070939692), commit `9754be46068ec92155e8aa5645a98e032f283116`, triggered by push on the current branch. The corresponding pull-request run also passed.
+- `flutter analyze` and the full `flutter test` suite **passed** in CI. The added synthetic `.qatbackup` cross-install test ran within this suite and compares every SQLite table/row, settings, logo bytes, `integrity_check`, and `foreign_key_check`.
+- Customer and Developer QA builds **passed**. CI’s APK manifest/binary audit passed for package IDs, labels, version names/codes, edition isolation, and signatures. The Android Emulator smoke test passed for installing and launching both new apps side-by-side with distinct app data directories.
+- Both the production package-preparation and publication paths were **skipped**. Artifacts use `QAT_LEDGER_CUSTOMER_QA_DEBUG_ONLY.apk` and `QAT_LEDGER_DEVELOPER_QA_DEBUG_ONLY.apk`; the workflow artifact is named `qat-ledger-QA-DEBUG-ONLY-build-and-audit`. These are QA/debug-signed only and must not be given to customers as production builds or used to update the legacy app.
+- No historical Ed25519 public keys were configured or verified. The workflow generated no replacement key; it marks license readiness **BLOCKED**. The QA run does not establish production licensing compatibility.
+- An earlier QA run at commit `1389541d256728c8193233d645300883ad1f7d26` failed analysis on one redundant test import; that import was removed, and the follow-up run above passed.
 
-## BLOCKED locally — GitHub Actions QA run pending
+## Remaining BLOCKED release gates
 
-| Gate | Status | Reason / next evidence required |
+| Gate | Status | Required next evidence/action |
 |---|---|---|
-| `flutter analyze`, `flutter test` | **BLOCKED** | Flutter/Dart SDKs are not installed. |
-| Android Gradle Customer/Developer build | **BLOCKED** | Java, Gradle, and Android SDK build tools are not installed. |
-| APK Manifest/application IDs, version, signature and certificate audit | **BLOCKED** | No APK was built; `aapt2`, `apksigner`, and `keytool` are unavailable. |
-| Emulator installation, launch and data-directory separation | **BLOCKED** | `adb` and Android emulator are unavailable. |
-| Install beside the original app without changing its data | **BLOCKED** | Requires an Android device with the original app and a new QA APK. |
-| Import `.qatbackup` inside new Customer on a separate device | **BLOCKED** | The synthetic automated test is unrun; the required separate-device test has not happened. Use synthetic data only; verify all tables/records, financial totals, settings, logo, `integrity_check`, and `foreign_key_check`; keep the original backup unchanged and never upload it. |
-| License activation/re-activation and two-device behavior | **BLOCKED** | No historical Ed25519 public keys or test license have been recovered and verified. Do not invent a replacement key. |
-| Production signing and secret verification | **BLOCKED** | No production keystore is available here; GitHub secret names could not be inspected (HTTP 403). No key was generated. The production Environment must be owner-verified and properly provisioned. |
-| Final release approval / distribution | **BLOCKED** | No final commit, owner approval of the IDs, passing device evidence, verified signing, or release authorization exists. No release was published. |
+| Physical coexistence with the original Customer installation | **BLOCKED** | On a separate owner-controlled Android device, install Customer alongside legacy `com.aistudio.tofanqat.nxzwmb`, launch both, and verify the old app's data remains unchanged. CI only installed the two new apps together. |
+| `.qatbackup` import inside the new Customer on a separate device | **BLOCKED** | Test with synthetic data only. Compare all tables/records, financial totals, settings and logo; run SQLite `integrity_check` and `foreign_key_check`; preserve the input file unchanged. Never upload a real backup to GitHub/Actions or a public link. |
+| Historical-license activation, re-activation and persistence | **BLOCKED** | Recover and verify historical Ed25519 public key(s) and test licenses. Do not invent replacement keys or include private seeds. |
+| New production signing identity | **BLOCKED** | After QA, the owner must generate a new RSA-3072 JKS key on a trusted computer, retain two encrypted owner-controlled backups, verify its fingerprint, and configure the protected `production` Environment secrets. No key was created in Arena. See [`RELEASE_KEY_SETUP.md`](RELEASE_KEY_SETUP.md). |
+| Production `apksigner` verification | **BLOCKED** | No production APK exists. The CI `apksigner` result above is for QA/debug APKs only. Production must confirm both new APKs use the owner-approved new certificate. |
+| Final production authorization/distribution | **BLOCKED** | Requires the physical-device and license evidence, new-key and Environment verification, exact release commit/fingerprints/results, and the owner's separate final approval. No Release was published. |
 
 ## Repository state
 
-Work remains on `arena/e82ef661-qat-ledger`; PR #1 stays open and `main` is not changed or merged. The pre-existing broad worktree changes and safety snapshots under `.workspace-safety-backup/` are preserved. This report describes the checked-out source and does not imply that a production release was built or approved.
+Current work remains on `arena/e82ef661-qat-ledger`; PR #1 is open. No merge or change to `main` occurred. QA run `45070939692` tested app source at commit `9754be46068ec92155e8aa5645a98e032f283116`. Subsequent edits to production-key policy and its owner setup guide require their own QA rerun before those workflow edits are treated as validated. Safety snapshots remain under `.workspace-safety-backup/` and are not part of the Release.
