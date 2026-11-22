@@ -12,8 +12,10 @@
 
 | Flavor | Application ID | Entrypoint | Purpose | Private Keys in APK |
 |---|---|---|---|---|
-| `customer` | `com.aistudio.tofanqat.nxzwmb` | `lib/main_customer.dart` | End-user production app preserving in-place upgrade & Room v18 migration (`tofan_al_aqsa_qat_db`) | **Zero** (`APP_EDITION=customer`; zero `lib/developer/**` imports; only public keys via `QAT_LICENSE_PUBLIC_KEYS`) |
-| `developer` | `com.aistudio.tofanqat.nxzwmb.dev` | `lib/main_developer.dart` | Internal vendor/developer issuance build | **Zero extractable private keys in APK/CI** (Ed25519 keys generated/sealed on device inside `AndroidKeyStore` AES-256-GCM or imported via encrypted `.qkey`) |
+| `customer` | `com.aistudio.tofanqat.qatledger.customer` (owner-approved permanent ID; distribution-channel availability still needs verification) | `lib/main_customer.dart` | New end-user app; independent install beside legacy package; Room v18 migration (`tofan_al_aqsa_qat_db`) | **Zero** (`APP_EDITION=customer`; zero `lib/developer/**` imports; only public keys via `QAT_LICENSE_PUBLIC_KEYS`) |
+| `developer` | `com.aistudio.tofanqat.qatledger.developer` (owner-approved permanent ID; distribution-channel availability still needs verification) | `lib/main_developer.dart` | New, separate Developer app identity | **Zero extractable private keys in APK/CI** (Ed25519 keys generated/sealed on device inside `AndroidKeyStore` AES-256-GCM or imported via encrypted `.qkey`) |
+
+**Identity and upgrade safety:** The owner approved both proposed new IDs as permanent identities; store/registry availability still needs verification. The legacy Customer package is `com.aistudio.tofanqat.nxzwmb` (reported legacy version `2.0.0 (200)`). The proposed new IDs above are distinct from that legacy ID and from each other; they install as separate apps and are **not direct updates**. Keep the legacy installation and its data untouched. The version is `2.1.0+201` (`versionCode=201`) for both new flavors; Developer's display version has the `-dev` suffix. The namespace remains the legacy Kotlin source namespace only; packaged IDs come from the flavor `applicationId`s. These package IDs are long-lived Android identities: owner approval is recorded; confirmation that they are available in the intended distribution channels is still required before distributing any build.
 
 ---
 
@@ -24,7 +26,7 @@
 - **Developer APK** NEVER bundles any plaintext private seed (`dev_bootstrap_seed.b64` is banned from APKs, Git, and CI archives). Instead:
   1. **On-Device Hardware-Sealed Keys:** On first launch on the owner's Developer phone, `DeveloperKeyManager` generates an Ed25519 keypair and seals the seed via `AndroidKeyStore` (`AES-256-GCM`), or imports an encrypted `.qkey` vault bundle (`QAT_LEDGER_ENC_KEY_V1`, protected by `PBKDF2-HMAC-SHA256` 200,000 iterations + `AES-256-GCM` with passphrase >= 10 chars). AndroidKeyStore errors fail closed; Android builds never persist a newly generated seed to plaintext preferences. Legacy fallback seeds are sealed into AndroidKeyStore before use, and remain untouched if sealing fails. If a stored sealed key cannot be opened, the Developer bridge disables signing rather than replacing the key, while app initialization continues so accounting data remains accessible.
   2. **Public-Only CI Secret (`QAT_LICENSE_PUBLIC_KEYS`):** The developer copies ONLY the public key line (`QLK-XXXXXXXX:<base64UrlRaw32>`) into GitHub Secrets (`QAT_LICENSE_PUBLIC_KEYS`). Neither CI nor any APK ever holds a production private signing key.
-  3. **Legacy Format Compatibility & Signed Revocation:** Existing `QL1.` compact tokens and `.qlic` JSON envelopes (both Kotlin `licensing-core` line-v1 and Flutter v2 JSON) remain 100% valid; offline revocation uses additive signed `QLR1.` revocation notices (`QAT_LEDGER_REVOCATION_V1`) without invalidating legacy licenses.
+  3. **Format support is not identity recovery:** `QL1.` compact tokens and `.qlic` JSON envelopes (Kotlin `licensing-core` line-v1 and Flutter v2 JSON) are supported only when their signer is present in the app's trusted public keys. Do not claim compatibility with licenses signed by an unrecovered historical key. Offline revocation uses additive signed `QLR1.` revocation notices (`QAT_LEDGER_REVOCATION_V1`); do not remove or replace trusted keys as a substitute for revocation.
 
 ### Production Signing Service Design vs Device-Local Keystore (Security Trade-off Disclosure)
 - **Recommended Enterprise Option — Remote Signing Service (Cloud KMS / HSM):**
@@ -34,15 +36,15 @@
   - **Architecture:** No backend required; Developer phone seals its Ed25519 key inside `AndroidKeyStore` AES-256-GCM and backs up encrypted `.qkey` bundles offline.
   - **Security Boundary:** Protects completely against APK extraction and CI leaks (since zero keys reside in the APK or CI). Risk is strictly bounded to physical compromise + OS-level root extraction on the live unlocked Developer phone itself.
 
-### Key Continuity & Rotation Policy
-- **Why persistent keys matter:** Rotating Ed25519 keys without keeping older public keys in `QAT_LICENSE_PUBLIC_KEYS` causes previously issued customer licenses to fail with `UNTRUSTED_KEY`.
-- **How to rotate without breaking existing customers:**
-  1. Rotate to a new Ed25519 key (`QLK-NEWKEY`) in the Developer Console (or HSM/KMS).
-  2. Append the new public key while preserving the older public key(s) in GitHub Secret `QAT_LICENSE_PUBLIC_KEYS`:
-     ```text
-     QLK-OLDKEY:<oldBase64UrlRaw32>,QLK-NEWKEY:<newBase64UrlRaw32>
-     ```
-  3. Rebuild the Customer APK so existing customers remain active (`QLK-OLDKEY`) and new customers verify against `QLK-NEWKEY`.
+### Key Recovery, Continuity & Owner-Approved Transition
+- **Current historical identity status:** The historical Developer Ed25519 private identity and its public key have not been recovered or independently verified. No public-key entries were found in the inspected repository/archive; this does not prove no key exists on the owner's devices or backups. Do not generate a replacement or claim old-license compatibility until legitimate recovery has been attempted.
+- **Safe recovery sequence (owner-controlled device only):**
+  1. Preserve the Developer phone and encrypted `.qkey` backups. Do not clear app data, reinstall, reset the device, export an unencrypted seed, or paste seed/key-vault contents into chat, CI, source control, or logs.
+  2. On the original device, use the Developer console to inspect/export only the public key line and key ID. Preserve an encrypted backup of any currently working key before attempting recovery. Search owner-controlled offline backups for an encrypted `.qkey` vault; do not import over an existing identity. Recover it only on a separate owner-controlled secure Developer device, or after an owner-approved backup/restore plan. Never upload a `.qkey` or private seed.
+  3. Compare the recovered public key with any documented historical key and known license-validation evidence. Treat a missing/locked key as unrecovered; do not silently replace it.
+  4. If recovery fails, stop for explicit owner approval of an identity transition. Generate any replacement only on the owner-controlled Developer device or approved HSM, and document that licenses signed by an unavailable old key may not verify. Keep every recovered historical public key additively in the Customer trust set; never claim continuity without test evidence.
+  5. Before production, configure `QAT_LICENSE_PUBLIC_KEYS` with public keys only and verify a test license for every retained key on Customer builds. A signing-key transition does not authorize data deletion or a licensing-semantics change.
+- **General rotation after identity recovery:** Add the new public key while preserving every historical key in `QAT_LICENSE_PUBLIC_KEYS` (for example `QLK-OLD:<oldBase64UrlRaw32>,QLK-NEW:<newBase64UrlRaw32>`), rebuild, and test verification against each key before any approved release.
 
 ---
 
@@ -50,38 +52,60 @@
 
 From the original Kotlin repository (`516e118:app/build.gradle.kts` & `516e118:README.md`):
 - The original build referenced `${rootDir}/my-upload-key.jks` (`keyAlias = "upload"`) via `KEYSTORE_PATH` / `STORE_PASSWORD` / `KEY_PASSWORD`, which was **never committed to Git**.
-- `516e118:app/build.gradle.kts` set `dependenciesInfo { includeInApk = false; includeInBundle = true }`, and `516e118:README.md` explicitly referenced Google Play Console upload key reset — indicating **Google Play App Signing** architecture:
-  - **Play App Signing Key (held by Google Play):** Signs final Play-distributed APKs derived from uploaded `.aab` bundles.
-  - **Upload Key (`my-upload-key.jks`, alias `upload`):** Used by the developer/CI to sign `.aab` uploads to Play Console (or direct sideload APKs if distributed directly outside Play).
-  - **If `my-upload-key.jks` is lost:**
-    1. If distributed via **Google Play (Play App Signing enabled)**: Generate a new upload keystore (`keytool -genkeypair ... -alias upload`), export its PEM certificate (`keytool -export -rfc ...`), and follow Google Play Console **Setup → App integrity → Request upload key reset** — **Play preserves the underlying App Signing key so users still update seamlessly**.
-    2. If distributed as **direct sideload APKs outside Play**: A lost keystore cannot produce in-place upgrades over earlier direct installs; installing a new keystore requires uninstalling the older build (backup `.qatbackup` first!) or recovering the original `my-upload-key.jks` from the original AI Studio / developer machine.
+- `516e118:app/build.gradle.kts` and `516e118:README.md` contain legacy Play-upload configuration, but the requested deliverables here are direct APKs. Do not infer the Play App Signing certificate from that legacy upload-key material.
+- **Owner-approved production signing identity:** The owner supplied `qat-ledger-production.jks` (`qat-ledger-release`) and its approved certificate fingerprint. Do not generate, reset, or substitute a keystore for this APK release. The new package IDs are separate from the historical app, so the old app does not need uninstalling. Keep the same new-app release identity for future updates to these proposed IDs; a signing identity cannot turn them into updates of the old package. A Play upload-key reset is a separate, inapplicable process unless the owner confirms a distinct Play App Signing release path.
 
 ### Strict CI & Gradle Rules
 - **Production Release (`RELEASE_SIGNING_REQUIRED=true` / `release_mode=production_release`):**
   - `android/app/build.gradle.kts` **throws `GradleException` and refuses Debug signing** if `android/key.properties` or the `.jks` keystore file is absent.
-  - `.github/workflows/flutter_build.yml` enforces **all six** GitHub Repository Secrets before allowing `is_official_release=true` or publishing an Official GitHub Release:
-    1. `KEYSTORE_B64` — Base64 encoding of `my-upload-key.jks` (single line)
+  - `.github/workflows/flutter_build.yml` reads production credentials only for an explicit `workflow_dispatch` from `main` after the `production` Environment gate; store all six as **Environment secrets**, not repository-wide secrets:
+    1. `KEYSTORE_B64` — Base64 encoding of the original owner-controlled release keystore (single line)
     2. `KEYSTORE_PASSWORD` — Keystore password
-    3. `KEY_ALIAS` — Key alias (`upload` in original `516e118`)
+    3. `KEY_ALIAS` — Verified key alias (do not assume the historical `upload` alias)
     4. `KEY_PASSWORD` — Private key password
-    5. `RELEASE_KEYSTORE_SHA256` — **Required** 64-hex SHA-256 certificate digest verified via `keytool` before Gradle runs AND matched against `apksigner` output on both final APKs
-    6. `QAT_LICENSE_PUBLIC_KEYS` — Trusted Ed25519 **public** key(s) (`QLK-XXXXXXXX:<base64UrlRaw32>`); binary audit verifies each key is embedded in Customer APK `libapp.so` + `classes*.dex`
-- **Official Release Gate & Required 10 Release Assets:**
-  - `Publish Official GitHub Release` executes **only after** `flutter analyze`, `flutter test`, strict keystore & SHA-256 verification, `apksigner` certificate match, binary isolation + Ed25519 trust-root audit, and `Smoke-test APKs on Android Emulator` (including same-cert in-place reinstall) ALL pass, attaching all 10 artifacts:
-    `QAT_LEDGER_CUSTOMER_RELEASE.apk`, `QAT_LEDGER_DEVELOPER_RELEASE.apk`, `QAT_LEDGER_FLUTTER_SOURCE.zip`, `SHA256SUMS.txt`, `BUILD_SIGNING_STATUS.txt`, `customer-signature.txt`, `developer-signature.txt`, `binary-isolation-audit.txt`, `LICENSE_TRUST_AUDIT.txt`, and `FINAL_BUILD_AND_TEST_REPORT.txt`.
-- **When Official Secrets Are Missing (`qa_debug_only`):**
-  - CI halts publishing any Production GitHub Release (`Publish Official GitHub Release` is skipped).
-  - Builds are strictly labeled `QAT_LEDGER_CUSTOMER_QA_DEBUG_ONLY.apk` and `QAT_LEDGER_DEVELOPER_QA_DEBUG_ONLY.apk` for QA verification only.
+    5. `RELEASE_KEYSTORE_SHA256` — Required 64-hex SHA-256 certificate digest, independently recorded from the owner's trusted signing certificate; CI verifies it via `keytool` before Gradle and matches both final APKs via `apksigner`
+    6. `QAT_LICENSE_PUBLIC_KEYS` — Trusted Ed25519 **public** key(s) only (`QLK-XXXXXXXX:<base64UrlRaw32>`); binary audit verifies each key in Customer APK `libapp.so` + `classes*.dex`
+  - Never generate an Android release identity in CI or Arena. The owner supplied the already-created `qat-ledger-production.jks`; its file is not present in this workspace, so the provided SHA-256, PrivateKeyEntry, alias and passwords have not been independently verified here. The workflow pins and checks the specified certificate identity. A different certificate will not update an earlier build of either new package in place; neither new package is intended to update the legacy Customer package. Follow the separate-install data migration procedure below. GitHub denied names-only listing of Environment secrets (HTTP 403), so secret presence remains unverified.
+- **Production owner-only dispatch controls:** Pushes and pull requests are QA-only and can never access the `production` Environment or publish. A production run requires an explicit `workflow_dispatch` from the current `main` tip, `release_mode=production_release`, and a typed confirmation exactly equal to `RELEASE <full 40-character commit SHA>`. The workflow rejects any other ref, stale/non-tip commit, missing/mismatched confirmation, or a production Environment that allows any branch except exactly `main`, enables administrator bypass, or has a GitHub required-reviewers rule. Do not configure independent reviewers or treat self-approval as review; the typed confirmation is the owner's deliberate release authorization. The build job has read-only permissions; a separate publication job receives only `contents: write`, and only after every build, signing, binary, trust-root, and emulator gate succeeds. The publisher verifies checksums, serializes publication, reserves an immutable version-and-commit tag (`qat-ledger-v<semver>-build.<build-number>-<full SHA>`) with a non-forcing GitHub API ref creation, and refuses to overwrite an existing tag/release or create a duplicate. If release creation fails after the tag has been reserved, stop for manual investigation; do not force-move or silently reuse the tag. Push/PR executions and QA dispatches cannot enter that publication path.
+- **Environment prerequisite (latest inspection):** GitHub currently reports `can_admins_bypass=false`, exactly one custom deployment branch policy (`main`), and no required-reviewers rule. This matches the single-owner protection model; do not add an independent reviewer or treat self-approval as one. The production Environment secret-name endpoint returned HTTP 403 to this session, so the presence or values of signing/public-key secrets remain unknown. The production workflow will fail closed if the environment policy changes or required secrets are absent/malformed.
+- **Workflow supply chain:** Third-party GitHub Actions in this workflow are referenced by immutable full commit SHAs (with the corresponding release tag in a comment); update them only after verifying the upstream release and reviewed commit.
+- **Official Release Gate & Required Assets:** Publication requires `flutter analyze`, `flutter test`, strict owner-approved keystore/certificate identity verification, matching `apksigner` certificates, binary isolation and Ed25519 trust-root audits, emulator smoke tests for separate Customer/Developer identities, and actual owner-run physical-device/data-restore tests for the exact commit. No legacy in-place upgrade is expected or tested because the new IDs intentionally differ. The immutable versioned tag is `qat-ledger-v<semver>-build.<build-number>-<full-commit-sha>`. The public release contains exactly `QAT-Ledger-Customer.apk`, `QAT-Ledger-Developer.apk`, `SHA256SUMS.txt`, and `RELEASE-NOTES.md`; the checksum manifest covers both APKs and the notes/evidence file. Release notes include version/build/commit/date, minimum Android API, certificate fingerprint, separate-install `.qatbackup` migration guidance, and the explicit non-update relationship to the legacy app. The publisher downloads the actual release assets again and rechecks their checksums and APK signatures before the workflow succeeds.
+- **QA-only mode:** Pushes, PRs, and non-production dispatches use QA signing, never access production secrets, and cannot publish a production release. If no verified historical public keys are available, QA builds embed no license trust root; CI does not generate a replacement key, reports licensing as `BLOCKED`, and labels APKs `QAT_LEDGER_CUSTOMER_QA_DEBUG_ONLY.apk` and `QAT_LEDGER_DEVELOPER_QA_DEBUG_ONLY.apk`.
 
-### Encoding Your Original Keystore for GitHub Secrets
+### Customer data migration when the Android signing certificate changes
+The new Customer package ID intentionally differs from the legacy ID, so install the new app next to the old app; do **not** uninstall, overwrite, or clear the legacy Customer app/data. A `.qatbackup` restore creates data in the new installation, not an in-place upgrade.
+
+1. In the old Customer app, open **Settings → backup/restore** and use the **Save/Export database** action (the Android system “Save as” document picker). Save the legacy Room database file, normally `qat_ledger_backup_*.db`, to a user-visible location such as Documents, Downloads, removable storage, or another independently backed-up provider—not the app's internal backup folder or `Android/data`.
+2. Keep two copies outside the phone's app-private storage. Re-open the file picker and confirm the exported file exists and is non-empty. Preserve the original unchanged; do not uninstall or clear the old app at any point in this migration. Never attach the backup to GitHub, CI artifacts, or a public link. If possible, copy it to a second owner-controlled device or computer.
+3. Install the new Customer alongside the legacy Customer, without uninstalling either app. In the new app, choose **Settings → backup/restore → inspect/restore**, select the exported `.qatbackup`, and review the validation summary before confirming restore. The importer verifies the package/database and SQLite integrity, restores transactionally with a rollback snapshot, and preserves the legacy app's separate private data.
+4. After restore, verify agency/account setup, YER/SAR balances, customers, invoices/sales, suppliers, stock, expenses, taxes, transfers, and transaction history against the old device's last reports. Keep the external backup unchanged until those checks are complete. Do not delete the old device or its copy beforehand.
+5. A license/installation ID is device-bound and is not part of the accounting database backup; the customer may need a new license. Historical licenses signed by an unrecovered Ed25519 key may not validate. Do not promise continuity until the corresponding public key and a test license have been verified.
+
+The codebase contains synthetic Room migration and backup/restore tests, but **no actual `.qatbackup` restore inside the new Customer build or physical-device migration was tested in this mission**. The release gate therefore requires an owner-authored GitHub issue/PR comment URL for the exact commit containing these lines: `two_device_license_transfer=PASS`, `license_restart_persistence=PASS`, `customer_backup_saved_outside_app_data=PASS`, `legacy_customer_and_new_customer_coexist=PASS`, `legacy_customer_data_unchanged=PASS`, `customer_backup_restore_on_new_install=PASS`, `all_tables_and_records_verified=PASS`, `all_financial_totals_verified=PASS`, `settings_and_logo_verified=PASS`, `sqlite_integrity_check=PASS`, `foreign_key_check=PASS`, `clean_install_launch=PASS`, and `commit_sha=<full SHA>`. Use synthetic data only; never attach or upload `.qatbackup` data. This is an owner evidence record, not an independent CI hardware test; the report labels it as owner-attested.
+
+### Handling a recovered historical signing identity
+If the historical keystore is later recovered, preserve it and inspect it only on the owner's trusted machine. Compare its public certificate fingerprint with the historical signed APKs and records; do not substitute it for the expressly supplied production identity, upload it, or discard either identity without a documented owner decision. Never paste key material or passwords into chat, CI, issues, or logs.
+
+Store only the owner-approved production keystore and its required Android signing values, plus the public-only `QAT_LICENSE_PUBLIC_KEYS`, as secrets on the `production` Environment. Do not configure the Developer private Ed25519 seed as a GitHub secret. For an authorized dispatch, select `production_release`, enter `RELEASE <the exact current main commit SHA>` in `production_confirmation`, and provide the owner-authored physical-device/data-restore evidence comment URL. Do not dispatch until the permanent Android signing identity and Ed25519 public trust root are verified and every automated, emulator, and physical-device prerequisite has passed.
+
+### Owner-approved Android production identity (use this existing key; never generate a replacement)
+The owner supplied the already-created production identity. The private file itself was not found in this workspace, and must not be presumed available from the owner's Windows device or GitHub.
+
+- Filename: `qat-ledger-production.jks`
+- Alias: `qat-ledger-release`
+- Store type: JKS; key: RSA 3072-bit; signature algorithm: `SHA256withRSA`
+- Certificate subject: `CN=QAT Ledger, OU=Software Development, O=QAT Ledger, L=Taiz, ST=TTT, C=YE`
+- **Approved certificate SHA-256:** `EF:54:45:2F:72:86:5E:58:0E:BE:13:E6:9A:2F:BE:27:85:D4:7F:99:19:8B:09:15:73:0A:9B:F1:CC:3B:AD:62`
+
+On the owner's trusted machine, inspect the existing file using `keytool` (it prompts for credentials; do not place passwords in command arguments or share output containing secrets):
 ```bash
-# Base64-encode the original keystore (single line, no wrapping)
-base64 -w 0 my-upload-key.jks
-
-# Inspect the SHA-256 certificate fingerprint (for RELEASE_KEYSTORE_SHA256)
-keytool -list -v -keystore my-upload-key.jks -alias upload | grep SHA256
+keytool -list -v -storetype JKS \
+  -keystore /secure/path/qat-ledger-production.jks \
+  -alias qat-ledger-release
 ```
+Confirm `Entry type: PrivateKeyEntry`, the exact alias, subject, 3072-bit RSA key, `SHA256withRSA`, and the exact fingerprint above. The owner must test the private-key password with a local signing operation, then verify the resulting signature; CI also exercises it when Gradle signs both production APKs. Keep two owner-controlled backups. Do not generate a replacement, rename or discard the existing identity, or put the file in Git.
+
+Provision the five Android signing secrets (`KEYSTORE_B64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`, `RELEASE_KEYSTORE_SHA256`) plus the separate public-only `QAT_LICENSE_PUBLIC_KEYS` in **Settings → Environments → production → Environment secrets**. Set `KEY_ALIAS=qat-ledger-release` and `RELEASE_KEYSTORE_SHA256` to the approved fingerprint above. The workflow now pins the approved fingerprint, subject, key type, alias, RSA size and signature algorithm and fails closed on any mismatch. Never configure an Ed25519 private seed as a GitHub secret.
 
 ---
 
@@ -95,14 +119,14 @@ flutter pub get
 flutter analyze
 flutter test -r expanded
 
-# 3. Official Production Customer Release APK (requires android/key.properties + release.jks)
+# 3. Official Production Customer Release APK (requires android/key.properties + qat-ledger-production.jks)
 flutter build apk --release --flavor customer \
   -t lib/main_customer.dart \
   -PRELEASE_SIGNING_REQUIRED=true \
   --dart-define=APP_EDITION=customer \
   --dart-define=QAT_LICENSE_PUBLIC_KEYS="<QLK_ENTRY_CSV>"
 
-# 4. Official Production Developer Release APK (requires android/key.properties + release.jks)
+# 4. Official Production Developer Release APK (requires android/key.properties + qat-ledger-production.jks)
 flutter build apk --release --flavor developer \
   -t lib/main_developer.dart \
   -PRELEASE_SIGNING_REQUIRED=true \

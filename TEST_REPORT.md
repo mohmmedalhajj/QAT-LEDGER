@@ -1,5 +1,8 @@
 # TEST & VERIFICATION REPORT — QAT LEDGER (`ميزان القات`)
 
+> **Historical CI snapshot:** This report records earlier PR build runs and the then-configured legacy package IDs. It is not evidence for the proposed new Customer/Developer IDs, current source revision, new version, physical-device migration, or release signing.
+
+
 **Repository:** `mohmmedalhajj/QAT-LEDGER`  
 **Branch:** `arena/e82ef661-qat-ledger` (branched from `516e118fc3c2dc476049c6de47b7cffe7b9fdc66`)  
 **Verified CI Run:** `44039066878` (commit `c7a24e142e58d5ae26f1b001482453afe6b6b1be`)  

@@ -474,9 +474,9 @@ void main() {
       final editionCfg = EditionConfig(
         edition: 'customer',
         publicKeysCsv: keyInfo.kotlinConfigLine,
-        applicationId: 'com.aistudio.tofanqat.nxzwmb',
-        versionName: '1.0.0',
-        versionCode: 1,
+        applicationId: 'com.aistudio.tofanqat.qatledger.customer',
+        versionName: '2.1.0',
+        versionCode: 201,
       );
 
       await store.saveRawLicense(subLicense.compactToken);
@@ -574,9 +574,9 @@ void main() {
       final custConfig = EditionConfig(
         edition: 'customer',
         publicKeysCsv: devPubInfo.kotlinConfigLine,
-        applicationId: 'com.aistudio.tofanqat.nxzwmb',
-        versionName: '2.0.0',
-        versionCode: 200,
+        applicationId: 'com.aistudio.tofanqat.qatledger.customer',
+        versionName: '2.1.0',
+        versionCode: 201,
       );
       final custDb = DatabaseService(
         factory: databaseFactoryFfi,

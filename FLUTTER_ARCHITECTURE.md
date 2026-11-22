@@ -71,9 +71,9 @@
   - `QAT_LEDGER_CANONICAL_PAYLOAD_V1`
   - Key order: `format`, `licenseId`, `product`, `edition`, `customerName`, `businessName`, `planCode`, `issuedAtEpochMs`, `expiresAtEpochMs`, `installationId`, `maxDevices`, `features`
   - Signed with Ed25519 (`package:cryptography`) and encoded as `QL1.<base64url_payload>.<base64url_signature>` or JSON `.qlic` (`QAT_LEDGER_LICENSE_V1`).
-- **Build Flavors:**
-  - `customer` flavor (`com.aistudio.tofanqat.nxzwmb`): `APP_EDITION=customer`, verifies licenses against `QAT_LICENSE_PUBLIC_KEYS` (`--dart-define` / Gradle `BuildConfig`), hides all Developer Console UI & issuance logic.
-  - `developer` flavor (`com.aistudio.tofanqat.nxzwmb.dev`): `APP_EDITION=developer`, unlocks Developer Key Manager, License Signer, Plans, Customers, Issued Registry, and Audit Log behind the `780mohmmed` gate.
+- **Build Flavors (owner-approved permanent package IDs; availability must be confirmed before distribution):**
+  - `customer` flavor (`com.aistudio.tofanqat.qatledger.customer`, proposed): `APP_EDITION=customer`, verifies licenses only against owner-recovered historical public keys supplied through `QAT_LICENSE_PUBLIC_KEYS` (`--dart-define` / Gradle `BuildConfig`), and hides Developer Console UI and issuance logic.
+  - `developer` flavor (`com.aistudio.tofanqat.qatledger.developer`, proposed): `APP_EDITION=developer`, unlocks Developer Key Manager, License Signer, Plans, Customers, Issued Registry, and Audit Log behind the `780mohmmed` gate.
 
 ---
 

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -8,6 +9,7 @@ import 'package:qat_ledger/data/database_service.dart';
 import 'package:qat_ledger/data/models.dart';
 import 'package:qat_ledger/data/qat_repository.dart';
 import 'package:qat_ledger/data/room_migrator.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -606,6 +608,97 @@ void main() {
       expect((await repo.getWorkerHandoffs(includeArchived: false)).length, 2);
       await repo.deleteWorkerHandoff(wh2);
       expect((await repo.getWorkerHandoffs(includeArchived: false)).length, 1);
+
+      // Synthetic cross-install .qatbackup restore: compare every table/row/setting and logo bytes.
+      // No real customer backup or private finance data is used by this automated test.
+      final crossInstallDir = p.join(tempDir.path, 'cross_install');
+      final logoPath = p.join(crossInstallDir, 'synthetic-agency-logo.png');
+      await Directory(crossInstallDir).create(recursive: true);
+      final syntheticLogo = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/k9sAAAAASUVORK5CYII=',
+      );
+      await File(logoPath).writeAsBytes(syntheticLogo, flush: true);
+      await repo.setSetting('agency_name', 'Synthetic Restore Agency');
+      await repo.setSetting('agency_logo_path', logoPath);
+      await repo.setSetting('currency_mode', 'dual_currency');
+      final qatBackup = await backupService.buildBackupPackageBytes(
+        stagingDir: p.join(crossInstallDir, 'export'),
+        appEdition: 'customer',
+        agencyLogoPath: logoPath,
+      );
+      expect(qatBackup.metadata.fileName.endsWith('.qatbackup'), isTrue);
+      final sourceInspection = await backupService.inspectBackupFile(qatBackup.metadata.filePath);
+      expect(sourceInspection.isValid, isTrue);
+
+      final targetService = DatabaseService(
+        factory: databaseFactoryFfi,
+        customPath: p.join(crossInstallDir, 'fresh_customer_install.db'),
+      );
+      final targetMigrator = RoomMigrator(
+        dbService: targetService,
+        sourceFactory: databaseFactoryFfi,
+      );
+      final targetRepo = QatRepository(targetService);
+      final targetBackupService = BackupService(
+        dbService: targetService,
+        migrator: targetMigrator,
+      );
+      final targetDb = await targetService.database;
+      await targetDb.insert(
+        'app_settings',
+        {'key': 'stale_install_only', 'value': 'remove-me', 'updated_at_ms': 1},
+      );
+      final restoreResult = await targetBackupService.restoreFromFile(qatBackup.metadata.filePath);
+      expect(restoreResult.postRestoreVerified, isTrue);
+      expect(restoreResult.verifiedSha256, qatBackup.metadata.dbSha256);
+
+      final sourceDb = await dbService.database;
+      final restoredDb = await targetService.database;
+      for (final db in [sourceDb, restoredDb]) {
+        final integrity = await db.rawQuery('PRAGMA integrity_check');
+        expect(integrity.single.values.single, 'ok');
+        await db.execute('PRAGMA foreign_keys = ON');
+        expect(await db.rawQuery('PRAGMA foreign_key_check'), isEmpty);
+      }
+      expect(await targetRepo.getSetting('stale_install_only'), isNull);
+      expect(await targetRepo.getSetting('agency_name'), 'Synthetic Restore Agency');
+      expect(await targetRepo.getSetting('currency_mode'), 'dual_currency');
+      final restoredLogoPath = await targetRepo.getSetting('agency_logo_path');
+      expect(restoredLogoPath, isNotNull);
+      expect(await File(restoredLogoPath!).readAsBytes(), syntheticLogo);
+
+      Future<List<String>> canonicalTableSnapshots(Database db) async {
+        final tableRows = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        );
+        final snapshots = <String>[];
+        for (final tableRow in tableRows) {
+          final table = tableRow['name']! as String;
+          final quoted = '"${table.replaceAll('"', '""')}"';
+          final rows = await db.rawQuery('SELECT * FROM $quoted');
+          final canonicalRows = <String>[];
+          for (final row in rows) {
+            final values = Map<String, Object?>.fromEntries(
+              row.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
+            );
+            if (table == 'app_settings' && values['key'] == 'agency_logo_path') {
+              values['value'] = '<bundled-logo-restored-to-device-storage>';
+              values['updated_at_ms'] = 0;
+            }
+            canonicalRows.add(jsonEncode(values));
+          }
+          canonicalRows.sort();
+          snapshots.add('$table:${jsonEncode(canonicalRows)}');
+        }
+        return snapshots;
+      }
+
+      expect(
+        await canonicalTableSnapshots(restoredDb),
+        await canonicalTableSnapshots(sourceDb),
+        reason: 'All synthetic database tables, rows, and settings must survive .qatbackup import.',
+      );
+      await targetService.close();
 
       // BackupService.resetAllAccountingData wipes transactional tables while keeping safety snapshot
       final resetSafety = await backupService.resetAllAccountingData(

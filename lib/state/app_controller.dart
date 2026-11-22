@@ -93,9 +93,9 @@ class AppController extends ChangeNotifier {
   EditionConfig _editionConfig = const EditionConfig(
     edition: 'customer',
     publicKeysCsv: '',
-    applicationId: 'com.aistudio.tofanqat.nxzwmb',
-    versionName: '2.0.0',
-    versionCode: 200,
+    applicationId: 'com.aistudio.tofanqat.qatledger.customer',
+    versionName: '2.1.0',
+    versionCode: 201,
   );
   String _installationId = '';
   LicenseVerificationResult _licenseStatus =

@@ -50,6 +50,8 @@ if (releaseSigningRequired && !hasReleaseKeystore) {
 }
 
 android {
+    // Keep the legacy Kotlin/BuildConfig namespace; flavor applicationIds below are new,
+    // independently installable app identities and are NOT upgrades of the legacy package.
     namespace = "com.aistudio.tofanqat.nxzwmb"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
@@ -70,7 +72,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.aistudio.tofanqat.nxzwmb"
+        applicationId = "com.aistudio.tofanqat.qatledger.customer"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -86,7 +88,7 @@ android {
         }
         create("developer") {
             dimension = "edition"
-            applicationIdSuffix = ".dev"
+            applicationId = "com.aistudio.tofanqat.qatledger.developer"
             versionNameSuffix = "-dev"
             buildConfigField("String", "APP_EDITION", "\"developer\"")
         }

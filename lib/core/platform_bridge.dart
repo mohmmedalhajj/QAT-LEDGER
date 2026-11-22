@@ -154,9 +154,9 @@ class PlatformBridge {
         return EditionConfig(
           edition: _dartDefineEdition.isNotEmpty ? _dartDefineEdition : nativeEdition,
           publicKeysCsv: combinedKeys,
-          applicationId: (raw['applicationId'] as String?) ?? 'com.aistudio.tofanqat.nxzwmb',
-          versionName: (raw['versionName'] as String?) ?? '2.0.0',
-          versionCode: (raw['versionCode'] as int?) ?? 200,
+          applicationId: (raw['applicationId'] as String?) ?? 'com.aistudio.tofanqat.qatledger.customer',
+          versionName: (raw['versionName'] as String?) ?? '2.1.0',
+          versionCode: (raw['versionCode'] as int?) ?? 201,
         );
       }
     } on MissingPluginException {
@@ -167,9 +167,9 @@ class PlatformBridge {
     return const EditionConfig(
       edition: _dartDefineEdition == 'developer' ? 'developer' : 'customer',
       publicKeysCsv: _dartDefineKeys,
-      applicationId: 'com.aistudio.tofanqat.nxzwmb',
-      versionName: '2.0.0',
-      versionCode: 200,
+      applicationId: 'com.aistudio.tofanqat.qatledger.customer',
+      versionName: '2.1.0',
+      versionCode: 201,
     );
   }
 

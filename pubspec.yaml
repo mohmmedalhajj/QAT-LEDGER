@@ -1,7 +1,7 @@
 name: qat_ledger
 description: "ميزان القات (QAT LEDGER) — نظام محاسبي وإداري متكامل لوكالات ومكاتب القات بدون إنترنت"
 publish_to: "none"
-version: 2.0.0+200
+version: 2.1.0+201
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
