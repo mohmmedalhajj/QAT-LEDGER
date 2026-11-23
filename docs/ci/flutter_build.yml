@@ -1097,12 +1097,10 @@ jobs:
 
           timeout 15 "$ADB" logcat -c || true
 
-          echo "=== Running Flutter integration tests on the clean Android Emulator ===" | tee -a "$LOG"
+          echo "=== Running Flutter app integration tests with isolated synthetic SQLite/platform fixtures ===" | tee -a "$LOG"
           set -o pipefail
-          if ! timeout 300 flutter drive \
-            --driver=test_driver/integration_test.dart \
-            --target=integration_test/customer_app_test.dart \
-            --flavor customer -d emulator-5554 -v 2>&1 \
+          if ! timeout 300 flutter test integration_test/customer_app_test.dart \
+            -r expanded 2>&1 \
             | tee ci-dist/integration_test_customer.log; then
             echo "FAIL: Customer Flutter integration test failed or timed out." | tee -a "$LOG"
             DIAGNOSTIC=$(tr '\r' '\n' < ci-dist/integration_test_customer.log | tail -c 1800 | tr '\n' '|')
@@ -1111,10 +1109,8 @@ jobs:
             { echo '### Customer integration failure'; tail -n 100 ci-dist/integration_test_customer.log; } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          if ! timeout 300 flutter drive \
-            --driver=test_driver/integration_test.dart \
-            --target=integration_test/developer_app_test.dart \
-            --flavor developer -d emulator-5554 -v 2>&1 \
+          if ! timeout 300 flutter test integration_test/developer_app_test.dart \
+            -r expanded 2>&1 \
             | tee ci-dist/integration_test_developer.log; then
             echo "FAIL: Developer Flutter integration test failed or timed out." | tee -a "$LOG"
             DIAGNOSTIC=$(tr '\r' '\n' < ci-dist/integration_test_developer.log | tail -c 1800 | tr '\n' '|')
