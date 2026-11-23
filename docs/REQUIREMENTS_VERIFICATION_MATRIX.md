@@ -2,18 +2,18 @@
 
 **المصدر الحاكم الموثق سابقًا:** المرفق الأصلي «أمر إلزامي لتدقيق واستكمال QAT-LEDGER وتسليم تطبيقي Customer وDeveloper»، ويُسجل في الجرد السابق PDF من 8 صفحات وSHA-256 `aef78a885fd0575d647af2150f71318e51b7cebfe00e6f1834fbfc7ff6a04a0c`. **تنبيه الحالة الحالية:** لم يُعثر على ملف PDF في مساحة العمل الحالية؛ لا أدّعي أنني أعدت فتحه أو طابقت كل بند معه في هذه الجولة.
 
-**المستودع/الفرع الآن:** `mohmmedalhajj/QAT-LEDGER`, `arena/e82ef661-qat-ledger`، PR #1 مفتوح مقابل `main`. **HEAD الحالي:** `7d45f919b44c65adeaaf3432928e4d39e17cb1eb`. تفاصيل جرد ما قبل التنفيذ أدناه لقطة تاريخية وليست الحالة الراهنة.
+**المستودع/الفرع الآن:** `mohmmedalhajj/QAT-LEDGER`, `arena/e82ef661-qat-ledger`، PR #1 مفتوح مقابل `main`. **HEAD الذي اختُبر في هذه اللقطة:** `19408731c191d9540fd0a89109326d02e7b8b090`؛ تحديث المصفوفة هنا توثيقي فقط. تفاصيل جرد ما قبل التنفيذ أدناه لقطة تاريخية وليست الحالة الراهنة.
 
 ## تحقق الحالة الحالية — 16-11-2026
 
-- الفرع الحالي `arena/e82ef661-qat-ledger`، HEAD `7d45f919b44c65adeaaf3432928e4d39e17cb1eb`؛ PR #1 مفتوح إلى `main` على الـHEAD نفسه، ولم يحدث دمج أو Release.
-- أحدث Push Actions على HEAD هو [45102345855 — SUCCESS](https://github.com/mohmmedalhajj/QAT-LEDGER/actions/runs/45102345855)، وفحص PR المقابل [45102352131 — SUCCESS](https://github.com/mohmmedalhajj/QAT-LEDGER/actions/runs/45102352131). نجح Flutter analyze/test وbuild للنسختين وAPK audits واختبارات app integration الاصطناعية وAndroid Emulator smoke test. التشغيل QA-DEBUG-ONLY، وليس Production؛ تحقق المحاكي لا يثبت اختبار هاتف حقيقي أو سلامة التطبيق القديم على هاتف المالك.
+- الفرع الحالي `arena/e82ef661-qat-ledger`، HEAD الذي اختُبر `19408731c191d9540fd0a89109326d02e7b8b090`؛ PR #1 مفتوح إلى `main` على الـHEAD نفسه، ولم يحدث دمج أو Release.
+- Push Actions على هذا الـHEAD هو [45103541120 — SUCCESS](https://github.com/mohmmedalhajj/QAT-LEDGER/actions/runs/45103541120)، وفحص PR المقابل [45103546478 — SUCCESS](https://github.com/mohmmedalhajj/QAT-LEDGER/actions/runs/45103546478). نجح Flutter analyze/test وbuild للنسختين وAPK audits واختبارات app integration الاصطناعية وAndroid Emulator smoke test. التشغيل QA-DEBUG-ONLY، وليس Production؛ تحقق المحاكي لا يثبت اختبار هاتف حقيقي أو سلامة التطبيق القديم على هاتف المالك.
 - تدقيق APK والمحاكي في تشغيل Push تحقق من هويتي Customer وDeveloper الجديدتين، تثبيتهما جنبًا إلى جنب مع مجلدي بيانات منفصلين وإقلاعهما دون crash؛ لم تُجرَ محاولة ترقية التطبيق القديم. لا يثبت ذلك وظيفة مالية end-to-end أو اختبار هاتف المالك.
 - أحدث تقرير signing status في Actions أكد غياب متطلبات توقيع Production: S1 keystore Base64 وS2 store password وS3 alias وS4 key password وS5 certificate SHA-256 كلها `MISSING` (حالة فقط، لا قيم). تقرير بناء QA يسجل `no_historical_public_keys_qa_only` و`public_key_id=NONE`؛ لا يوجد جذر تاريخي مثبت. Production halted/skipped، وQA APKs ليست Production.
 - GitHub Releases list يعرض إصدارين سابقين فقط بعنوان QA-DEBUG-ONLY pre-release، وremote tags لهما؛ لا Production release. لم أنشئ أو أعدّل أي Release/Tag.
 - اختبارات integration الحالية في `test/app_integration/` هي Flutter host tests بقاعدة SQLite وplatform fixtures اصطناعية: إعداد الهوية/flavor، boot وonboarding، رفض الافتراضي، وعزل Developer bridge. ليست device integration tests.
 - **المرفق الأصلي غير متاح في هذا الـworkspace الآن:** بحثت عن ملفات PDF خارج `.workspace-safety-backup/` ولم أجد مرفق المتطلبات. المصفوفة تسجل تاريخيًا SHA-256 `aef78a885fd0575d647af2150f71318e51b7cebfe00e6f1834fbfc7ff6a04a0c` واستخراجًا سابقًا من 8 صفحات، لكن لا أستطيع فتح الأصل أو إعادة مطابقة كل بند في هذه الجولة. لذلك لا أؤكد اكتمال التغطية؛ وضعت صفوف التحقق من المصدر والتغطية الشاملة `BLOCKED` حتى تعيد إرفاق PDF الأصلي.
-- هذه النسخة من المصفوفة حدّثت محليًا لتسجل نتائج Actions على HEAD الحالي؛ نجاح Actions يثبت فقط النطاق الذي اختبره CI، ولا يستبدل المطابقة مع PDF الأصلي أو اختبارات الهاتف/بيانات المالك.
+- هذا التحديث التوثيقي يسجل نتائج Actions للـHEAD أعلاه؛ أي commit لاحق يقتصر على تعديل المصفوفة نفسها ولا يغير الشيفرة المختبرة. نجاح Actions يثبت فقط النطاق الذي اختبره CI، ولا يستبدل المطابقة مع PDF الأصلي أو اختبارات الهاتف/بيانات المالك.
 
 **حدود الصلاحية:** تدقيق/QA فقط؛ لا دمج، لا تعديل لـ`main`، لا إصدار أو نشر Production، لا tag/Release، ولا إنشاء مفاتيح أو Keystore. الهويتان الثابتتان هما Customer `com.aistudio.tofanqat.qatledger.customer` وDeveloper `com.aistudio.tofanqat.qatledger.developer`. التطبيق القديم `com.aistudio.tofanqat.nxzwmb` وبياناته لا تُحدّث ولا تُحذف. لا ترفع `.qatbackup` حقيقيًا. الحالة `PASS` محصورة في الدليل المذكور وبنطاقه؛ اختبار اصطناعي/CI/محاكي لا يساوي اختبار هاتف أو جهاز مادي.
 
