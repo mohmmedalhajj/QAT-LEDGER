@@ -1098,12 +1098,22 @@ jobs:
 
           echo "=== Running Flutter integration tests on the clean Android Emulator ===" | tee -a "$LOG"
           set -o pipefail
-          flutter test integration_test/customer_app_test.dart \
+          if ! timeout 600 flutter test integration_test/customer_app_test.dart \
             --flavor customer -d emulator-5554 -r expanded 2>&1 \
-            | tee ci-dist/integration_test_customer.log
-          flutter test integration_test/developer_app_test.dart \
+            | tee ci-dist/integration_test_customer.log; then
+            echo "FAIL: Customer Flutter integration test failed or timed out." | tee -a "$LOG"
+            tail -n 100 ci-dist/integration_test_customer.log | tee -a "$LOG"
+            { echo '### Customer integration failure'; tail -n 100 ci-dist/integration_test_customer.log; } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if ! timeout 600 flutter test integration_test/developer_app_test.dart \
             --flavor developer -d emulator-5554 -r expanded 2>&1 \
-            | tee ci-dist/integration_test_developer.log
+            | tee ci-dist/integration_test_developer.log; then
+            echo "FAIL: Developer Flutter integration test failed or timed out." | tee -a "$LOG"
+            tail -n 100 ci-dist/integration_test_developer.log | tee -a "$LOG"
+            { echo '### Developer integration failure'; tail -n 100 ci-dist/integration_test_developer.log; } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           echo "PASS: Customer and Developer integration tests booted, verified native flavor identities, completed synthetic onboarding, rejected default credentials, and checked Developer-console isolation." | tee -a "$LOG"
 
           CUSTOMER_ACTIVITY=$(awk -F"'" '/^launchable-activity:/{print $2; exit}' ci-dist/customer-badging.txt)
