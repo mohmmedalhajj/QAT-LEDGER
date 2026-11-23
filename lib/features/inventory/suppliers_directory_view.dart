@@ -1,0 +1,1183 @@
+import 'package:material_ui/material_ui.dart';
+import 'package:provider/provider.dart';
+
+import '../../core/money.dart';
+import '../../core/platform_bridge.dart';
+import '../../core/theme.dart';
+import '../../data/models.dart';
+import '../../data/qat_repository.dart';
+import '../../services/whatsapp_share_service.dart';
+import '../../state/app_controller.dart';
+import '../widgets/common_widgets.dart';
+import '../widgets/erp_components.dart';
+
+class SuppliersDirectoryView extends StatefulWidget {
+  const SuppliersDirectoryView({super.key});
+
+  @override
+  State<SuppliersDirectoryView> createState() => _SuppliersDirectoryViewState();
+}
+
+class _SuppliersDirectoryViewState extends State<SuppliersDirectoryView> {
+  String _search = '';
+  bool _onlyPayables = false;
+
+  Future<void> _openSupplierDialog(
+    AppController ctrl, {
+    Supplier? existing,
+  }) async {
+    final nameCtrl = TextEditingController(text: existing?.name ?? '');
+    final phoneCtrl = TextEditingController(text: existing?.phone ?? '');
+    final addrCtrl = TextEditingController(text: existing?.address ?? '');
+    final regionCtrl = TextEditingController(text: existing?.region ?? '');
+    final notesCtrl = TextEditingController(text: existing?.notes ?? '');
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [nameCtrl, phoneCtrl, addrCtrl, regionCtrl, notesCtrl],
+        child: AlertDialog(
+          title: Text(existing == null ? 'مورد جديد' : 'تعديل بيانات المورد'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final picked =
+                      await PlatformBridge.instance.pickPhoneContact();
+                  if (picked != null) {
+                    nameCtrl.text = picked.name;
+                    phoneCtrl.text = picked.phone;
+                  }
+                },
+                icon: const Icon(Icons.contacts_outlined, size: 18),
+                label: const Text('استيراد من جهات الاتصال'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'الاسم *'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: phoneCtrl,
+                textDirection: TextDirection.ltr,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'الهاتف'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: regionCtrl,
+                decoration: const InputDecoration(labelText: 'المنطقة / المديرية'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: addrCtrl,
+                decoration: const InputDecoration(labelText: 'العنوان التفصيلي'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: notesCtrl,
+                decoration: const InputDecoration(labelText: 'ملاحظات'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final clean = nameCtrl.text.trim();
+              if (clean.isEmpty) return;
+              final dup = ctrl.suppliers.any(
+                (s) =>
+                    s.id != existing?.id &&
+                    s.name.trim().toLowerCase() == clean.toLowerCase(),
+              );
+              if (dup) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text('يوجد مورد مسجل بنفس الاسم مسبقاً'),
+                  ),
+                );
+                return;
+              }
+              await ctrl.repo.upsertSupplier(
+                id: existing?.id,
+                name: clean,
+                phone: phoneCtrl.text,
+                address: addrCtrl.text,
+                region: regionCtrl.text,
+                notes: notesCtrl.text,
+              );
+              await ctrl.reloadAll();
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('حفظ'),
+          ),
+        ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSupplierReturnDialog(
+    AppController ctrl,
+    Supplier supplier,
+  ) async {
+    final amountCtrl = TextEditingController();
+    final qtyCtrl = TextEditingController(text: '0');
+    final itemCtrl = TextEditingController();
+    final notesCtrl = TextEditingController();
+    CurrencyCode cur = ctrl.currencyPolicy.defaultCurrency;
+    int returnDateMs = DateTime.now().millisecondsSinceEpoch;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [amountCtrl, qtyCtrl, itemCtrl, notesCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text('سند مرتجع لمورد — ${supplier.name}'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ErpDatePickerTile(
+                    label: 'تاريخ المرتجع',
+                    dateMs: returnDateMs,
+                    onChanged: (ms) => setModalState(() => returnDateMs = ms),
+                  ),
+                  const SizedBox(height: 8),
+                  CurrencySelectorRow(
+                    policy: ctrl.currencyPolicy,
+                    selected: cur,
+                    onChanged: (c) => setModalState(() => cur = c),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: itemCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'الصنف المرتجع (اختياري)',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  AccountingNumberField(
+                    controller: qtyCtrl,
+                    label: 'الكمية المرتجعة',
+                  ),
+                  const SizedBox(height: 8),
+                  AccountingNumberField(
+                    controller: amountCtrl,
+                    label: 'قيمة المرتجع (${cur.shortSymbol}) *',
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: notesCtrl,
+                    decoration: const InputDecoration(labelText: 'سبب المرتجع'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final amt = Money.parseMinorUnits(amountCtrl.text);
+                  if (amt <= 0) return;
+                  await ctrl.repo.addSupplierReturn(
+                    supplierId: supplier.id,
+                    supplierName: supplier.name,
+                    amountMinor: amt,
+                    currency: cur,
+                    returnedQtyMilli: QuantityMath.parseMilli(qtyCtrl.text),
+                    itemName: itemCtrl.text,
+                    notes: notesCtrl.text,
+                    dateMs: returnDateMs,
+                  );
+                  await ctrl.reloadAll();
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                child: const Text('اعتماد المرتجع'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSupplierPaymentDialog(
+    AppController ctrl,
+    Supplier supplier,
+  ) async {
+    final amountCtrl = TextEditingController();
+    final bankCtrl = TextEditingController();
+    final transferNoCtrl = TextEditingController();
+    final notesCtrl = TextEditingController();
+    CurrencyCode cur = ctrl.currencyPolicy.defaultCurrency;
+    String paymentMethod = 'نقدي';
+    int payDateMs = DateTime.now().millisecondsSinceEpoch;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => ErpDialogControllerScope(
+        controllers: [amountCtrl, bankCtrl, transferNoCtrl, notesCtrl],
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => AlertDialog(
+            title: Text('سند صرف لمورد — ${supplier.name}'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ErpDetailRow(
+                  label: 'المستحق للمورد',
+                  value: Money(supplier.balanceFor(cur), cur).format(),
+                  valueColor: supplier.balanceFor(cur) > 0
+                      ? ctx.pal.warning
+                      : ctx.pal.success,
+                ),
+                const SizedBox(height: 8),
+                ErpDatePickerTile(
+                  label: 'تاريخ السند',
+                  dateMs: payDateMs,
+                  onChanged: (ms) => setModalState(() => payDateMs = ms),
+                ),
+                const SizedBox(height: 8),
+                CurrencySelectorRow(
+                  policy: ctrl.currencyPolicy,
+                  selected: cur,
+                  onChanged: (c) => setModalState(() => cur = c),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  children: [
+                    for (final m in const ['نقدي', 'تحويل', 'إيداع'])
+                      ChoiceChip(
+                        label: Text(m),
+                        selected: paymentMethod == m,
+                        onSelected: (_) =>
+                            setModalState(() => paymentMethod = m),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                AccountingNumberField(
+                  controller: amountCtrl,
+                  label: 'المبلغ المدفوع (${cur.shortSymbol})',
+                ),
+                if (paymentMethod != 'نقدي') ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: bankCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'البنك / الصرافة',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: transferNoCtrl,
+                          textDirection: TextDirection.ltr,
+                          decoration: const InputDecoration(
+                            labelText: 'رقم الحوالة / الإيداع',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 10),
+                TextField(
+                  controller: notesCtrl,
+                  decoration: const InputDecoration(labelText: 'ملاحظات'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final minor = Money.parseMinorUnits(amountCtrl.text);
+                if (minor <= 0) return;
+                await ctrl.repo.addSupplierPayment(
+                  supplierId: supplier.id,
+                  supplierName: supplier.name,
+                  amountMinor: minor,
+                  currency: cur,
+                  paymentMethod: paymentMethod,
+                  bankName: bankCtrl.text,
+                  transferNumber: transferNoCtrl.text,
+                  notes: notesCtrl.text,
+                  dateMs: payDateMs,
+                );
+                await ctrl.reloadAll();
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('اعتماد السند'),
+            ),
+          ],
+        ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openNewPurchaseDialog(
+    AppController ctrl,
+    Supplier supplier,
+  ) async {
+    final lineDrafts = <({
+      TextEditingController qatCtrl,
+      TextEditingController qtyCtrl,
+      TextEditingController buyCtrl,
+      TextEditingController sellCtrl,
+    })>[
+      (
+        qatCtrl: TextEditingController(),
+        qtyCtrl: TextEditingController(text: '10'),
+        buyCtrl: TextEditingController(),
+        sellCtrl: TextEditingController(),
+      ),
+    ];
+    final paidCtrl = TextEditingController(text: '0');
+    final bankCtrl = TextEditingController();
+    final transferNoCtrl = TextEditingController();
+    final demarAmountCtrl = TextEditingController(text: '0');
+    final demarTypeCtrl = TextEditingController();
+    final demarNoCtrl = TextEditingController();
+    final receiverCtrl = TextEditingController();
+    final notesCtrl = TextEditingController();
+    CurrencyCode cur = ctrl.currencyPolicy.defaultCurrency;
+    PaymentType pType = PaymentType.credit;
+    String paymentMethod = 'نقداً';
+    int purchaseDateMs = DateTime.now().millisecondsSinceEpoch;
+    int? receiverId;
+    int? importWeightId;
+
+    List<TextEditingController> allControllers() => [
+          paidCtrl,
+          bankCtrl,
+          transferNoCtrl,
+          demarAmountCtrl,
+          demarTypeCtrl,
+          demarNoCtrl,
+          receiverCtrl,
+          notesCtrl,
+          for (final d in lineDrafts) ...[
+            d.qatCtrl,
+            d.qtyCtrl,
+            d.buyCtrl,
+            d.sellCtrl,
+          ],
+        ];
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => AlertDialog(
+          title: Text('فاتورة شراء من ${supplier.name}'),
+          content: SizedBox(
+            width: 440,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ErpDatePickerTile(
+                    label: 'تاريخ الشراء',
+                    dateMs: purchaseDateMs,
+                    onChanged: (ms) =>
+                        setModalState(() => purchaseDateMs = ms),
+                  ),
+                  const SizedBox(height: 8),
+                  CurrencySelectorRow(
+                    policy: ctrl.currencyPolicy,
+                    selected: cur,
+                    onChanged: (c) => setModalState(() => cur = c),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'الأصناف المشتراة (${lineDrafts.length})',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () {
+                          setModalState(() {
+                            lineDrafts.add((
+                              qatCtrl: TextEditingController(),
+                              qtyCtrl: TextEditingController(text: '10'),
+                              buyCtrl: TextEditingController(),
+                              sellCtrl: TextEditingController(),
+                            ));
+                          });
+                        },
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('إضافة صنف'),
+                      ),
+                    ],
+                  ),
+                  for (int idx = 0; idx < lineDrafts.length; idx++)
+                    Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Column(
+                          children: [
+                            if (ctrl.qatTypes.isNotEmpty) ...[
+                              DropdownButtonFormField<String>(
+                                initialValue: null,
+                                isExpanded: true,
+                                decoration: InputDecoration(
+                                  isDense: true,
+                                  labelText: 'دليل الأصناف — بند #${idx + 1}',
+                                ),
+                                items: ctrl.qatTypes
+                                    .map(
+                                      (qt) => DropdownMenuItem<String>(
+                                        value: qt.name,
+                                        child: Text(qt.name),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (v) {
+                                  if (v == null) return;
+                                  final qt = ctrl.qatTypes
+                                      .firstWhere((e) => e.name == v);
+                                  lineDrafts[idx].qatCtrl.text = qt.name;
+                                  lineDrafts[idx].buyCtrl.text =
+                                      Money.formatMinor(
+                                    qt.defaultBuyPriceMinor,
+                                    showZeroDecimals: false,
+                                  ).replaceAll(',', '');
+                                  lineDrafts[idx].sellCtrl.text =
+                                      Money.formatMinor(
+                                    qt.defaultSellPriceMinor,
+                                    showZeroDecimals: false,
+                                  ).replaceAll(',', '');
+                                },
+                              ),
+                              const SizedBox(height: 6),
+                            ],
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: lineDrafts[idx].qatCtrl,
+                                    decoration: InputDecoration(
+                                      isDense: true,
+                                      labelText: 'الصنف #${idx + 1} *',
+                                    ),
+                                  ),
+                                ),
+                                if (lineDrafts.length > 1)
+                                  IconButton(
+                                    icon: Icon(
+                                      Icons.delete_outline,
+                                      size: 18,
+                                      color: ctx.pal.danger,
+                                    ),
+                                    onPressed: () {
+                                      setModalState(() {
+                                        final rem = lineDrafts.removeAt(idx);
+                                        rem.qatCtrl.dispose();
+                                        rem.qtyCtrl.dispose();
+                                        rem.buyCtrl.dispose();
+                                        rem.sellCtrl.dispose();
+                                      });
+                                    },
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: AccountingNumberField(
+                                    controller: lineDrafts[idx].qtyCtrl,
+                                    label: 'الكمية',
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: AccountingNumberField(
+                                    controller: lineDrafts[idx].buyCtrl,
+                                    label: 'سعر الشراء',
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: AccountingNumberField(
+                                    controller: lineDrafts[idx].sellCtrl,
+                                    label: 'البيع',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  SegmentedButton<PaymentType>(
+                    segments: const [
+                      ButtonSegment<PaymentType>(
+                        value: PaymentType.paid,
+                        label: Text('نقداً'),
+                      ),
+                      ButtonSegment<PaymentType>(
+                        value: PaymentType.partial,
+                        label: Text('جزئي'),
+                      ),
+                      ButtonSegment<PaymentType>(
+                        value: PaymentType.credit,
+                        label: Text('آجل'),
+                      ),
+                    ],
+                    selected: {pType},
+                    onSelectionChanged: (s) =>
+                        setModalState(() => pType = s.first),
+                  ),
+                  if (pType != PaymentType.credit) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        for (final m in const ['نقداً', 'تحويل', 'إيداع'])
+                          ChoiceChip(
+                            label: Text(m),
+                            selected: paymentMethod == m,
+                            onSelected: (_) =>
+                                setModalState(() => paymentMethod = m),
+                          ),
+                      ],
+                    ),
+                  ],
+                  if (pType == PaymentType.partial ||
+                      pType == PaymentType.paid) ...[
+                    const SizedBox(height: 8),
+                    AccountingNumberField(
+                      controller: paidCtrl,
+                      label: pType == PaymentType.paid
+                          ? 'المدفوع الفعلي (أو 0 لاحتساب الإجمالي)'
+                          : 'المدفوع مقدماً',
+                    ),
+                  ],
+                  if (pType != PaymentType.credit &&
+                      paymentMethod != 'نقداً') ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: bankCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'البنك / الصرافة',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: transferNoCtrl,
+                            textDirection: TextDirection.ltr,
+                            decoration: const InputDecoration(
+                              labelText: 'رقم الحوالة',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  AccountingNumberField(
+                    controller: demarAmountCtrl,
+                    label: 'مبلغ الدمار (اختياري)',
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: demarTypeCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'نوع الدمار (إن وجد)',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: demarNoCtrl,
+                          textDirection: TextDirection.ltr,
+                          decoration: const InputDecoration(
+                            labelText: 'رقم الدمار',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  if (ctrl.inventoryReceivers.isNotEmpty) ...[
+                    DropdownButtonFormField<int?>(
+                      key: ValueKey<String>('pur_recv_${receiverId ?? 'none'}'),
+                      initialValue:
+                          ctrl.inventoryReceivers.any((r) => r.id == receiverId)
+                              ? receiverId
+                              : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'مستلم المخزون (اختياري)',
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('بدون مستلم محدد / إدخال يدوي'),
+                        ),
+                        ...ctrl.inventoryReceivers
+                            .where((r) => r.isActive)
+                            .map(
+                              (r) => DropdownMenuItem<int?>(
+                                value: r.id,
+                                child: Text(r.name),
+                              ),
+                            ),
+                      ],
+                      onChanged: (v) {
+                        setModalState(() => receiverId = v);
+                        if (v != null) {
+                          receiverCtrl.text = ctrl.inventoryReceivers
+                              .firstWhere((r) => r.id == v)
+                              .name;
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  TextField(
+                    controller: receiverCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'اسم مستلم المخزون (اختياري)',
+                    ),
+                  ),
+                  if (ctrl.importWeights.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<int?>(
+                      key: ValueKey<String>(
+                        'pur_wt_${importWeightId ?? 'none'}',
+                      ),
+                      initialValue: ctrl.importWeights
+                              .any((w) => w.id == importWeightId)
+                          ? importWeightId
+                          : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'ربط بسجل وزن وارد (اختياري)',
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('بدون ربط بوزن وارد'),
+                        ),
+                        ...ctrl.importWeights.take(40).map(
+                              (w) => DropdownMenuItem<int?>(
+                                value: w.id,
+                                child: Text(
+                                  '${w.dateIso} • ${QuantityMath.formatMilli(w.weightMilli)} كجم (${w.receiverName})',
+                                ),
+                              ),
+                            ),
+                      ],
+                      onChanged: (v) {
+                        setModalState(() => importWeightId = v);
+                        if (v != null && receiverCtrl.text.trim().isEmpty) {
+                          receiverCtrl.text = ctrl.importWeights
+                              .firstWhere((w) => w.id == v)
+                              .receiverName;
+                        }
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: notesCtrl,
+                    decoration: const InputDecoration(labelText: 'ملاحظات'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final items = <NewPurchaseItemInput>[];
+                for (final d in lineDrafts) {
+                  final qty = QuantityMath.parseMilli(d.qtyCtrl.text);
+                  final buy = Money.parseMinorUnits(d.buyCtrl.text);
+                  final sell = Money.parseMinorUnits(d.sellCtrl.text);
+                  if (d.qatCtrl.text.trim().isEmpty || qty <= 0) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      const SnackBar(
+                        content: Text('أكمل اسم الصنف والكمية لكل بند'),
+                      ),
+                    );
+                    return;
+                  }
+                  items.add(
+                    NewPurchaseItemInput(
+                      qatTypeName: d.qatCtrl.text.trim(),
+                      qtyMilli: qty,
+                      unit: 'ربطة',
+                      buyPriceMinor: buy,
+                      sellPriceMinor: sell > 0 ? sell : buy,
+                    ),
+                  );
+                }
+                await ctrl.repo.makeSupplierPurchase(
+                  supplierId: supplier.id,
+                  supplierName: supplier.name,
+                  items: items,
+                  currency: cur,
+                  paymentType: pType,
+                  paidAmountMinor: Money.parseMinorUnits(paidCtrl.text),
+                  paymentMethod:
+                      pType == PaymentType.credit ? 'آجل' : paymentMethod,
+                  bankName: bankCtrl.text,
+                  transferNumber: transferNoCtrl.text,
+                  demarMinor: Money.parseMinorUnits(demarAmountCtrl.text),
+                  demarType: demarTypeCtrl.text,
+                  demarNumber: demarNoCtrl.text,
+                  receiverId: receiverId,
+                  receiverName: receiverCtrl.text,
+                  importWeightId: importWeightId,
+                  notes: notesCtrl.text,
+                  dateMs: purchaseDateMs,
+                );
+                await ctrl.reloadAll();
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('حفظ وترحيل للمخزون'),
+            ),
+          ],
+        ),
+      ),
+    );
+    for (final c in allControllers()) {
+      c.dispose();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = context.watch<AppController>();
+    final pal = context.pal;
+
+    final list = ctrl.suppliers.where((s) {
+      final yer = s.balanceFor(CurrencyCode.yer);
+      final sar = s.balanceFor(CurrencyCode.sar);
+      if (_onlyPayables && yer <= 0 && sar <= 0) return false;
+      if (_search.isEmpty) return true;
+      final q = _search.toLowerCase();
+      return s.name.toLowerCase().contains(q) || s.phone.contains(q);
+    }).toList();
+
+    final summaryMetrics = <ErpSummaryMetric>[
+      ErpSummaryMetric(label: 'الموردون', value: '${list.length}'),
+    ];
+    for (final cur in ctrl.currencyPolicy.allowedCurrencies) {
+      final totPay = list.fold<int>(
+        0,
+        (sum, s) => sum + (s.balanceFor(cur) > 0 ? s.balanceFor(cur) : 0),
+      );
+      summaryMetrics.add(
+        ErpSummaryMetric(
+          label: 'مستحقات ${cur.code}',
+          value: Money(totPay, cur).format(),
+          toneColor: totPay > 0 ? pal.warning : pal.success,
+        ),
+      );
+    }
+
+    return Scaffold(
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _openSupplierDialog(ctrl),
+        icon: const Icon(Icons.person_add_outlined),
+        label: const Text('مورد جديد'),
+      ),
+      body: Column(
+        children: [
+          ErpSearchFilterBar(
+            searchHint: 'بحث عن مورد بالاسم أو الهاتف...',
+            onSearchChanged: (v) => setState(() => _search = v.trim()),
+            filters: [
+              ChoiceChip(
+                label: const Text('الكل'),
+                selected: !_onlyPayables,
+                onSelected: (_) => setState(() => _onlyPayables = false),
+              ),
+              ChoiceChip(
+                label: const Text('لهم مستحقات فقط'),
+                selected: _onlyPayables,
+                onSelected: (_) => setState(() => _onlyPayables = true),
+              ),
+            ],
+          ),
+          if (ctrl.suppliers.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              child: ErpSummaryBar(metrics: summaryMetrics),
+            ),
+          Expanded(
+            child: list.isEmpty
+                ? const EmptyLedgerState(
+                    icon: Icons.local_shipping_outlined,
+                    title: 'لا يوجد موردون مطابقون',
+                    subtitle: 'أضف الموردين لتسجيل فواتير الشراء والمستحقات',
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 84),
+                    itemCount: list.length,
+                    separatorBuilder: (_, idx) => const SizedBox(height: 10),
+                    itemBuilder: (_, idx) {
+                      final s = list[idx];
+                      final yerBal = s.balanceFor(CurrencyCode.yer);
+                      final sarBal = s.balanceFor(CurrencyCode.sar);
+                      return Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      s.name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 14.5,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'تعديل',
+                                    onPressed: () =>
+                                        _openSupplierDialog(ctrl, existing: s),
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      size: 18,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'أرشفة المورد',
+                                    onPressed: () async {
+                                      final ok = await showErpConfirmDialog(
+                                        context,
+                                        title: 'أرشفة المورد',
+                                        message:
+                                            'نقل المورد ${s.name} إلى الأرشيف مع حفظ كافة الفواتير والرصيد؟',
+                                        confirmLabel: 'أرشفة',
+                                      );
+                                      if (!ok) return;
+                                      await ctrl.repo.setArchived(
+                                        'suppliers',
+                                        s.id,
+                                        true,
+                                      );
+                                      await ctrl.reloadAll();
+                                    },
+                                    icon: const Icon(
+                                      Icons.archive_outlined,
+                                      size: 18,
+                                    ),
+                                  ),
+                                  if (ctrl.canDeleteCurrent)
+                                    IconButton(
+                                      tooltip: 'حذف المورد',
+                                      onPressed: () async {
+                                        final ok = await showErpConfirmDialog(
+                                          context,
+                                          title: 'حذف المورد',
+                                          message:
+                                              'هل تريد حذف المورد ${s.name}؟',
+                                          confirmLabel: 'حذف',
+                                          destructive: true,
+                                        );
+                                        if (!ok) return;
+                                        try {
+                                          await ctrl.repo.deleteSupplier(s.id);
+                                          await ctrl.reloadAll();
+                                        } catch (e) {
+                                          if (!context.mounted) return;
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            SnackBar(
+                                              content: Text(e.toString()),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      icon: Icon(
+                                        Icons.delete_outline,
+                                        color: pal.danger,
+                                        size: 18,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              if (s.phone.isNotEmpty || s.region.isNotEmpty)
+                                Text(
+                                  [
+                                    if (s.phone.isNotEmpty) s.phone,
+                                    if (s.region.isNotEmpty) s.region,
+                                  ].join(' • '),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: pal.textSecondary,
+                                  ),
+                                ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                children: [
+                                  StatusPill(
+                                    label:
+                                        'YER: ${Money(yerBal, CurrencyCode.yer).format()}',
+                                    bg: yerBal > 0
+                                        ? pal.warningSoft
+                                        : pal.successSoft,
+                                    fg: yerBal > 0
+                                        ? pal.warning
+                                        : pal.success,
+                                  ),
+                                  if (sarBal != 0 ||
+                                      ctrl.currencyPolicy.canSwitchCurrency)
+                                    StatusPill(
+                                      label:
+                                          'SAR: ${Money(sarBal, CurrencyCode.sar).format()}',
+                                      bg: sarBal > 0
+                                          ? pal.warningSoft
+                                          : pal.successSoft,
+                                      fg: sarBal > 0
+                                          ? pal.warning
+                                          : pal.success,
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  FilledButton.tonalIcon(
+                                    onPressed: () =>
+                                        _openNewPurchaseDialog(ctrl, s),
+                                    icon: const Icon(
+                                      Icons.add_shopping_cart,
+                                      size: 16,
+                                    ),
+                                    label: const Text('فاتورة شراء'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _openSupplierPaymentDialog(ctrl, s),
+                                    icon: const Icon(
+                                      Icons.payments_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('سند صرف'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: () async {
+                                      final payments = ctrl.supplierPayments
+                                          .where((p) => p.supplierId == s.id)
+                                          .toList();
+                                      await showDialog<void>(
+                                        context: context,
+                                        builder: (ctx) => AlertDialog(
+                                          title: Text('سندات صرف — ${s.name}'),
+                                          content: SizedBox(
+                                            width: double.maxFinite,
+                                            child: payments.isEmpty
+                                                ? const Text(
+                                                    'لا توجد سندات صرف مسجلة.',
+                                                  )
+                                                : ListView.separated(
+                                                    shrinkWrap: true,
+                                                    itemCount: payments.length,
+                                                    separatorBuilder:
+                                                        (_, idx) =>
+                                                            const Divider(
+                                                      height: 1,
+                                                    ),
+                                                    itemBuilder: (_, pi) {
+                                                      final pay = payments[pi];
+                                                      return ListTile(
+                                                        dense: true,
+                                                        title: Text(
+                                                          Money(
+                                                            pay.amountMinor,
+                                                            pay.currency,
+                                                          ).format(),
+                                                          style:
+                                                              const TextStyle(
+                                                            fontWeight:
+                                                                FontWeight.w700,
+                                                          ),
+                                                        ),
+                                                        subtitle: Text(
+                                                          '${pay.dateIso} • ${pay.paymentMethod} ${pay.notes}',
+                                                        ),
+                                                        trailing: ctrl
+                                                                .canDeleteCurrent
+                                                            ? IconButton(
+                                                                icon: const Icon(
+                                                                  Icons
+                                                                      .delete_outline,
+                                                                  size: 18,
+                                                                ),
+                                                                onPressed:
+                                                                    () async {
+                                                                  final ok =
+                                                                      await showErpConfirmDialog(
+                                                                    ctx,
+                                                                    title:
+                                                                        'حذف السند',
+                                                                    message:
+                                                                        'سيتم حذف سند الصرف وعكس أثره على حساب المورد.',
+                                                                    confirmLabel:
+                                                                        'حذف',
+                                                                    destructive:
+                                                                        true,
+                                                                  );
+                                                                  if (!ok) {
+                                                                    return;
+                                                                  }
+                                                                  await ctrl
+                                                                      .repo
+                                                                      .deleteSupplierPayment(
+                                                                    pay.id,
+                                                                  );
+                                                                  await ctrl
+                                                                      .reloadAll();
+                                                                  if (ctx
+                                                                      .mounted) {
+                                                                    Navigator
+                                                                        .pop(
+                                                                      ctx,
+                                                                    );
+                                                                  }
+                                                                },
+                                                              )
+                                                            : null,
+                                                      );
+                                                    },
+                                                  ),
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(ctx),
+                                              child: const Text('إغلاق'),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(
+                                      Icons.receipt_long_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('السندات'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _openSupplierReturnDialog(ctrl, s),
+                                    icon: const Icon(
+                                      Icons.assignment_return_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('مرتجع'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: () =>
+                                        ctrl.openStatementForSupplier(s.id),
+                                    icon: const Icon(
+                                      Icons.table_chart_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('كشف الحساب'),
+                                  ),
+                                  if (s.phone.isNotEmpty) ...[
+                                    OutlinedButton.icon(
+                                      onPressed: () async =>
+                                          WhatsappShareService.instance
+                                              .openWhatsApp(
+                                        phone: s.phone,
+                                        text:
+                                            'تحية طيبة ${s.name}، رصيد حسابكم لدى ${ctrl.settings.agencyName}:\n'
+                                            'YER: ${Money(yerBal, CurrencyCode.yer).format()}'
+                                            '${sarBal != 0 ? '\nSAR: ${Money(sarBal, CurrencyCode.sar).format()}' : ''}',
+                                      ),
+                                      icon: const Icon(
+                                        Icons.chat_outlined,
+                                        size: 16,
+                                      ),
+                                      label: const Text('واتساب'),
+                                    ),
+                                    OutlinedButton.icon(
+                                      onPressed: () async =>
+                                          WhatsappShareService.instance.openSms(
+                                        phone: s.phone,
+                                        text:
+                                            '${s.name} — رصيدكم لدى ${ctrl.settings.agencyName}: YER ${Money(yerBal, CurrencyCode.yer).format()}${sarBal != 0 ? ' | SAR ${Money(sarBal, CurrencyCode.sar).format()}' : ''}',
+                                      ),
+                                      icon: const Icon(
+                                        Icons.sms_outlined,
+                                        size: 16,
+                                      ),
+                                      label: const Text('SMS'),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
