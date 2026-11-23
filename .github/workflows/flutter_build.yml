@@ -1031,7 +1031,7 @@ jobs:
               tail -n 60 "$LOGCAT_LOG" || true
             fi
             if [ -s "$LOG" ]; then
-              SUMMARY=$(tail -n 30 "$LOG" | tr '\n' '|' | sed 's/|/ | /g')
+              SUMMARY=$(tail -c 20000 "$LOG" | tr '\r' '\n' | tail -n 35 | tr '\n' '|' | sed 's/|/ | /g')
               if grep -q "^FAIL:" "$LOG"; then
                 BOOT_TAIL=$(tail -n 20 "$BOOT_LOG" 2>/dev/null | tr '\n' ' ' || true)
                 echo "::error title=emulator_smoke::${SUMMARY:0:700} BOOT_TAIL: ${BOOT_TAIL:0:400}"
