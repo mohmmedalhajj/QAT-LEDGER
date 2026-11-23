@@ -1,5 +1,3 @@
-import 'package:flutter_test/flutter_test.dart';
-
 import 'flavor_smoke_flow.dart';
 
 void main() {
