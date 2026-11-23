@@ -1031,7 +1031,7 @@ jobs:
               tail -n 60 "$LOGCAT_LOG" || true
             fi
             if [ -s "$LOG" ]; then
-              SUMMARY=$(tail -c 20000 "$LOG" | tr '\r' '\n' | tail -n 35 | tr '\n' '|' | sed 's/|/ | /g')
+              SUMMARY=$(tail -c 20000 "$LOG" | tr '\r' '\n' | tail -n 35 | tr '\n' '|' | sed 's/|/ | /g' | tail -c 900)
               if grep -q "^FAIL:" "$LOG"; then
                 BOOT_TAIL=$(tail -n 20 "$BOOT_LOG" 2>/dev/null | tr '\n' ' ' || true)
                 echo "::error title=emulator_smoke::${SUMMARY:0:700} BOOT_TAIL: ${BOOT_TAIL:0:400}"
@@ -1098,18 +1098,22 @@ jobs:
 
           echo "=== Running Flutter integration tests on the clean Android Emulator ===" | tee -a "$LOG"
           set -o pipefail
-          if ! timeout 600 flutter test integration_test/customer_app_test.dart \
+          if ! timeout 300 flutter test integration_test/customer_app_test.dart \
             --flavor customer -d emulator-5554 -r expanded 2>&1 \
             | tee ci-dist/integration_test_customer.log; then
             echo "FAIL: Customer Flutter integration test failed or timed out." | tee -a "$LOG"
+            DIAGNOSTIC=$(tr '\r' '\n' < ci-dist/integration_test_customer.log | tail -c 1800 | tr '\n' '|')
+            echo "::error title=Customer integration test failure::${DIAGNOSTIC}"
             tail -n 100 ci-dist/integration_test_customer.log | tee -a "$LOG"
             { echo '### Customer integration failure'; tail -n 100 ci-dist/integration_test_customer.log; } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          if ! timeout 600 flutter test integration_test/developer_app_test.dart \
+          if ! timeout 300 flutter test integration_test/developer_app_test.dart \
             --flavor developer -d emulator-5554 -r expanded 2>&1 \
             | tee ci-dist/integration_test_developer.log; then
             echo "FAIL: Developer Flutter integration test failed or timed out." | tee -a "$LOG"
+            DIAGNOSTIC=$(tr '\r' '\n' < ci-dist/integration_test_developer.log | tail -c 1800 | tr '\n' '|')
+            echo "::error title=Developer integration test failure::${DIAGNOSTIC}"
             tail -n 100 ci-dist/integration_test_developer.log | tee -a "$LOG"
             { echo '### Developer integration failure'; tail -n 100 ci-dist/integration_test_developer.log; } >> "$GITHUB_STEP_SUMMARY"
             exit 1
