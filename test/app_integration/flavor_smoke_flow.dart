@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:qat_ledger/app.dart';
 import 'package:qat_ledger/data/database_service.dart';
+import 'package:qat_ledger/features/settings/license_security_view.dart';
 import 'package:qat_ledger/licensing/developer_bridge.dart';
 import 'package:qat_ledger/licensing/trusted_key_registry.dart';
 import 'package:qat_ledger/state/app_controller.dart';
@@ -113,8 +114,13 @@ void registerFlavorSmokeTest({
     expect(controller.isLoggedIn, isTrue);
     expect(controller.needsOnboarding, isFalse);
 
-    controller.setSection(4, subTab: 3);
-    await tester.pump();
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppController>.value(
+        value: controller,
+        child: const MaterialApp(home: LicenseAndSecurityView()),
+      ),
+    );
+    await tester.pumpAndSettle();
     final developerConsole = find.text('وحدة تحكم المطور (Developer Edition)');
     if (expectedEdition == 'developer') {
       expect(developerConsole, findsOneWidget);
