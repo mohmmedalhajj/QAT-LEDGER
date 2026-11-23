@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:qat_ledger/app.dart';
+import 'package:qat_ledger/core/theme.dart';
 import 'package:qat_ledger/data/database_service.dart';
 import 'package:qat_ledger/features/settings/license_security_view.dart';
 import 'package:qat_ledger/licensing/developer_bridge.dart';
@@ -117,7 +118,10 @@ void registerFlavorSmokeTest({
     await tester.pumpWidget(
       ChangeNotifierProvider<AppController>.value(
         value: controller,
-        child: const MaterialApp(home: LicenseAndSecurityView()),
+        child: MaterialApp(
+          theme: AppTheme.buildLight(preset: controller.settings.activeColorPreset),
+          home: const LicenseAndSecurityView(),
+        ),
       ),
     );
     await tester.pumpAndSettle();
