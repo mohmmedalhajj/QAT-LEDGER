@@ -862,6 +862,28 @@ jobs:
 
           echo "::notice title=apk_binary_audit::official=${IS_OFFICIAL} signed_by=${SIGNED_BY} seed=${SEED_SOURCE} kid=${PUBLIC_KEY_ID} cust=${CUST_SIZE}B(${CUST_CERT_SHA256}) dev=${DEV_SIZE}B(${DEV_CERT_SHA256}) | ${AUDIT_LINE}"
 
+      - name: Run Flutter app integration tests (synthetic host fixtures)
+        if: ${{ !cancelled() && steps.audit.outcome == 'success' }}
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          mkdir -p ci-dist
+          if ! timeout 300 flutter test test/app_integration/customer_app_test.dart -r expanded 2>&1 \
+            | tee ci-dist/integration_test_customer.log; then
+            DIAGNOSTIC=$(tr '\r' '\n' < ci-dist/integration_test_customer.log | tail -c 1800 | tr '\n' '|')
+            echo "::error title=Customer integration test failure::${DIAGNOSTIC}"
+            { echo '### Customer integration failure'; tail -n 100 ci-dist/integration_test_customer.log; } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if ! timeout 300 flutter test test/app_integration/developer_app_test.dart -r expanded 2>&1 \
+            | tee ci-dist/integration_test_developer.log; then
+            DIAGNOSTIC=$(tr '\r' '\n' < ci-dist/integration_test_developer.log | tail -c 1800 | tr '\n' '|')
+            echo "::error title=Developer integration test failure::${DIAGNOSTIC}"
+            { echo '### Developer integration failure'; tail -n 100 ci-dist/integration_test_developer.log; } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "PASS: Customer and Developer app/controller/SQLite integration fixtures; Developer console remains edition-isolated and no signing key is created during startup."
+
       - name: Smoke-test APKs on Android Emulator
         id: emu
         if: ${{ !cancelled() && steps.audit.outcome == 'success' }}
@@ -1097,30 +1119,6 @@ jobs:
 
           timeout 15 "$ADB" logcat -c || true
 
-          echo "=== Running Flutter app integration tests with isolated synthetic SQLite/platform fixtures ===" | tee -a "$LOG"
-          set -o pipefail
-          if ! timeout 300 flutter test integration_test/customer_app_test.dart \
-            -r expanded 2>&1 \
-            | tee ci-dist/integration_test_customer.log; then
-            echo "FAIL: Customer Flutter integration test failed or timed out." | tee -a "$LOG"
-            DIAGNOSTIC=$(tr '\r' '\n' < ci-dist/integration_test_customer.log | tail -c 1800 | tr '\n' '|')
-            echo "::error title=Customer integration test failure::${DIAGNOSTIC}"
-            tail -n 100 ci-dist/integration_test_customer.log | tee -a "$LOG"
-            { echo '### Customer integration failure'; tail -n 100 ci-dist/integration_test_customer.log; } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          if ! timeout 300 flutter test integration_test/developer_app_test.dart \
-            -r expanded 2>&1 \
-            | tee ci-dist/integration_test_developer.log; then
-            echo "FAIL: Developer Flutter integration test failed or timed out." | tee -a "$LOG"
-            DIAGNOSTIC=$(tr '\r' '\n' < ci-dist/integration_test_developer.log | tail -c 1800 | tr '\n' '|')
-            echo "::error title=Developer integration test failure::${DIAGNOSTIC}"
-            tail -n 100 ci-dist/integration_test_developer.log | tee -a "$LOG"
-            { echo '### Developer integration failure'; tail -n 100 ci-dist/integration_test_developer.log; } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          echo "PASS: Customer and Developer integration tests booted, verified native flavor identities, completed synthetic onboarding, rejected default credentials, and checked Developer-console isolation." | tee -a "$LOG"
-
           CUSTOMER_ACTIVITY=$(awk -F"'" '/^launchable-activity:/{print $2; exit}' ci-dist/customer-badging.txt)
           DEVELOPER_ACTIVITY=$(awk -F"'" '/^launchable-activity:/{print $2; exit}' ci-dist/developer-badging.txt)
 
@@ -1238,6 +1236,7 @@ jobs:
             echo "--- 9. GATE MATRIX (PASS / FAIL / NOT EXECUTED / BLOCKED) ---"
             echo "PASS: flutter analyze"
             echo "PASS: flutter test (automated Dart/SQLite/Ed25519/Room v18 suites)"
+            echo "PASS: Flutter Customer/Developer app integration suites (synthetic isolated SQLite/platform; no signing-key creation)"
             echo "PASS: APK binary isolation & zero-private-key audit"
             if [ "$SEED_SOURCE" = "persistent_public_secret" ]; then
               echo "PASS: Customer APK embedded the owner-configured historical Ed25519 public key(s)"

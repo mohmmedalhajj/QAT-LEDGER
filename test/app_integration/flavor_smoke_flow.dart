@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:integration_test/integration_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:qat_ledger/app.dart';
@@ -34,7 +33,6 @@ void registerFlavorSmokeTest({
   required String expectedEdition,
   required String expectedApplicationId,
 }) {
-  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('$expectedEdition app boot, synthetic onboarding and edition isolation',
       (tester) async {
     sqfliteFfiInit();
