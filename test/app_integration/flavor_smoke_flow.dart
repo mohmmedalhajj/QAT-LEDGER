@@ -127,6 +127,8 @@ void registerFlavorSmokeTest({
     await tester.pumpAndSettle();
     final developerConsole = find.text('وحدة تحكم المطور (Developer Edition)');
     if (expectedEdition == 'developer') {
+      await tester.scrollUntilVisible(developerConsole, 500);
+      await tester.pumpAndSettle();
       expect(developerConsole, findsOneWidget);
     } else {
       expect(developerConsole, findsNothing,
