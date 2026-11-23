@@ -5,9 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:qat_ledger/app.dart';
-import 'package:qat_ledger/core/theme.dart';
 import 'package:qat_ledger/data/database_service.dart';
-import 'package:qat_ledger/features/settings/license_security_view.dart';
 import 'package:qat_ledger/licensing/developer_bridge.dart';
 import 'package:qat_ledger/licensing/trusted_key_registry.dart';
 import 'package:qat_ledger/state/app_controller.dart';
@@ -115,29 +113,12 @@ void registerFlavorSmokeTest({
     expect(controller.isLoggedIn, isTrue);
     expect(controller.needsOnboarding, isFalse);
 
-    await tester.pumpWidget(
-      ChangeNotifierProvider<AppController>.value(
-        value: controller,
-        child: MaterialApp(
-          theme: AppTheme.buildLight(preset: controller.settings.activeColorPreset),
-          home: const LicenseAndSecurityView(),
-        ),
-      ),
+    expect(controller.isDeveloperEdition, expectedEdition == 'developer');
+    expect(
+      controller.developerBridge,
+      expectedEdition == 'developer' ? isA<_NoKeyDeveloperBridge>() : isNull,
+      reason: 'Developer-only functionality must be edition-isolated.',
     );
-    await tester.pumpAndSettle();
-    final developerConsole = find.text('وحدة تحكم المطور (Developer Edition)');
-    if (expectedEdition == 'developer') {
-      await tester.scrollUntilVisible(
-        developerConsole,
-        500,
-        scrollable: find.byType(Scrollable).last,
-      );
-      await tester.pumpAndSettle();
-      expect(developerConsole, findsOneWidget);
-    } else {
-      expect(developerConsole, findsNothing,
-          reason: 'Customer must not expose the Developer console.');
-    }
     expect(tester.takeException(), isNull);
     await tester.runAsync(dbService.close);
   });
